@@ -1,0 +1,16 @@
+# SolidWorks MCP Server Dependencies
+# Author: Samsaam Ali Baig
+# Updated: 2026-01-22
+
+# MCP SDK (2.x removed the @server.list_tools() decorator API used here)
+mcp>=1.0.0,<2
+
+# Logging and utilities
+python-dotenv>=1.0.0
+
+# ===== NEW: Direct COM Automation =====
+# pywin32 for proper COM automation with error handling
+pywin32>=306
+
+# For COM VARIANT types (ByRef parameters)
+# pythoncom is included with pywin32

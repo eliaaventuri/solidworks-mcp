@@ -1,0 +1,18 @@
+{
+  "exe_path": "auto",
+  "part_template": "auto",
+  "assembly_template": "auto",
+  "drawing_template": "auto",
+  "startup_timeout": 120,
+  "connection_retry_interval": 5,
+  "max_retries": 3,
+  "default_unit": "mm",
+  "log_level": "INFO",
+  "log_file": "solidworks_mcp.log",
+  "default_extrude_depth": 10.0,
+  "default_fillet_radius": 2.0,
+  "default_chamfer_distance": 2.0,
+  "default_circle_radius": 25.0,
+  "capture_width": 1920,
+  "capture_height": 1080
+}
