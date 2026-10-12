@@ -8,7 +8,7 @@ Tutte le selezioni 3D avvengono per COORDINATE (punto sull'entita', modello, uni
 ModelingBase._select_point. Gli schizzi si indicano per nome ("Schizzo1") o, se omesso, e' quello attivo
 (che viene chiuso) oppure l'ultimo.
 
-Trappole API scoperte (SW 2026, late binding, vedi STATO.md):
+Trappole API scoperte (SW 2026, late binding, vedi STATO_STORICO.md):
  - Estrusioni: MidPlane=6, ThroughAllBoth=9 (il vecchio cut_extrude usava 2 = "fino al successivo").
  - Smusso: InsertFeatureChamfer(Options=0, tipo 1=angolo-distanza | 2=distanza-distanza, ...); il tipo 16 non scava.
  - Raccordo: FeatureFillet3(Options=3, R1, R2, Rho, 0, 0, 0, None x7).

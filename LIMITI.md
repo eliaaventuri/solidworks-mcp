@@ -1,7 +1,7 @@
-# LIMITI - elenco di lavoro (2026-10-10)
+# LIMITI - elenco di lavoro (aperto il 2026-10-10)
 
 Ogni limite noto, da risolvere uno per uno. Stato: `[ ]` da fare, `[x]` risolto e testato, `[~]` risolto in parte / alternativa (spiegare).
-Chi lavora su un gruppo aggiorna questo file man mano.
+Chi lavora su un gruppo aggiorna questo file man mano. Esiti dettagliati e regressioni di ogni gruppo: `STATO_STORICO.md`.
 
 ## Gruppo A — Disegni
 - [x] A1 Linee di esplosione nelle tavole d'assieme (InsertExplodeLineSketch + InsertRouteLine) -- add_explode_lines (perno-boccola-foro + una per vite) con InsertExplodeLineSketch; la vista esplosa del disegno le mostra. Test: linee presenti, PNG assieme.
@@ -20,7 +20,7 @@ Chi lavora su un gruppo aggiorna questo file man mano.
 - [x] A14 Fogli A3–A0 verticali con cornice e cartiglio (formato ISO verticale generato) -- formati ISO verticali A3-A0 generati in formats/ (drawing_formats.py); A3 verticale 297 x 420 con cornice e cartiglio verificato.
 - [x] A15 Layout: non presupporre l'isometrica nell'angolo; fogli affollati → nuovo foglio automatico -- layout senza isometrica nell'angolo; foglio pieno -> nuovo foglio dello stesso formato (new_sheet_if_full).
 - [x] A16 `add_auxiliary_view` senza `CreateAuxiliaryViewAt2` -- vista nominata AUX_n (Orientation3 + NameView) + CreateDrawViewFromModelView3, freccia con lettera e titolo; cuneo a 30 gradi: faccia in vera grandezza (cos 1,00000, area 1209,3 = 30 x 40,31). test_drawings_live 65/65 per 3 volte di fila (64 + il nuovo controllo). Guardia DXF/DWG con viste interrotte estesa a save_document e _save_as.
-- [x] A17 Difetti residui della staffa e della flangia -- GD&T agganciato con freccia, rugosita' generale ISO 1302 composta con misure vere, fori in catena sui due lati senza attraversare altri fori, quote di profilo su laterale/frontale senza duplicati, titolo SEZIONE A-A libero. Controlli automatici nuovi (check_a17) in test_drawing_quality_live (139/139). Dettagli in STATO.md.
+- [x] A17 Difetti residui della staffa e della flangia -- GD&T agganciato con freccia, rugosita' generale ISO 1302 composta con misure vere, fori in catena sui due lati senza attraversare altri fori, quote di profilo su laterale/frontale senza duplicati, titolo SEZIONE A-A libero. Controlli automatici nuovi (check_a17) in test_drawing_quality_live (139/139). Dettagli in STATO_STORICO.md.
 
 ## Gruppo B — Modellazione e tool base
 - [x] B1 Test di `fillet_variable_radius` con confronto numerico -> FATTO: volume asportato vs (1-pi/4) L (r0^2+r0r1+r1^2)/3, scarto 0,04 % su 4 coppie di raggi (`test_modeling_extra_live.py`).
@@ -38,9 +38,6 @@ Chi lavora su un gruppo aggiorna questo file man mano.
 - [~] C5 Test degli accoppiamenti avanzati: limite distanza/angolo, ingranaggio, vite, larghezza, simmetrico, tangente, blocco -- VERIFICATI muovendo e misurando: limite distanza 5..20 (valori nel limite portano il blocco a x=10+valore, fuori limite rifiutati; limiti modificabili), limite angolo -20..45 (|rotazione|=|valore|, fuori limite rifiutato), larghezza (linguetta centrata a y=5, Y vietato, X/Z liberi; AddMate5 la rifiutava: serve CreateMateData), simmetrico (origine -100 = riflesso), tangente (asse a z=15, non penetra). Creati e letti dal modello ma NON verificabili dinamicamente: blocco (le traslazioni restano ma le tre rotazioni sono libere), ingranaggio (rapporto 2:1 letto dal modello, scambiato; la seconda ruota non segue), vite (passo 2 mm/giro letto dal modello via quota D1; la chiocciola non avanza): SetTransformAndSolve2 e IDragOperator non propagano questi accoppiamenti; uno studio di movimento (motore rotativo) non ha prodotto moto nell'istanza nascosta.
 - [x] C6 `delete_mate` che lascia altri componenti sottovincolati: indagare e correggere -- riprodotto: eliminando il coincidente boccola-base la boccola passa da 1 a 2 gradi di liberta' e il PERNO (che non e' in quell'accoppiamento) da 1 a 2 per catena, ma il tool non diceva nulla. Ora `delete_mate` misura i gradi di liberta' prima/dopo (anche per effetto di catene) e riporta `freed_components`/`freed_not_in_mate` e un avviso; le posizioni restano invariate (misurato).
 - [x] C7 `move_component` con rotazione su componente parzialmente vincolato -- gradi di liberta' MISURATI (anche su assi inclinati) e movimento ridotto a quelli: perno col solo concentrico: rotazione di 30, 20, 14,76 gradi e scorrimento di 15 e -5 mm applicati, Y/Z e rotazioni attorno a Y/Z scartate (prima una rotazione attorno a Y faceva scivolare il perno di 11,7 mm); asse inclinato di 30 gradi: dx=10 -> 8,66 mm lungo l'asse (7,5; 4,33; 0).
-
-## Avanzamento gruppo C (2026-10-11)
-- C1-C7 chiusi: C1, C2, C4, C6, C7 `[x]`; C3 e C5 `[~]` (rotazione nei passi di traslazione dell'esploso; blocco/ingranaggio/vite non propagati dal solutore via API). Test: `tests/test_assembly_extra_live.py` 213/213. Regressioni in sequenza: drawings 65/65, modeling 175/175, modeling_extra 240/240, assembly 113/113, data 159/159, drawing_quality 139/139, simulation 120/120. Nessun tool nuovo (196). Dettagli in STATO.md, sezione "Limiti gruppo C".
 
 ## Gruppo D — Dati ed export
 Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIANO_D_E.md` (2026-10-12, non ancora provato dal vivo).
@@ -66,12 +63,3 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [x] F1 `.env` dell'autore con una chiave API OpenRouter esposta: togliere dal repository (resta in .gitignore)
 - [x] F2 `execute_python` esegue codice arbitrario: lasciarlo con avviso nella descrizione del tool
 - [x] F3 Codice morto dell'autore (`backup_*`, `scripts/`, `solidworks_com.py`, `solidworks_simulation.py`): segnalato, non rimosso
-
-
-## Avanzamento gruppo A
-- A1-A15 risolti e coperti da `tests/test_drawing_quality_live.py` (132/132 PASS) + PNG controllati a occhio. Dettagli in STATO.md, sezione "Limiti gruppo A".
-- Aperto, non del gruppo A: `tests/test_drawings_live.py` fallisce a `add_auxiliary_view` per un crash casuale di SolidWorks (vedi STATO.md); riproducibile anche su HEAD.
-- A16 e A17 chiusi (2026-10-11). Regressioni: drawings 65/65 x3, drawing_quality 139/139, modeling 175/175, assembly 113/113, data 159/159, simulation 120/120. Il rosso 'aperto, non del gruppo A' di test_drawings_live e' risolto con la nuova vista ausiliaria.
-
-## Avanzamento gruppo B (2026-10-11)
-- B1-B6 chiusi (2026-10-11): B1, B2, B3, B5, B6 `[x]`, B4 `[~]` (UNI assente dal database; posizione angolare del foro sulle facce cilindriche non controllabile). Test: `tests/test_modeling_extra_live.py` 240/240. Regressioni in sequenza: drawings 65/65, modeling 175/175, assembly 113/113, data 159/159, drawing_quality 139/139, simulation 120/120. Dettagli in STATO.md, sezione "Limiti gruppo B".

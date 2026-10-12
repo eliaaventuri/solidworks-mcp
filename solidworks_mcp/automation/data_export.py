@@ -5,7 +5,7 @@ Materiali, proprieta' di massa, proprieta' personalizzate, variabili globali/equ
 export (STL/3MF/STEP/IGES/Parasolid/PDF 3D/eDrawings), immagini del modello, import, misure.
 Misure in mm (o `unit`), angoli in gradi, massa in kg, inerzie in kg*m2 (e kg*mm2).
 
-Trappole API scoperte (SW 2026 italiano, late binding) — dettagli anche in STATO.md:
+Trappole API scoperte (SW 2026 italiano, late binding) — dettagli anche in STATO_STORICO.md:
  - Corpi: `Body2.SetMaterialProperty` e' IGNORATA (restituisce True) se il corpo non e' stato prima 'toccato' con `IMassProperty2.SelectedItems = [corpo]`
    (provato: ripetere la chiamata non serve, la selezione nella massa si'); dopo il set si ricostruisce e si ripesca il corpo.
    `Body2.SetMaterialProperty(cfg, db, nome)` / `GetMaterialPropertyName(cfg, ByRef db)` (i metodi `...PropertyName2` NON esistono su Body2;
