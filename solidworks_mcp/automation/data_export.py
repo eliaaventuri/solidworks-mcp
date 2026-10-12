@@ -294,6 +294,14 @@ class DataExportOperations:
             return self._dx_cfg_names(doc)
         return [str(configuration)]
 
+    def _dx_bad_cfgs(self, doc, names) -> Optional[Dict]:
+        """Errore se una delle configurazioni richieste non esiste (prima ShowConfiguration2 falliva in silenzio)."""
+        have = self._dx_cfg_names(doc)
+        missing = [n for n in names if have and n not in have]
+        if missing:
+            return self._result(False, f"Configurazione/i {missing} non trovata/e. Presenti: {have}", SwErrors.swSelectionError)
+        return None
+
     def _dx_rebuild(self, doc):
         try:
             doc.ForceRebuild3(False)
@@ -610,61 +618,71 @@ class DataExportOperations:
             if err:
                 return err
             body_name = str(bd.Name) if bd is not None else None
+            if configuration:
+                bad = self._dx_bad_cfgs(doc, [configuration])
+                if bad:
+                    return bad
             prev = None
             if configuration and configuration != self._dx_cfg_name(doc):
                 prev = self._dx_cfg_name(doc)
                 doc.ShowConfiguration2(configuration)
-            self._dx_rebuild(doc)
-            if bd is not None:                      # dopo la ricostruzione i puntatori ai corpi sono vecchi: si cerca di nuovo
-                bd, err = self._dx_body(doc, body_name)
-                if err:
-                    return err
-            mp = self._com(doc.Extension, "CreateMassProperty2")
-            if mp is None:
-                return self._result(False, "CreateMassProperty2 non disponibile", SwErrors.swUnknownError)
-            if bd is not None:
-                mp.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, (bd,))
-            u = self._unit_name(unit)
-            vol = float(self._com(mp, "Volume"))
-            mass = float(self._com(mp, "Mass"))
-            area = float(self._com(mp, "SurfaceArea"))
-            com = [float(c) for c in self._com(mp, "CenterOfMass")]
-            dens = float(self._com(mp, "Density"))
-            pm = [float(x) for x in self._com(mp, "PrincipalMomentsOfInertia")]
-            axes = [[float(x) for x in mp.PrincipalAxesOfInertia(i)] for i in range(3)]
-            Ic = [float(x) for x in mp.GetMomentOfInertia(0)]
-            Io = [float(x) for x in mp.GetMomentOfInertia(1)]
-            ov = False
             try:
-                ov = bool(self._com(self._com(doc.Extension, "CreateMassProperty"), "OverrideMass"))
-            except Exception:
-                pass
-            mm2 = 1e6
-
-            def t(v, k=1.0):
-                return [[round(v[3 * i + j] * k, 12) for j in range(3)] for i in range(3)]
-            data = {
-                "body": body_name, "configuration": self._dx_cfg_name(doc),
-                "mass_kg": mass, "volume_mm3": round(vol * 1e9, 6), "surface_area_mm2": round(area * 1e6, 6),
-                "density_kg_m3": round(dens, 6), "mass_overridden": ov,
-                "center_of_mass": [round(self._from_m(c, u), 6) for c in com], "unit": u,
-                "principal_moments_kg_m2": pm, "principal_moments_kg_mm2": [x * mm2 for x in pm],
-                "principal_axes": axes,
-                "inertia_tensor_at_center_of_mass_kg_m2": t(Ic), "inertia_tensor_at_center_of_mass_kg_mm2": t(Ic, mm2),
-                "inertia_tensor_at_origin_kg_m2": t(Io), "inertia_tensor_at_origin_kg_mm2": t(Io, mm2),
-                "bodies": len(self._bodies(doc)),
-            }
-            try:
-                cfg = self._dx_cfg_name(doc)
-                data["material"] = doc.GetMaterialPropertyName2(cfg, _byref_bstr()) or None
-            except Exception:
-                pass
-            if prev:
-                doc.ShowConfiguration2(prev)
-            return self._result(True, f"Massa {mass:.6f} kg, volume {vol * 1e9:.3f} mm3, densita' {dens:.1f} kg/m3",
-                                SwErrors.swSuccess, data)
+                return self._dx_mass_props_body(doc, bd, body_name, unit)
+            finally:
+                if prev:                            # la configurazione di partenza torna attiva anche in caso di errore
+                    doc.ShowConfiguration2(prev)
         except Exception as e:
             return self._dx_fail("get_part_mass_properties", e)
+
+    def _dx_mass_props_body(self, doc, bd, body_name, unit) -> Dict:
+        """Corpo di get_part_mass_properties con la configurazione richiesta gia' attiva."""
+        self._dx_rebuild(doc)
+        if bd is not None:                      # dopo la ricostruzione i puntatori ai corpi sono vecchi: si cerca di nuovo
+            bd, err = self._dx_body(doc, body_name)
+            if err:
+                return err
+        mp = self._com(doc.Extension, "CreateMassProperty2")
+        if mp is None:
+            return self._result(False, "CreateMassProperty2 non disponibile", SwErrors.swUnknownError)
+        if bd is not None:
+            mp.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, (bd,))
+        u = self._unit_name(unit)
+        vol = float(self._com(mp, "Volume"))
+        mass = float(self._com(mp, "Mass"))
+        area = float(self._com(mp, "SurfaceArea"))
+        com = [float(c) for c in self._com(mp, "CenterOfMass")]
+        dens = float(self._com(mp, "Density"))
+        pm = [float(x) for x in self._com(mp, "PrincipalMomentsOfInertia")]
+        axes = [[float(x) for x in mp.PrincipalAxesOfInertia(i)] for i in range(3)]
+        Ic = [float(x) for x in mp.GetMomentOfInertia(0)]
+        Io = [float(x) for x in mp.GetMomentOfInertia(1)]
+        ov = False
+        try:
+            ov = bool(self._com(self._com(doc.Extension, "CreateMassProperty"), "OverrideMass"))
+        except Exception:
+            pass
+        mm2 = 1e6
+
+        def t(v, k=1.0):
+            return [[round(v[3 * i + j] * k, 12) for j in range(3)] for i in range(3)]
+        data = {
+            "body": body_name, "configuration": self._dx_cfg_name(doc),
+            "mass_kg": mass, "volume_mm3": round(vol * 1e9, 6), "surface_area_mm2": round(area * 1e6, 6),
+            "density_kg_m3": round(dens, 6), "mass_overridden": ov,
+            "center_of_mass": [round(self._from_m(c, u), 6) for c in com], "unit": u,
+            "principal_moments_kg_m2": pm, "principal_moments_kg_mm2": [x * mm2 for x in pm],
+            "principal_axes": axes,
+            "inertia_tensor_at_center_of_mass_kg_m2": t(Ic), "inertia_tensor_at_center_of_mass_kg_mm2": t(Ic, mm2),
+            "inertia_tensor_at_origin_kg_m2": t(Io), "inertia_tensor_at_origin_kg_mm2": t(Io, mm2),
+            "bodies": len(self._bodies(doc)),
+        }
+        try:
+            cfg = self._dx_cfg_name(doc)
+            data["material"] = doc.GetMaterialPropertyName2(cfg, _byref_bstr()) or None
+        except Exception:
+            pass
+        return self._result(True, f"Massa {mass:.6f} kg, volume {vol * 1e9:.3f} mm3, densita' {dens:.1f} kg/m3",
+                            SwErrors.swSuccess, data)
 
     def set_mass_override(self, mass: float = None, center_of_mass: List[float] = None, unit: str = None,
                           configuration: str = None) -> Dict:
@@ -961,20 +979,22 @@ class DataExportOperations:
                 return err
             active = self._dx_cfg_name(doc)
             items = []
-            for n in self._dx_cfg_names(doc):
-                it = {"name": n, "active": n == active}
-                try:
-                    it["comment"] = str(doc.GetConfigurationByName(n).Comment)
-                except Exception:
-                    pass
-                if include_volume and int(doc.GetType) == 1:
-                    doc.ShowConfiguration2(n)
+            try:
+                for n in self._dx_cfg_names(doc):
+                    it = {"name": n, "active": n == active}
+                    try:
+                        it["comment"] = str(doc.GetConfigurationByName(n).Comment)
+                    except Exception:
+                        pass
+                    if include_volume and int(doc.GetType) == 1:
+                        doc.ShowConfiguration2(n)
+                        self._dx_rebuild(doc)
+                        it["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 4)
+                    items.append(it)
+            finally:                                # la configurazione attiva torna quella di partenza anche in caso di errore
+                if include_volume and self._dx_cfg_name(doc) != active:
+                    doc.ShowConfiguration2(active)
                     self._dx_rebuild(doc)
-                    it["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 4)
-                items.append(it)
-            if include_volume and self._dx_cfg_name(doc) != active:
-                doc.ShowConfiguration2(active)
-                self._dx_rebuild(doc)
             return self._result(True, f"{len(items)} configurazioni (attiva: {active})", SwErrors.swSuccess,
                                 {"active": active, "configurations": items})
         except Exception as e:
@@ -1049,6 +1069,9 @@ class DataExportOperations:
                 angular = False
             si = math.radians(value) if angular else self._mmu(value, unit)
             cfgs = self._dx_cfg_list(doc, configuration)
+            bad = self._dx_bad_cfgs(doc, cfgs)
+            if bad:
+                return bad
             st = d.SetSystemValue3(si, 3, _bstr_array(cfgs))
             if int(st) != 0:
                 return self._result(False, f"SetSystemValue3 ha restituito {st} (quota guidata da equazione o di riferimento?)",
@@ -1067,6 +1090,9 @@ class DataExportOperations:
             if err:
                 return err
             cfgs = self._dx_cfg_list(doc, configuration)
+            bad = self._dx_bad_cfgs(doc, cfgs)
+            if bad:
+                return bad
             f = self._find_feature(doc, feature)
             if f is None:
                 return self._result(False, f"Feature '{feature}' non trovata", SwErrors.swSelectionError)
@@ -1074,15 +1100,17 @@ class DataExportOperations:
             self._dx_rebuild(doc)
             states = {}
             active = self._dx_cfg_name(doc)
-            for c in cfgs:
-                if c != self._dx_cfg_name(doc):
-                    doc.ShowConfiguration2(c)
+            try:
+                for c in cfgs:
+                    if c != self._dx_cfg_name(doc):
+                        doc.ShowConfiguration2(c)
+                        self._dx_rebuild(doc)
+                    ff = self._find_feature(doc, feature)
+                    states[c] = bool(ff.IsSuppressed2(1, _bstr_array([c]))[0]) if ff is not None else None
+            finally:                                # la configurazione attiva torna quella di partenza anche in caso di errore
+                if self._dx_cfg_name(doc) != active:
+                    doc.ShowConfiguration2(active)
                     self._dx_rebuild(doc)
-                ff = self._find_feature(doc, feature)
-                states[c] = bool(ff.IsSuppressed2(1, _bstr_array([c]))[0]) if ff is not None else None
-            if self._dx_cfg_name(doc) != active:
-                doc.ShowConfiguration2(active)
-                self._dx_rebuild(doc)
             return self._result(bool(ok), f"'{feature}' {'soppressa' if suppressed else 'attiva'} in {cfgs}", SwErrors.swSuccess,
                                 {"feature": feature, "suppressed_by_configuration": states,
                                  "volume_active_mm3": round(self._volume_m3(doc) * 1e9, 4)})
@@ -1213,20 +1241,25 @@ class DataExportOperations:
             fmt = EXPORT_FORMATS.get((format or ext).lower())
             if fmt is None:
                 return self._result(False, f"Formato '{format or ext}' non supportato ({sorted(set(EXPORT_FORMATS))})", SwErrors.swInvalidInput)
-            filepath = os.path.abspath(filepath)
+            if configuration:
+                bad = self._dx_bad_cfgs(doc, [configuration])
+                if bad:
+                    return bad
+            filepath = asked = os.path.abspath(filepath)
             if fmt == "iges" and ext == "iges":
                 filepath = filepath[:-5] + ".igs"            # SW non conosce l'estensione .iges
             if fmt == "stl" and ext != "stl":
                 filepath = os.path.splitext(filepath)[0] + ".stl"
+            if filepath != asked and os.path.exists(filepath):
+                # la guardia di sovrascrittura (safety.py) ha controllato il nome richiesto, non questo
+                return self._result(False, f"Rifiutato: il file viene scritto come {filepath}, che esiste gia' e verrebbe "
+                                    f"sovrascritto. Usa direttamente quel nome (con overwrite=true se voluto).",
+                                    SwErrors.swFileSaveError, {"refused": "file_exists", "filepath": filepath})
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             if os.path.exists(filepath):
                 os.remove(filepath)
             app = self._sw_app
             prev_cfg = None
-            if configuration and configuration != self._dx_cfg_name(doc):
-                prev_cfg = self._dx_cfg_name(doc)
-                doc.ShowConfiguration2(configuration)
-            self._dx_rebuild(doc)
             unit_ids = {"mm": 0, "cm": 1, "m": 2, "inch": 3, "in": 3, "ft": 4}
             saved = {}
 
@@ -1244,6 +1277,10 @@ class DataExportOperations:
             export_data = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
             opts = {"format": fmt}
             try:
+                if configuration and configuration != self._dx_cfg_name(doc):
+                    prev_cfg = self._dx_cfg_name(doc)
+                    doc.ShowConfiguration2(configuration)
+                self._dx_rebuild(doc)
                 if fmt in ("stl", "3mf"):
                     q = {"coarse": 1, "fine": 2, "custom": 3}.get(str(quality).lower())
                     if q is None:
@@ -1275,6 +1312,7 @@ class DataExportOperations:
                     export_data.ExportAs3D = True
                 e, w = _byref_i4(), _byref_i4()
                 ok = doc.Extension.SaveAs(filepath, 0, 1, export_data, e, w)
+                model_box = self._dx_box_m(doc) if fmt in ("stl", "3mf") else None   # box della configurazione ESPORTATA
             finally:
                 for (k, key), v in saved.items():
                     try:
@@ -1296,7 +1334,7 @@ class DataExportOperations:
                 v = data["verify"]
                 if fmt in ("stl", "3mf"):
                     good = v.get("triangles", 0) > 0
-                    box = self._dx_box_m(doc)
+                    box = model_box
                     if box and "bbox_size" in v:
                         k = {"mm": 1.0, "cm": 0.1, "m": 0.001, "inch": 1 / 25.4, "in": 1 / 25.4, "ft": 1 / 304.8}.get(units.lower(), 1.0)
                         model = [round((box[3 + i] - box[i]) * 1000.0 * k, 6) for i in range(3)]

@@ -195,6 +195,34 @@ def test_call_tool(tmp):
         set_default_unit("mm")
 
 
+# ============================================================================ controlli di export_model prima di SolidWorks
+def test_export_guards(tmp):
+    sw = SolidWorksAutomation()
+    sw._dx_doc = lambda types=None: (object(), None)
+    sw._dx_cfg_names = lambda doc: ["Default", "Lunga"]
+    igs = os.path.join(tmp, "pezzo.igs")
+    with open(igs, "w") as f:
+        f.write("ORIGINALE")
+    r = sw.export_model(os.path.join(tmp, "pezzo.iges"))
+    record("export_model: .iges scritto come .igs esistente -> rifiuto, file intatto",
+           not r["success"] and r["data"].get("refused") == "file_exists" and open(igs).read() == "ORIGINALE", r["message"][:90])
+    stl = os.path.join(tmp, "pezzo.stl")
+    with open(stl, "w") as f:
+        f.write("ORIGINALE")
+    r = sw.export_model(os.path.join(tmp, "pezzo.step"), format="stl")
+    record("export_model: format=stl su nome .step con .stl esistente -> rifiuto", not r["success"] and open(stl).read() == "ORIGINALE")
+    pdf = os.path.join(tmp, "tavola.pdf")
+    with open(pdf, "w") as f:
+        f.write("ORIGINALE")
+    sw._drawing = lambda: (object(), None)
+    r = sw.export_drawing(os.path.join(tmp, "tavola.dxf"), format="pdf")
+    record("export_drawing: format=pdf su nome .dxf con .pdf esistente -> rifiuto", not r["success"] and open(pdf).read() == "ORIGINALE",
+           r["message"][:90])
+    r = sw.export_model(os.path.join(tmp, "nuovo.step"), configuration="Inesistente")
+    record("export_model: configurazione inesistente -> errore prima dell'export", not r["success"] and "Inesistente" in r["message"]
+           and not os.path.exists(os.path.join(tmp, "nuovo.step")), r["message"][:90])
+
+
 # ============================================================================ sicurezza
 def test_safety(tmp):
     existing = os.path.join(tmp, "esiste.step")
@@ -561,6 +589,7 @@ def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
         for name, fn in (("registro", test_registry), ("call_tool", lambda: test_call_tool(tmp)),
+                         ("export_model", lambda: test_export_guards(tmp)),
                          ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
                          ("lettori", lambda: test_inspectors(tmp)),
                          ("materiali", lambda: test_materials(tmp)),

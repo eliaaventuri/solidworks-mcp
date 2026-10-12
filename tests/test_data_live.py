@@ -333,7 +333,7 @@ async def scenario(c: Client, tools):
     d = await T(c, "export_model", "STEP AP242 (richiesto)", filepath=p, step_ap=242, check=lambda d: d["verify"]["manifold_solid_brep"] >= 1)
     record("STEP AP242: protocollo effettivo del file", bool(d), f"{d.get('verify', {}).get('application_protocol')} ({d.get('warning', 'AP242 ok')})"[:150])
     for ext in ("igs", "iges", "x_t", "x_b", "pdf", "eprt"):
-        p = F("dx_a", ext if ext != "iges" else "igs")
+        p = F("dx_b", ext if ext != "iges" else "igs")      # .iges viene scritto come .igs: va tolto il file del giro prima
         rm(p)
         d = await T(c, "export_model", ext, filepath=F("dx_b", ext), check=lambda d: d["size_bytes"] > 500)
     d = await T(c, "export_model", "PDF 3D contiene PRC", filepath=F("dx_b", "pdf"), check=lambda d: d["verify"]["has_3d"])

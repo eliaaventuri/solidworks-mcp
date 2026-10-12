@@ -1959,6 +1959,11 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 return self._result(False, "Formato non supportato (pdf, dwg, dxf, png, jpg)", SwErrors.swInvalidInput)
             if os.path.splitext(path)[1].lower().lstrip(".") != fmt:
                 path = os.path.splitext(path)[0] + "." + fmt
+                if os.path.exists(path):
+                    # la guardia di sovrascrittura (safety.py) ha controllato il nome richiesto, non questo
+                    return self._result(False, f"Rifiutato: il file viene scritto come {path}, che esiste gia' e verrebbe "
+                                        f"sovrascritto. Usa direttamente quel nome (con overwrite=true se voluto).",
+                                        SwErrors.swFileSaveError, {"refused": "file_exists", "filepath": path})
             if fmt in ("dxf", "dwg"):
                 # SolidWorks 2026 crashes (RPC failure, process lost) exporting DXF/DWG of drawings with
                 # break views anywhere in the drawing (verified live, non-deterministic)

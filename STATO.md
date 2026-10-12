@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 66/66 (2026-10-12, Linux; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 70/70 (2026-10-12, Linux; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -38,6 +38,11 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
   e tipo di import STL (int 208 = 2 solido). Controllare in Opzioni > Esporta/Importa se si notano differenze.
 - `_dx_inspect_step` ha due contatori nuovi (struttura d'assieme) non ancora provati su uno STEP scritto da SolidWorks:
   rieseguire `test_data_live.py`.
+- **Preferenze globali cambiate per sempre** da `_prepare_prefs` (`automation/modeling_base.py`) a ogni documento attivo, anche
+  sull'istanza di Elia: richiesta del valore alla creazione di una quota (toggle 10 = off), richiesta di chiudere lo schizzo (96 = off),
+  quote sovradefinite (100 = off, 101 = guidate). Servono per non bloccare l'istanza nascosta con finestre di dialogo, ma restano
+  nel registro anche per il lavoro a mano. Da decidere: applicarle solo in modalita' dedicata, o salvarle e ripristinarle
+  alla chiusura (verificare dal vivo come SolidWorks le salva). Se Elia nota che le quote non chiedono piu' il valore: e' questo.
 - Codice vecchio dell'autore originale (`backup_*`, `scripts/`, `solidworks_com.py`, `solidworks_simulation.py`): solo nella
   copia locale, non nel repository (F3).
 
@@ -50,6 +55,16 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Versione del pacchetto 5.0.0.
 - Parti pure del gruppo D in `solidworks_mcp/utils/` (D1 tabella configurazioni, D7 inerzia in sistema utente, D10 lettura PDF 3D),
   coperte dal test offline; D10 e' gia' usato da `inspect_export_file` (chiave `pdf3d`, `has_3d` invariato).
+- Revisione del codice (`data_export.py`, `drawings.py`):
+  - `get_part_mass_properties`, `list_part_configurations(include_volume)`, `set_configuration_suppression`, `export_model`:
+    la configurazione attiva di partenza torna attiva anche se c'e' un errore a meta' (prima restava cambiata);
+  - `configuration=` con un nome inesistente ora da' errore (prima `ShowConfiguration2` falliva in silenzio e si lavorava
+    sulla configurazione attiva: export e proprieta' di massa della configurazione sbagliata con esito positivo);
+  - `export_model` con `configuration=`: il box del modello per il controllo dell'STL ora e' quello della configurazione esportata
+    (prima era quello della configurazione di partenza);
+  - `export_model` / `export_drawing`: se il nome del file viene cambiato (`.iges` -> `.igs`, `format` diverso dall'estensione)
+    e il file col nome nuovo esiste, rifiuto (prima veniva cancellato e riscritto senza `overwrite`);
+  - `tests/test_data_live.py`: refuso `dx_a` -> `dx_b` nella pulizia prima degli export IGES/x_t/x_b/PDF/eDrawings.
 
 ## Prossimo passo (sul PC con SolidWorks, dopo `git pull` di main)
 1. Regressione completa con `.venv\Scripts\python.exe tests\run_all.py` (un test alla volta, istanza dedicata, worker fermato da solo) per confermare A, B, C dopo le modifiche del
