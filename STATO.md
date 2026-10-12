@@ -31,7 +31,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 
 ## Aperto
 - **Gruppo D** (dati ed export) e **gruppo E** (simulazione): tutto da fare, piano in `PIANO_D_E.md`.
-- Parziali: B4 (UNI assente dal database; posizione angolare dei fori su facce cilindriche non controllabile), C3 (rotazione nei
+- Parziali (B4 e C5 riaperti, piano in `PIANO_D_E.md`): B4 (UNI assente dal database; posizione angolare dei fori su facce cilindriche non controllabile), C3 (rotazione nei
   passi di traslazione dell'esploso), C5 (blocco/ingranaggio/vite non propagati dal solutore via API).
 - Residuo visivo non bloccante: nella tavola del cuneo la vista ausiliaria non sta sulla perpendicolare allo spigolo.
 - Preferenze di SolidWorks cambiate durante lo sviluppo di cui non si conosce il valore originale: qualita' STL (int 78 = 2 fine)
@@ -49,6 +49,10 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
   `test_modeling_extra_live` usa `Client(session, auto_overwrite=False)` come prima).
 - Versione del pacchetto 5.0.0.
 
-## Prossimo passo
-Sul PC con SolidWorks: `python tests/test_offline.py`, poi `test_modeling_live.py` (prova lo smistamento nuovo dei tool base) e `test_data_live.py`, poi il gruppo D nell'ordine di `PIANO_D_E.md`
-(D5, D6, D7, D8, D1 per primi).
+## Prossimo passo (sul PC con SolidWorks, dopo `git pull` di main)
+1. Regressione completa, un test alla volta (istanza dedicata, worker di sviluppo fermo), per confermare A, B, C dopo le modifiche del
+   2026-10-12 (smistamento dei tool base, `tests/live_common.py`, config):
+   `test_offline`, `test_modeling_live`, `test_modeling_extra_live`, `test_drawings_live`, `test_drawing_quality_live`,
+   `test_assembly_live`, `test_assembly_extra_live`, `test_data_live`, `test_simulation_live`. Annotare qui gli esiti; un rosso si corregge prima di andare avanti.
+2. Ripresa dei parziali B4 (posizione dei fori su cilindri) e C5 (ingranaggio/vite/blocco), poi C3: `PIANO_D_E.md`.
+3. Gruppo D e poi E nell'ordine di `PIANO_D_E.md`.

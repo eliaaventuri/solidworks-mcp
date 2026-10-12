@@ -1,4 +1,4 @@
-# PIANO — Gruppi D (dati ed export) ed E (simulazione)
+# PIANO — Gruppi D (dati ed export) ed E (simulazione), ripresa dei parziali B4 / C5 / C3
 
 Scritto il 2026-10-12 in una sessione cloud **senza SolidWorks**: niente di questo piano e' stato provato dal vivo.
 I nomi di API marcati **(da verificare)** vengono dalla documentazione e dalla memoria, non da prove: prima di scrivere
@@ -10,7 +10,8 @@ Fatto in questa sessione (verificabile senza SolidWorks):
   metodo, `required` = parametri obbligatori), `safety.py`, PNG puro Python, lettori STL/3MF/STEP/IGES/x_t/PDF, libreria `.sldmat`, unita'.
 - `_dx_inspect_step` conta anche `product_definitions` e `assembly_occurrences` (struttura d'assieme dello STEP, serve a D6).
 
-Ordine consigliato: D5, D6, D7, D8, D1 (tool composti da metodi gia' verificati, rischio basso) -> E3, E5, E1, E4, E2 -> D4, D9, D10 -> D2, D3 (probabili limiti dell'edizione).
+Prima di tutto: regressione completa dei 9 test (vedi `STATO.md`, "Prossimo passo").
+Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (tool composti da metodi gia' verificati, rischio basso) -> E3, E5, E1, E4, E2 -> D4, D9, D10 -> D2, D3 (probabili limiti dell'edizione).
 
 ---
 
@@ -143,6 +144,39 @@ Ordine consigliato: D5, D6, D7, D8, D1 (tool composti da metodi gia' verificati,
     (k letto dalla libreria; con k = 47 W/mK: 4,7 W).
 
 ---
+
+## Ripresa dei parziali (riaperti il 2026-10-12)
+
+### B4 — posizione angolare del foro su facce cilindriche
+- Oggi: foro radiale con Ø e volume giusti, ma `HoleWizard5` lo mette in un'altra posizione angolare (R30 asse X: pick a 45 gradi ->
+  foro a -45; lo scarto cambia con assi e cilindri decentrati). Sulle facce PIANE di qualunque orientamento invece il punto e' esatto.
+- Idea 1 (preferita): piano tangente. Costruire un piano di riferimento tangente al cilindro nel punto richiesto (normale = direzione
+  radiale dal punto sull'asse al punto, calcolata da `CylinderParams`), creare il foro sul piano (posizionamento esatto gia' verificato
+  sui piani) con condizione finale riferita alla faccia cilindrica o profondita' misurata dalla linea di contatto; nascondere il piano.
+  Da verificare: che il piano tangente sia accettato da `HoleWizard5` come faccia di posizionamento (altrimenti piano con offset di 0,01 mm).
+- Idea 2: dopo la creazione, leggere il punto dello schizzo di posizione del foro (sotto-feature), confrontarlo con il punto richiesto e
+  spostarlo (`EditSketch` + coordinate del punto, poi ricostruzione); serve se lo schizzo di posizione e' un 3D sketch modificabile.
+- Verifica (test esistente in `test_modeling_extra_live.py`, sezione B4): per pick a 0, 45, 90, 180 gradi e cilindri decentrati /
+  con asse Y o Z, l'asse del foro misurato con `list_entities` passa per il punto richiesto (scarto angolare < 0,01 gradi), Ø e volume
+  come oggi. Se nessuna idea funziona: restare `[~]` con il risultato delle prove.
+
+### C5 — ingranaggio, vite e blocco che il solutore non propaga
+- Oggi: creati e letti dal modello (rapporto 2:1, passo 2 mm/giro), ma `SetTransformAndSolve2` e `IDragOperator` non muovono la seconda
+  ruota / la chiocciola; lo studio di movimento con motore rotativo non ha prodotto moto nell'istanza NASCOSTA.
+- Prova 1: stesso studio di movimento (Animazione, motore rotativo 1 giro, `Calculate`) in un'istanza dedicata VISIBILE (minimizzata),
+  poi lettura della posa dei componenti a fine studio (`MotionStudy` -> tempo finale -> `Transform2`). Atteso: seconda ruota -0,5 giri,
+  chiocciola +2 mm per giro.
+- Prova 2: `IDragOperator` in istanza visibile con `DynamicClearance`/`CollisionDetection` disattivati e passi piccoli (es. 10 x 36 gradi):
+  il solutore di trascinamento risolve gli accoppiamenti meccanici, il `SetTransformAndSolve2` diretto no.
+- Prova 3 (blocco): dopo un `ForceRebuild3`, leggere i gradi di liberta' con `_as_dof_basis` (C7) invece di muovere: un blocco
+  corretto lascia 0 DOF; se l'API ne vede 3 di rotazione, documentarlo.
+- Verifica: rapporto misurato = rapporto impostato entro 0,1 %, avanzamento della vite = passo x giri entro 0,01 mm.
+  Se funziona solo con l'istanza visibile, dichiararlo nel risultato del tool.
+
+### C3 — rotazione nei passi di traslazione dell'esploso (priorita' bassa)
+- Oggi: `AddExplodeStep2` non memorizza l'angolo nei passi di traslazione (nei passi radiali si'). Prove: `IExplodeStep` dopo la
+  creazione (proprieta' di rotazione scrivibili? `BeginEdit/EndEdit` come per i carichi della simulazione), oppure un passo di
+  traslazione + un passo di sola rotazione sullo stesso componente. Verifica: angolo letto dalla matrice esplosa (come per il radiale).
 
 ## Problemi notati rileggendo il codice (senza SolidWorks)
 - `import_model(merge_faces=...)`: parametro del metodo mai usato, non esposto nello schema (vedi D9).
