@@ -401,6 +401,140 @@ def test_materials(tmp):
     record("ricerca materiale: inesistente -> errore", hit is None and bool(err), err)
 
 
+# ============================================================================ D1 tabella delle configurazioni
+def test_config_table(tmp):
+    from solidworks_mcp.utils.config_table import parse_configuration_table, plan_configuration_changes, classify_column
+    kinds = [classify_column(h)[0] for h in ("D1@Schizzo1", "D2@Estrusione1@pezzo.Part", "$STATO@Foro1", "$state@Foro1",
+                                             "$PRP@Codice", "$MATERIALE", "$COMMENTO", "Lunghezza")]
+    record("D1: colonne riconosciute", kinds == ["dimension", "dimension", "suppression", "suppression", "property", "material",
+                                               "comment", "unknown"], str(kinds))
+    csv_path = os.path.join(tmp, "cfg.csv")
+    with open(csv_path, "w", encoding="utf-8-sig") as f:
+        f.write("Configurazione;D1@Schizzo1;$STATO@Foro1;$PRP@Codice;$MATERIALE;$COMMENTO\n"
+                "Default;30;R;A-001;;\nLunga;60,5;;A-002;AISI 304;versione lunga\nPieno;;S;;;\n")
+    t = parse_configuration_table(csv_path)
+    c = {x["name"]: x for x in t["configurations"]}
+    record("D1: CSV italiano (';' e virgola decimale), celle vuote saltate",
+           not t["errors"] and c["Lunga"]["dimensions"] == {"D1@Schizzo1": 60.5} and c["Default"]["suppression"] == {"Foro1": False}
+           and c["Pieno"]["suppression"] == {"Foro1": True} and c["Pieno"]["dimensions"] == {}
+           and c["Lunga"]["material"] == "AISI 304" and c["Lunga"]["properties"] == {"Codice": "A-002"}
+           and c["Lunga"]["comment"] == "versione lunga", str(t["errors"] or t["configurations"]))
+    j = parse_configuration_table('[{"Nome": "Corta", "D1@Schizzo1": 15}, {"Nome": "Media", "D1@Schizzo1": "20"}]')
+    jd = parse_configuration_table({"Corta": {"D1@Schizzo1": 15}})
+    record("D1: JSON a righe e a dizionario", not j["errors"] and [x["dimensions"]["D1@Schizzo1"] for x in j["configurations"]] == [15.0, 20.0]
+           and jd["configurations"][0]["name"] == "Corta", str(j))
+    bad = parse_configuration_table("Configurazione,D1@Schizzo1,$STATO@Foro1,Lunghezza\nA,dieci,forse,1\nA,1,S,2\n,3,S,4\n")
+    e = " | ".join(bad["errors"])
+    record("D1: errori -> colonna sconosciuta, numero e stato non validi, nome ripetuto, nome vuoto",
+           all(k in e for k in ("'Lunghezza' non riconosciuta", "'dieci' non e' un numero", "'forse' non e' uno stato", "ripetuta", "vuoto")), e)
+    plan = plan_configuration_changes(t, ["Default", "pieno"])
+    acts = [(a["action"], a["configuration"]) for a in plan["actions"]]
+    record("D1: piano -> crea solo le mancanti (nomi senza maiuscole), poi quote/soppressioni/proprieta'/materiale",
+           acts == [("set_dimension", "Default"), ("set_suppression", "Default"), ("set_property", "Default"),
+                    ("add_configuration", "Lunga"), ("set_dimension", "Lunga"), ("set_property", "Lunga"),
+                    ("assign_material", "Lunga"), ("set_suppression", "pieno")], str(acts))
+    p2 = plan_configuration_changes(t, ["Default"], create_missing=False)
+    record("D1: create_missing=false -> errore per le configurazioni assenti", len(p2["errors"]) == 2, str(p2["errors"]))
+    record("D1: tabella con errori -> nessuna azione", plan_configuration_changes(bad, [])["actions"] == [])
+
+
+# ============================================================================ D7 massa in un sistema utente
+def test_inertia():
+    import random
+    from solidworks_mcp.utils import inertia as I
+    rnd = random.Random(7)
+    pts = [(rnd.uniform(0.1, 1.0), [rnd.uniform(-0.05, 0.08), rnd.uniform(-0.02, 0.04), rnd.uniform(0.0, 0.03)]) for _ in range(40)]
+
+    def tensor(points, offdiag="tensor"):            # tensore diretto da masse puntiformi (origine = 0)
+        J = [[0.0] * 3 for _ in range(3)]
+        for m, p in points:
+            r2 = sum(x * x for x in p)
+            for a in range(3):
+                for b in range(3):
+                    J[a][b] += m * ((r2 if a == b else 0.0) - p[a] * p[b])
+        return I.flip_offdiag(J) if offdiag == "products" else J
+    M = sum(m for m, _ in pts)
+    com = [sum(m * p[k] for m, p in pts) / M for k in range(3)]
+    j_com = tensor([(m, [p[k] - com[k] for k in range(3)]) for m, p in pts])
+    R = I.mat_mul(I.rotation_about("z", 30), I.rotation_about("x", -20))
+    o = [0.02, -0.01, 0.005]
+    user = [(m, I.mat_vec(I.mat_t(R), [p[k] - o[k] for k in range(3)])) for m, p in pts]      # coordinate nel sistema utente
+    res = I.mass_properties_in_frame(M, com, j_com, R, o)
+    exp_c = [sum(m * p[k] for m, p in user) / M for k in range(3)]
+    exp_o = tensor(user)
+    err_c = max(abs(a - b) for a, b in zip(res["center_of_mass"], exp_c))
+    err_o = max(abs(res["inertia_at_origin"][a][b] - exp_o[a][b]) for a in range(3) for b in range(3))
+    record("D7: baricentro e tensore nell'origine utente = calcolo diretto sulle masse (sistema ruotato e traslato)",
+           err_c < 1e-12 and err_o < 1e-12 and not res["frame_issues"], f"scarti {err_c:.1e} m, {err_o:.1e} kg*m2")
+    resp = I.mass_properties_in_frame(M, com, I.flip_offdiag(j_com), R, o, offdiag="products")
+    exp_p = tensor(user, "products")
+    err_p = max(abs(resp["inertia_at_origin"][a][b] - exp_p[a][b]) for a in range(3) for b in range(3))
+    record("D7: convenzione 'products' (+integrale xy dm) coerente", err_p < 1e-12, f"{err_p:.1e}")
+    pm = I.principal_moments(j_com)
+    tr = sum(j_com[k][k] for k in range(3))
+    record("D7: momenti principali invarianti alla rotazione (somma = traccia)",
+           abs(sum(pm) - tr) < 1e-12 and max(abs(a - b) for a, b in zip(pm, res["principal_moments"])) < 1e-12, f"{pm}")
+    # blocco 80x50x30 mm, 0,96 kg (test_data_live): momenti noti m/12 (b2+c2)
+    m, a, b, c = 0.96, 0.03, 0.08, 0.05
+    box = [[m / 12 * (b * b + c * c), 0, 0], [0, m / 12 * (a * a + c * c), 0], [0, 0, m / 12 * (a * a + b * b)]]
+    rb = I.mass_properties_in_frame(m, [0.015, 0, 0], box, I.rotation_about("z", 90), [0, 0, 0])
+    record("D7: blocco ruotato di 90 gradi attorno a Z -> Ixx e Iyy si scambiano, baricentro (0, -15, 0) mm",
+           abs(rb["inertia_at_center_of_mass"][0][0] - box[1][1]) < 1e-15 and abs(rb["inertia_at_center_of_mass"][1][1] - box[0][0]) < 1e-15
+           and max(abs(x - y) for x, y in zip(rb["center_of_mass"], [0, -0.015, 0])) < 1e-15, str(rb["center_of_mass"]))
+    Rsw, osw = I.frame_from_sw_transform([0, 1, 0, -1, 0, 0, 0, 0, 1, 0.01, 0.02, 0.03, 1.0])
+    record("D7: MathTransform di SolidWorks -> righe = assi (X utente = Y modello)",
+           [Rsw[k][0] for k in range(3)] == [0, 1, 0] and osw == [0.01, 0.02, 0.03])
+    record("D7: sistema sinistrorso segnalato", I.check_rotation([[1, 0, 0], [0, 1, 0], [0, 0, -1]]) != [])
+
+
+# ============================================================================ D10 PDF 3D
+def _pdf(objects):
+    out, n = [b"%PDF-1.7\n"], 1
+    for body in objects:
+        out.append(b"%d 0 obj\n" % n + body + b"\nendobj\n")
+        n += 1
+    return b"".join(out) + b"trailer\n<< /Root 1 0 R >>\n%%EOF\n"
+
+
+def test_pdf3d(tmp):
+    import zlib
+    from solidworks_mcp.utils.pdf3d import inspect_pdf3d
+    prc = b"PRC" + bytes(range(200)) * 3
+    comp = zlib.compress(prc)
+    pdf = _pdf([b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                b"<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>",
+                b"<< /Type /Annot /Subtype /3D /Rect [0 0 100 100] /3DD 5 0 R /3DV << /XN (Isometrica) >> >>",
+                b"<< /Type /3D /Subtype /PRC /Filter /FlateDecode /Length %d >>\nstream\n" % len(comp) + comp + b"\nendstream",
+                b"<< /Type /3DView /XN (Frontale) >>"])
+    d = inspect_pdf3d(pdf)
+    st = d["streams_3d"][0] if d["streams_3d"] else {}
+    record("D10: PDF con PRC compresso -> stream decompresso, magic PRC, 1 pagina, 1 annotazione, 2 viste",
+           d["parsed"] and d["prc_ok"] and d["pages"] == 1 and d["annotations_3d"] == 1 and st.get("decoded_size") == len(prc)
+           and d["views"] == ["Isometrica", "Frontale"], str({k: d[k] for k in ("pages", "annotations_3d", "views", "prc_ok")}))
+    bad = _pdf([b"<< /Type /Page >>", b"<< /Type /3D /Subtype /PRC /Filter /FlateDecode /Length 10 >>\nstream\nNONZLIBXXX\nendstream"])
+    d = inspect_pdf3d(bad)
+    record("D10: stream PRC rovinato -> prc_ok falso, nessuna eccezione", d["parsed"] and not d["prc_ok"] and d["streams_3d"], str(d["streams_3d"]))
+    u3d = _pdf([b"<< /Type /3D /Subtype /U3D /Length 8 >>\nstream\nU3D\x00abcd\nendstream"])
+    record("D10: U3D non compresso riconosciuto", inspect_pdf3d(u3d)["u3d_ok"])
+    flat = inspect_pdf3d(_pdf([b"<< /Type /Page >>"]))
+    record("D10: PDF piatto -> nessuno stream 3D", flat["parsed"] and not flat["streams_3d"] and flat["pages"] == 1)
+    record("D10: non-PDF -> parsed falso", not inspect_pdf3d(b"ciao")["parsed"])
+    inner = [b"<< /Type /Page >>", b"<< /Type /Annot /Subtype /3D /Rect [0 0 1 1] /3DV << /XN (Vista1) >> >>"]
+    head = b"10 0 11 %d " % (len(inner[0]) + 1)
+    raw = head + inner[0] + b" " + inner[1]
+    z = zlib.compress(raw)
+    objstm = _pdf([b"<< /Type /ObjStm /N 2 /First %d /Filter /FlateDecode /Length %d >>\nstream\n" % (len(head), len(z)) + z + b"\nendstream",
+                   b"<< /Type /3D /Subtype /PRC /Filter /FlateDecode /Length %d >>\nstream\n" % len(comp) + comp + b"\nendstream"])
+    d = inspect_pdf3d(objstm)
+    record("D10: oggetti dentro un object stream compresso (PDF 1.5+)", d["pages"] == 1 and d["annotations_3d"] == 1
+           and d["views"] == ["Vista1"] and d["prc_ok"], str({k: d[k] for k in ("pages", "annotations_3d", "views", "prc_ok")}))
+    path = os.path.join(tmp, "m3d.pdf")
+    with open(path, "wb") as f:
+        f.write(pdf)
+    r = SolidWorksAutomation().inspect_export_file(path)["data"]
+    record("D10: inspect_export_file riporta pdf3d senza cambiare has_3d", r.get("has_3d") and r.get("pdf3d", {}).get("prc_ok"), str(r.get("pdf3d", {}).get("notes")))
+
+
 # ============================================================================ configurazione
 def test_config(tmp):
     from solidworks_mcp.config import SolidWorksConfig
@@ -430,7 +564,9 @@ def main():
                          ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
                          ("lettori", lambda: test_inspectors(tmp)),
                          ("materiali", lambda: test_materials(tmp)),
-                         ("configurazione", lambda: test_config(tmp)), ("unita'", test_units)):
+                         ("configurazione", lambda: test_config(tmp)),
+                         ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
+                         ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units)):
             try:
                 fn()
             except Exception as e:

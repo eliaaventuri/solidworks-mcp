@@ -2,6 +2,7 @@
 
 ## Documentazione
 ```
+CLAUDE.md                     istruzioni per Claude Code: cosa leggere, regole, test
 README.md                     cos'e' il progetto, installazione, tool, test
 STATO.md                      stato attuale in breve: cosa funziona, esiti dei test, regole di lavoro, cosa e' aperto
 STATO_STORICO.md              diario completo: esiti per blocco, misure, trappole API di SolidWorks, incidenti
@@ -27,6 +28,9 @@ solidworks_mcp/
   constants.py                costanti API SolidWorks (piani, errori, tipi)
   utils/sw_finder.py          trova SLDWORKS.exe e i template
   utils/units.py              conversione unita'
+  utils/config_table.py       D1: lettura/controllo della tabella delle configurazioni (CSV/JSON) e piano delle modifiche (puro)
+  utils/inertia.py            D7: baricentro e tensore d'inerzia in un sistema di coordinate utente (puro)
+  utils/pdf3d.py              D10: lettura della struttura 3D di un PDF (stream PRC/U3D, viste), usata da inspect_export_file
   automation/                 un mixin per area, riuniti in SolidWorksAutomation (__init__.py)
     base.py                   connessione COM (istanza dell'utente o dedicata con SW_MCP_INSTANCE=dedicated), helper _com, template, piani standard
     documents.py              nuovo/apri/salva/chiudi/elenca; close_document sicuro (save/discard/document), save_document con overwrite
@@ -55,6 +59,7 @@ formats/                      formati foglio ISO verticali A0-A3 (.slddrt), vers
 ## Test
 ```
 tests/test_offline.py              SENZA SolidWorks (anche su Linux): registro e smistamento dei tool (call_tool con SolidWorks finto), sicurezza, PNG, lettori dei file esportati, .sldmat, configurazione, unita'
+tests/run_all.py                   regressione completa (un test alla volta) con riepilogo in test_output/regressione_*.md
 tests/live_common.py               parti comuni dei test live: percorsi, Client MCP (auto_overwrite), sw_pids, cleanup
 tests/test_modeling_live.py        modellazione 3D con volumi calcolati a mano
 tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); argomenti B1 B4 ... per sezioni

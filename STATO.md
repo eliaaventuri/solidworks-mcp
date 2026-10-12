@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 46/46 (2026-10-12, Linux; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 66/66 (2026-10-12, Linux; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -48,9 +48,11 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Test live: percorsi, `Client`, `sw_pids`, `cleanup` spostati in `tests/live_common.py` (solo le copie identiche;
   `test_modeling_extra_live` usa `Client(session, auto_overwrite=False)` come prima).
 - Versione del pacchetto 5.0.0.
+- Parti pure del gruppo D in `solidworks_mcp/utils/` (D1 tabella configurazioni, D7 inerzia in sistema utente, D10 lettura PDF 3D),
+  coperte dal test offline; D10 e' gia' usato da `inspect_export_file` (chiave `pdf3d`, `has_3d` invariato).
 
 ## Prossimo passo (sul PC con SolidWorks, dopo `git pull` di main)
-1. Regressione completa, un test alla volta (istanza dedicata, worker di sviluppo fermo), per confermare A, B, C dopo le modifiche del
+1. Regressione completa con `.venv\Scripts\python.exe tests\run_all.py` (un test alla volta, istanza dedicata, worker fermato da solo) per confermare A, B, C dopo le modifiche del
    2026-10-12 (smistamento dei tool base, `tests/live_common.py`, config):
    `test_offline`, `test_modeling_live`, `test_modeling_extra_live`, `test_drawings_live`, `test_drawing_quality_live`,
    `test_assembly_live`, `test_assembly_extra_live`, `test_data_live`, `test_simulation_live`. Annotare qui gli esiti; un rosso si corregge prima di andare avanti.

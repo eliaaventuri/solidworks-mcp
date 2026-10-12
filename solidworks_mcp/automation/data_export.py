@@ -60,6 +60,7 @@ import pythoncom
 
 from ..constants import SwErrors
 from .modeling_base import null_variant, r8_array
+from ..utils.pdf3d import inspect_pdf3d
 
 logger = logging.getLogger(__name__)
 
@@ -1185,6 +1186,10 @@ class DataExportOperations:
             elif ext == "pdf":
                 b = open(filepath, "rb").read()
                 info = {"format": "pdf", "size_bytes": len(b), "has_3d": b"/3D" in b and b"PRC" in b}
+                try:                        # D10: lettura della struttura 3D (stream PRC decompresso, viste); non cambia has_3d
+                    info["pdf3d"] = inspect_pdf3d(b)
+                except Exception as e:
+                    info["pdf3d"] = {"parsed": False, "notes": [f"errore di lettura: {e}"]}
             else:
                 info = {"format": ext, "size_bytes": os.path.getsize(filepath)}
             return self._result(True, f"{ext.upper()}: " + ", ".join(f"{k}={v}" for k, v in info.items() if k in

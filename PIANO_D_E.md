@@ -22,6 +22,8 @@ Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (t
   Intestazioni con la stessa convenzione delle design table, cosi' la tabella si puo' riusare in Excel:
   `D1@Schizzo1` (quota, mm o gradi), `$STATO@Foro1` (`S`/`R` = soppressa/attiva), `$PRP@Codice` (proprieta' della configurazione),
   `$MATERIALE` (opzionale), prima colonna = nome della configurazione.
+- **Parte pura FATTA (2026-10-12)**: `solidworks_mcp/utils/config_table.py` (`parse_configuration_table`, `plan_configuration_changes`),
+  coperta da `test_offline.py`. Sul PC resta: il tool che esegue le azioni del piano e il test live.
 - Implementazione: SOLO composizione di metodi gia' verificati (`add_part_configuration`, `set_configuration_dimension`,
   `set_configuration_suppression`, `set_custom_property(configuration=)`, `assign_material(configuration=)`). Parsing e validazione
   (colonne sconosciute, valori non numerici, nomi duplicati) in una funzione pura -> test offline.
@@ -76,6 +78,10 @@ Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (t
   `GetCoordinateSystemTransformByName` (gia' verificato in B2):
   baricentro' = R^T (c - o); tensore nell'origine utente, assi utente: R^T (I_c + m(|d|^2 E - d d^T)) R con d = c - o.
 - Se esiste, confrontare con `IMassProperty2` dopo la scelta del sistema di coordinate (`SetCoordinateSystem` **(da verificare)**).
+- **Parte pura FATTA (2026-10-12)**: `solidworks_mcp/utils/inertia.py` (`mass_properties_in_frame`, `frame_from_sw_transform`),
+  verificata offline contro il calcolo diretto su masse puntiformi. Da stabilire dal vivo la convenzione dei termini fuori
+  diagonale di `GetMomentOfInertia` (`offdiag="tensor"` o `"products"`): blocco col baricentro in (15, 10, 0) mm, termine xy
+  all'origine = -m*0,015*0,010 (tensor) o +m*0,015*0,010 (products).
 - Nuovo parametro `coordinate_system` in `get_part_mass_properties`. Test: parallelepipedo e sistema ruotato di 30 gradi
   attorno a Z e traslato: confronto con le formule (< 0,01 %). La funzione di trasformazione e' pura -> test offline.
 
@@ -96,7 +102,10 @@ Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (t
   a mano togliendo un `ADVANCED_FACE`) -> la diagnostica la trova e la ripara (volume finale vicino all'originale).
 
 ### D10 — PDF 3D verificato a fondo
-- Oggi: presenza di `/3D` e `PRC`. Lettura completa in Python puro: trovare l'oggetto `/Subtype /PRC`, decomprimere lo stream
+- **FATTO offline (2026-10-12)**: `solidworks_mcp/utils/pdf3d.py`; `inspect_export_file` riporta `pdf3d` (stream PRC/U3D
+  decompresso con magic, pagine, annotazioni 3D, viste), anche dentro object stream. Sul PC: confrontarlo col PDF di `test_data_live`
+  e aggiungere al test la verifica `pdf3d.prc_ok`.
+- Prima: presenza di `/3D` e `PRC`. Lettura completa in Python puro: trovare l'oggetto `/Subtype /PRC`, decomprimere lo stream
   (`/FlateDecode` con zlib), controllare il magic `PRC` all'inizio e la lunghezza; leggere l'annotazione `/3D` con la vista
   predefinita (`/3DV`). Tutto testabile offline con un PDF sintetico; dal vivo si confronta con il PDF di `test_data_live`.
 - Facoltativo: estrarre dal PRC il numero di corpi/tessellazioni (il formato e' documentato, ISO 14739-1) se servono numeri.
