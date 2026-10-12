@@ -1,19 +1,6 @@
 """
-SolidWorks MCP Server
----------------------
-Main MCP server entry point with all tools.
-
-Version: 4.0.0 (Fixed for SolidWorks 2025)
-Author: Samsaam Ali Baig
-
-Fixes v4.0.0:
-- execute_python now captures stdout/stderr
-- FeatureExtrusion2 with correct 23 params for SW 2025
-- list_features: property access instead of method calls
-- extrude_sketch: proper sketch close + select before extrude
-- cut_extrude: proper sketch handling
-- NEW: close_sketch tool
-- NEW: get_sketch_status tool for diagnostics
+Server MCP di SolidWorks: definizione dei tool base, smistamento di tutti i 196 tool e avvio (stdio).
+I tool delle altre aree sono definiti in *_tools.py; la guardia di sovrascrittura e le annotazioni in safety.py.
 """
 
 import io
@@ -30,9 +17,10 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # Local imports
+from . import __version__
 from .automation import SolidWorksAutomation
 from .constants import SwErrors
-from .config import get_config, save_config
+from .config import get_config
 from .utils import get_solidworks_info, set_default_unit
 from .drawing_tools import DRAWING_TOOLS, DRAWING_DISPATCH
 from .modeling_tools import MODELING_TOOLS, MODELING_DISPATCH
@@ -390,190 +378,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = sw_automation._result(False, refusal, SwErrors.swFileSaveError, {"refused": "file_exists"})
             return [TextContent(type="text", text=format_result(result))]
         
-        # Connection Tools
-        if name == "connect_solidworks":
-            result = sw_automation.connect()
-        
-        elif name == "get_solidworks_info":
-            info = get_solidworks_info()
-            result = {
-                "success": info["found"],
-                "message": f"SolidWorks {'found' if info['found'] else 'not found'}",
-                "error_code": 0 if info["found"] else 105,
-                "error_name": "swSuccess" if info["found"] else "swSolidWorksNotFound",
-                "data": info
-            }
-        
-        # Document Tools
-        elif name == "create_new_part":
-            result = sw_automation.create_new_part()
-        
-        elif name == "create_new_assembly":
-            result = sw_automation.create_new_assembly()
-        
-        elif name == "open_document":
-            result = sw_automation.open_document(arguments.get("filepath", ""))
-        
-        elif name == "save_document":
-            result = sw_automation.save_document(arguments.get("filepath"), bool(arguments.get("overwrite", False)))
-        
-        elif name == "close_document":
-            result = sw_automation.close_document(bool(arguments.get("save", False)),
-                                                  bool(arguments.get("discard", False)),
-                                                  arguments.get("document"))
-        
-        elif name == "get_document_info":
-            result = sw_automation.get_document_info()
-        
-        elif name == "list_open_documents":
-            result = sw_automation.list_open_documents()
-        
-        # Sketch Tools
-        elif name == "create_sketch":
-            result = sw_automation.create_sketch(arguments.get("plane", "Front"))
-        
-        elif name == "create_sketch_on_face":
-            result = sw_automation.create_sketch_on_face(
-                arguments.get("x", 0),
-                arguments.get("y", 0),
-                arguments.get("z", 0),
-                arguments.get("unit")
-            )
-        
-        elif name == "draw_line":
-            result = sw_automation.draw_line(
-                arguments.get("x1", 0),
-                arguments.get("y1", 0),
-                arguments.get("x2", 100),
-                arguments.get("y2", 0),
-                arguments.get("unit")
-            )
-        
-        elif name == "draw_circle":
-            result = sw_automation.draw_circle(
-                arguments.get("x", 0),
-                arguments.get("y", 0),
-                arguments.get("radius", 25),
-                arguments.get("unit")
-            )
-        
-        elif name == "draw_rectangle":
-            result = sw_automation.draw_rectangle(
-                arguments.get("x1", -50),
-                arguments.get("y1", -25),
-                arguments.get("x2", 50),
-                arguments.get("y2", 25),
-                arguments.get("unit")
-            )
-        
-        elif name == "draw_arc":
-            result = sw_automation.draw_arc_center(
-                arguments.get("cx", 0),
-                arguments.get("cy", 0),
-                arguments.get("radius", 25),
-                arguments.get("start_angle", 0),
-                arguments.get("end_angle", 90),
-                arguments.get("unit")
-            )
-        
-        elif name == "draw_polygon":
-            result = sw_automation.draw_polygon(
-                arguments.get("cx", 0),
-                arguments.get("cy", 0),
-                arguments.get("radius", 25),
-                arguments.get("sides", 6),
-                arguments.get("unit")
-            )
-        
-        # Feature Tools
-        elif name == "extrude_sketch":
-            result = sw_automation.extrude_sketch(
-                arguments.get("depth", 10),
-                arguments.get("both_directions", False),
-                arguments.get("unit")
-            )
-        
-        elif name == "cut_extrude":
-            result = sw_automation.cut_extrude(
-                arguments.get("depth", 10),
-                arguments.get("through_all", False),
-                arguments.get("both_directions", False),
-                arguments.get("unit")
-            )
-        
-        elif name == "fillet_edges":
-            result = sw_automation.fillet_edges(
-                arguments.get("radius", 2),
-                arguments.get("unit"),
-                arguments.get("edge_points")
-            )
-        
-        elif name == "chamfer_edges":
-            result = sw_automation.chamfer_edges(
-                arguments.get("distance", 2),
-                arguments.get("angle", 45),
-                arguments.get("unit"),
-                arguments.get("edge_points"),
-                arguments.get("distance2")
-            )
-        
-        elif name == "list_features":
-            result = _list_features_fixed()
-        
-        # Sketch Management Tools
-        elif name == "close_sketch":
-            result = _close_sketch_handler()
-        
-        elif name == "get_sketch_status":
-            result = _get_sketch_status_handler()
-        
-        # Utility Tools
-        elif name == "set_units":
-            unit = arguments.get("unit", "mm")
-            set_default_unit(unit)
-            sw_automation._units.default_unit = unit
-            result = {
-                "success": True,
-                "message": f"Default unit set to: {unit}",
-                "error_code": 0,
-                "error_name": "swSuccess",
-                "data": {"unit": unit}
-            }
-        
-        elif name == "execute_python":
-            code = arguments.get("code", "")
-            if not code:
-                result = sw_automation._result(False, "Code is required", SwErrors.swInvalidInput)
-            else:
-                result = _execute_python_fixed(code)
-        
-        elif name in MODELING_DISPATCH:
-            method, allowed = MODELING_DISPATCH[name]
-            kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            result = getattr(sw_automation, method)(**kwargs)
-
-        elif name in SIMULATION_DISPATCH:
-            method, allowed = SIMULATION_DISPATCH[name]
-            kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            result = getattr(sw_automation, method)(**kwargs)
-
-        elif name in DATA_DISPATCH:
-            method, allowed = DATA_DISPATCH[name]
-            kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            result = getattr(sw_automation, method)(**kwargs)
-
-        elif name in ASSEMBLY_DISPATCH:
-            method, allowed = ASSEMBLY_DISPATCH[name]
-            kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            result = getattr(sw_automation, method)(**kwargs)
-
-        elif name in DRAWING_DISPATCH:
-            method, allowed = DRAWING_DISPATCH[name]
-            kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            result = getattr(sw_automation, method)(**kwargs)
-
+        if name in SPECIAL_HANDLERS:
+            result = SPECIAL_HANDLERS[name](arguments or {})
         else:
-            result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+            for table in DISPATCH_TABLES:
+                if name in table:
+                    method, allowed = table[name]
+                    kwargs = {k: v for k, v in (arguments or {}).items() if k in allowed}
+                    result = getattr(sw_automation, method)(**kwargs)
+                    break
+            else:
+                result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
         
         logger.info(f"Result: success={result['success']}")
         return [TextContent(type="text", text=format_result(result))]
@@ -923,12 +738,84 @@ def _get_sketch_status_handler() -> Dict:
 
 
 # ============================================================================
+# Smistamento dei tool base
+# ============================================================================
+
+def _solidworks_info_handler(arguments: dict) -> Dict:
+    info = get_solidworks_info()
+    return {
+        "success": info["found"],
+        "message": f"SolidWorks {'found' if info['found'] else 'not found'}",
+        "error_code": 0 if info["found"] else 105,
+        "error_name": "swSuccess" if info["found"] else "swSolidWorksNotFound",
+        "data": info
+    }
+
+
+def _set_units_handler(arguments: dict) -> Dict:
+    unit = arguments.get("unit", "mm")
+    set_default_unit(unit)
+    sw_automation._units.default_unit = unit
+    return {
+        "success": True,
+        "message": f"Default unit set to: {unit}",
+        "error_code": 0,
+        "error_name": "swSuccess",
+        "data": {"unit": unit}
+    }
+
+
+def _execute_python_handler(arguments: dict) -> Dict:
+    code = arguments.get("code", "")
+    if not code:
+        return sw_automation._result(False, "Code is required", SwErrors.swInvalidInput)
+    return _execute_python_fixed(code)
+
+
+# tool base che chiamano un metodo di SolidWorksAutomation: nome -> (metodo, parametri ammessi); i default sono quelli del metodo
+BASE_DISPATCH = {
+    "connect_solidworks": ("connect", set()),
+    "create_new_part": ("create_new_part", set()),
+    "create_new_assembly": ("create_new_assembly", set()),
+    "open_document": ("open_document", {"filepath"}),
+    "save_document": ("save_document", {"filepath", "overwrite"}),
+    "close_document": ("close_document", {"save", "discard", "document"}),
+    "get_document_info": ("get_document_info", set()),
+    "list_open_documents": ("list_open_documents", set()),
+    "create_sketch": ("create_sketch", {"plane"}),
+    "create_sketch_on_face": ("create_sketch_on_face", {"x", "y", "z", "unit"}),
+    "draw_line": ("draw_line", {"x1", "y1", "x2", "y2", "unit"}),
+    "draw_circle": ("draw_circle", {"x", "y", "radius", "unit"}),
+    "draw_rectangle": ("draw_rectangle", {"x1", "y1", "x2", "y2", "unit"}),
+    "draw_arc": ("draw_arc_center", {"cx", "cy", "radius", "start_angle", "end_angle", "unit"}),
+    "draw_polygon": ("draw_polygon", {"cx", "cy", "radius", "sides", "unit"}),
+    "extrude_sketch": ("extrude_sketch", {"depth", "both_directions", "unit"}),
+    "cut_extrude": ("cut_extrude", {"depth", "through_all", "both_directions", "unit"}),
+    "fillet_edges": ("fillet_edges", {"radius", "unit", "edge_points"}),
+    "chamfer_edges": ("chamfer_edges", {"distance", "angle", "unit", "edge_points", "distance2"}),
+}
+
+# tool base con un gestore proprio: nome -> funzione(arguments)
+SPECIAL_HANDLERS = {
+    "get_solidworks_info": _solidworks_info_handler,
+    "list_features": lambda arguments: _list_features_fixed(),
+    "close_sketch": lambda arguments: _close_sketch_handler(),
+    "get_sketch_status": lambda arguments: _get_sketch_status_handler(),
+    "set_units": _set_units_handler,
+    "execute_python": _execute_python_handler,
+}
+
+# ordine di ricerca (come la vecchia catena di elif)
+DISPATCH_TABLES = (BASE_DISPATCH, MODELING_DISPATCH, SIMULATION_DISPATCH, DATA_DISPATCH, ASSEMBLY_DISPATCH, DRAWING_DISPATCH)
+
+
+# ============================================================================
 # Main Entry Point
 # ============================================================================
 
 async def main():
     """Main entry point for MCP server"""
-    logger.info("Starting SolidWorks MCP Server v4.0.0 (Fixed)...")
+    logger.info(f"Starting SolidWorks MCP Server v{__version__}...")
     logger.info(f"Log file: {LOG_FILE}")
     
     async with stdio_server() as (read_stream, write_stream):

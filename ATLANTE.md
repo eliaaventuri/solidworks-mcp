@@ -16,14 +16,14 @@ LICENSE                       MIT (copyright dell'autore del progetto originale)
 solidworks_mcp_server.py      avvio del server MCP (stdio)
 requirements.txt              dipendenze: mcp<2, pywin32
 solidworks_mcp/
-  server.py                   25 tool base (connessione, documenti, schizzi, feature semplici, utilita'), smistamento di tutte le chiamate, guardia di sovrascrittura
+  server.py                   25 tool base (connessione, documenti, schizzi, feature semplici, utilita'); smistamento di tutte le chiamate con tabelle (BASE_DISPATCH + *_DISPATCH, SPECIAL_HANDLERS), guardia di sovrascrittura
   modeling_tools.py           schemi dei 50 tool di modellazione -> automation/modeling.py, sketch_constraints.py
   drawing_tools.py            schemi dei 38 tool di disegno -> automation/drawings.py e mixin drawing_*
   assembly_tools.py           schemi dei 35 tool di assieme -> automation/assembly*.py
   data_tools.py               schemi dei 30 tool di dati ed export -> automation/data_export.py
   simulation_tools.py         schemi dei 18 tool di simulazione -> automation/simulation.py
   safety.py                   tool distruttivi (destructiveHint + nota [DISTRUTTIVO]), parametro overwrite e rifiuto della sovrascrittura
-  config.py / config.json     configurazione (unita', percorsi, timeout)
+  config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
   utils/sw_finder.py          trova SLDWORKS.exe e i template
   utils/units.py              conversione unita'
@@ -54,7 +54,8 @@ formats/                      formati foglio ISO verticali A0-A3 (.slddrt), vers
 
 ## Test
 ```
-tests/test_offline.py              SENZA SolidWorks (anche su Linux): registro dei tool, sicurezza, PNG, lettori dei file esportati, .sldmat, unita'
+tests/test_offline.py              SENZA SolidWorks (anche su Linux): registro e smistamento dei tool (call_tool con SolidWorks finto), sicurezza, PNG, lettori dei file esportati, .sldmat, configurazione, unita'
+tests/live_common.py               parti comuni dei test live: percorsi, Client MCP (auto_overwrite), sw_pids, cleanup
 tests/test_modeling_live.py        modellazione 3D con volumi calcolati a mano
 tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); argomenti B1 B4 ... per sezioni
 tests/test_drawings_live.py        tool di disegno
@@ -65,6 +66,7 @@ tests/test_data_live.py            dati ed export (materiali, massa, equazioni, 
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
+`.github/workflows/test-offline.yml`: GitHub Actions esegue `test_offline.py` e pyflakes (nomi non definiti) a ogni push.
 
 ## Non versionati (`.gitignore`)
 ```

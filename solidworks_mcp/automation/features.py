@@ -3,10 +3,8 @@ SolidWorks Feature Operations
 -----------------------------
 Create 3D features: extrude, cut, fillet, chamfer, etc.
 
-Version: 4.0.0 (Fixed for SolidWorks 2025 - v33)
-Author: Samsaam Ali Baig
-
-Fixes v4.0.0:
+Modulo nato nel progetto originale (alisamsam/solidworks-mcp), poi corretto qui (cut_extrude through_all + both_directions, late binding).
+Note dell'autore originale:
 - FeatureExtrusion2 now uses correct 23 parameters for SW 2025
 - Proper sketch close + select before extrude (fixes multi-profile sketches)
 - Property vs method fixes (FirstFeature, GetNextFeature, GetTypeName2)

@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro tool, sicurezza, PNG, lettori export, `.sldmat` | `test_offline` 36/36 (2026-10-12, Linux) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 46/46 (2026-10-12, Linux; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -41,6 +41,14 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Codice vecchio dell'autore originale (`backup_*`, `scripts/`, `solidworks_com.py`, `solidworks_simulation.py`): solo nella
   copia locale, non nel repository (F3).
 
+## Ultime modifiche non ancora provate dal vivo (2026-10-12)
+- `server.py`: la catena di `elif` dei 25 tool base e' diventata una tabella (`BASE_DISPATCH` + `SPECIAL_HANDLERS`); stessi metodi e
+  stessi default (verificato offline con un SolidWorks finto).
+- `config.json` ridotto alle chiavi lette davvero; chiavi sconosciute in una config locale vengono ignorate (prima facevano perdere tutta la config).
+- Test live: percorsi, `Client`, `sw_pids`, `cleanup` spostati in `tests/live_common.py` (solo le copie identiche;
+  `test_modeling_extra_live` usa `Client(session, auto_overwrite=False)` come prima).
+- Versione del pacchetto 5.0.0.
+
 ## Prossimo passo
-Sul PC con SolidWorks: `python tests/test_offline.py`, poi `test_data_live.py`, poi il gruppo D nell'ordine di `PIANO_D_E.md`
+Sul PC con SolidWorks: `python tests/test_offline.py`, poi `test_modeling_live.py` (prova lo smistamento nuovo dei tool base) e `test_data_live.py`, poi il gruppo D nell'ordine di `PIANO_D_E.md`
 (D5, D6, D7, D8, D1 per primi).

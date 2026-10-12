@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SolidWorks MCP Server - Entry Point
-------------------------------------
-Run this file to start the MCP server.
+Avvio del server SolidWorks MCP (stdio).
 
-Version: 3.0.0
-Author: Samsaam Ali Baig
-
-Usage:
+Uso:
     python solidworks_mcp_server.py
-    
-Or configure in Claude Desktop:
-    {
-        "mcpServers": {
-            "solidworks": {
-                "command": "python",
-                "args": ["path/to/solidworks_mcp_server.py"]
-            }
-        }
-    }
+Configurazione di Claude Desktop / Claude Code: vedi README.md.
 """
 
 import sys

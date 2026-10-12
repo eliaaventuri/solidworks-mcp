@@ -4,11 +4,10 @@ SolidWorks MCP Configuration
 Configuration management with JSON file support.
 """
 
-import os
 import json
 import logging
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -17,49 +16,23 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SolidWorksConfig:
     """
-    SolidWorks MCP Configuration
-    
-    Attributes:
-        exe_path: Path to SLDWORKS.exe ("auto" for auto-detect)
-        startup_timeout: Seconds to wait for SolidWorks startup
-        connection_retry_interval: Seconds between connection retries
-        max_retries: Maximum connection retry attempts
-        default_unit: Default unit for dimensions (mm, inch, m)
-        part_template: Part template path ("auto" for auto-detect)
-        assembly_template: Assembly template path
-        drawing_template: Drawing template path
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        log_file: Log file name
+    Configurazione del server (solidworks_mcp/config.json). Solo le chiavi lette davvero dal codice:
+        exe_path: percorso di SLDWORKS.exe ("auto" = ricerca automatica)
+        startup_timeout: secondi di attesa all'avvio di SolidWorks
+        connection_retry_interval: secondi fra due tentativi di connessione durante l'avvio
+        default_unit: unita' predefinita delle quote (mm, cm, m, inch, ft)
+        log_level: DEBUG, INFO, WARNING, ERROR
+        log_file: nome del file di log (nella cartella del pacchetto)
+    I template di pezzo/assieme/disegno non si configurano: li chiede a SolidWorks (Opzioni > Modelli predefiniti).
     """
-    
-    # SolidWorks paths
+
     exe_path: str = "auto"
-    part_template: str = "auto"
-    assembly_template: str = "auto"
-    drawing_template: str = "auto"
-    
-    # Connection settings
     startup_timeout: int = 120
     connection_retry_interval: int = 5
-    max_retries: int = 3
-    
-    # Units
     default_unit: str = "mm"
-    
-    # Logging
     log_level: str = "INFO"
     log_file: str = "solidworks_mcp.log"
-    
-    # Feature defaults (in default_unit)
-    default_extrude_depth: float = 10.0
-    default_fillet_radius: float = 2.0
-    default_chamfer_distance: float = 2.0
-    default_circle_radius: float = 25.0
-    
-    # View capture defaults
-    capture_width: int = 1920
-    capture_height: int = 1080
-    
+
     def __post_init__(self):
         """Validate configuration after initialization"""
         valid_units = ["mm", "inch", "m", "cm", "ft"]
@@ -98,7 +71,11 @@ class SolidWorksConfig:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 logger.info(f"Loaded config from: {config_path}")
-                return cls(**data)
+                known = set(cls.__dataclass_fields__)
+                unknown = sorted(set(data) - known)
+                if unknown:                 # chiavi vecchie o sbagliate: ignorate, non fanno perdere le altre
+                    logger.warning(f"Config: chiavi ignorate {unknown}")
+                return cls(**{k: v for k, v in data.items() if k in known})
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in config file: {e}")
             except TypeError as e:

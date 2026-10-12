@@ -19,53 +19,19 @@ Output: test_output\\ (file b5_*, b6_*)
 
 import os
 import sys
-import json
 import math
 import asyncio
 import subprocess
 from datetime import timedelta
-from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "test_output"
-OUT.mkdir(exist_ok=True)
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-SERVER = ROOT / "solidworks_mcp_server.py"
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client
 PI = math.pi
 TOL = 0.005          # 0,5 %
 
 RESULTS = []         # (tool, PASS/FAIL, nota)
-
-
-def sw_pids():
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"],
-                         capture_output=True, text=True).stdout
-    pids = set()
-    for line in out.splitlines():
-        parts = [p.strip('"') for p in line.split('","')]
-        if len(parts) > 1 and parts[0].strip('"').lower() == "sldworks.exe":
-            pids.add(int(parts[1]))
-    return pids
-
-
-class Client:
-    def __init__(self, session):
-        self.s = session
-
-    async def call(self, tool_name, /, **args):
-        r = await self.s.call_tool(tool_name, args)
-        text = "".join(c.text for c in r.content if hasattr(c, "text"))
-        ok = text.startswith("[SUCCESS]")
-        data = {}
-        if "Details: " in text:
-            try:
-                data = json.loads(text.split("Details: ", 1)[1])
-            except Exception:
-                data = {}
-        return ok, text, data
 
 
 def record(tool, ok, note=""):
@@ -162,7 +128,7 @@ async def run():
         async with stdio_client(params) as (rd, wr):
             async with ClientSession(rd, wr, read_timeout_seconds=timedelta(seconds=600)) as session:
                 await session.initialize()
-                c = Client(session)
+                c = Client(session, auto_overwrite=False)
                 tl = (await session.list_tools()).tools
                 tools = [t.name for t in tl]
                 print(f"{len(tools)} tool esposti")

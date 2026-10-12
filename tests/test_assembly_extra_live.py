@@ -18,54 +18,18 @@ Uso:  .venv\\Scripts\\python.exe tests\\test_assembly_extra_live.py [C1 C2 ...] 
 
 import os
 import sys
-import json
 import math
 import asyncio
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "test_output"
-OUT.mkdir(exist_ok=True)
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-SERVER = ROOT / "solidworks_mcp_server.py"
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup
 PI = math.pi
 TOL = 2e-3             # mm
-OVERWRITE_TOOLS = {"save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot", "create_drawing"}
 RESULTS = []
-
-
-def sw_pids():
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
-    pids = set()
-    for line in out.splitlines():
-        parts = [p.strip('"') for p in line.split('","')]
-        if len(parts) > 1 and parts[0].strip('"').lower() == "sldworks.exe":
-            pids.add(int(parts[1]))
-    return pids
-
-
-class Client:
-    def __init__(self, session):
-        self.s = session
-
-    async def call(self, tool_name, /, **args):
-        if tool_name in OVERWRITE_TOOLS:
-            args.setdefault("overwrite", True)
-        r = await self.s.call_tool(tool_name, args)
-        text = "".join(c.text for c in r.content if hasattr(c, "text"))
-        ok = text.startswith("[SUCCESS]")
-        data = {}
-        if "Details: " in text:
-            try:
-                data = json.loads(text.split("Details: ", 1)[1])
-            except Exception:
-                data = {}
-        return ok, text, data
 
 
 def record(name, ok, note=""):
@@ -179,15 +143,6 @@ async def run():
     finally:
         cleanup(my_pid, elia_pids)
     return True
-
-
-def cleanup(my_pid, elia_pids):
-    import time
-    if my_pid and my_pid in sw_pids():
-        subprocess.run(["taskkill", "/PID", str(my_pid), "/F"], capture_output=True)
-    time.sleep(3)
-    left = sw_pids() - elia_pids
-    print(f"Processi SolidWorks orfani dopo il test: {sorted(left)}; istanza utente intatta: {elia_pids <= sw_pids()}")
 
 
 # ============================================================================================ pezzi
@@ -620,6 +575,7 @@ async def c5_accoppiamenti_avanzati(c):
     record("accoppiamento di tipo 'limite distanza' con intervallo 5..20 mm letto dal modello", d.get("limits") == {"min": 5.0, "max": 20.0} and d.get("value") == 10.0, f"{d.get('feature_type')} {d.get('limits')}")
     p, _, _ = await pos_of(c, "cx_blocco-1")
     record("posizione nominale: faccia del blocco a 10 mm dalla piastra (origine x = 20)", abs(p[0] - 20) < TOL, f"{p}")
+    prev = None                       # ultimo valore accettato (i primi casi sono nel limite)
     for v, exp_ok in ((15, True), (19.9, True), (5.5, True), (25, False), (3, False)):
         ok, text, dd = await c.call("edit_mate", name=name, value=v)
         p, _, _ = await pos_of(c, "cx_blocco-1")

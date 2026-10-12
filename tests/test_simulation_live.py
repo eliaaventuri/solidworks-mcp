@@ -17,60 +17,22 @@ Uso:  .venv\\Scripts\\python.exe tests\\test_simulation_live.py       Output: te
 
 import os
 import sys
-import json
 import math
 import asyncio
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-OUT = ROOT / "test_output"
-OUT.mkdir(exist_ok=True)
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-SERVER = ROOT / "solidworks_mcp_server.py"
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup
 
-OVERWRITE_TOOLS = {"save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot", "create_drawing"}
 RESULTS = []
 
 # trave: X 0..200, Y +-10, Z +-5 (estrusione dal Piano frontale, normale X)
 L, BW, H = 200.0, 20.0, 10.0
 FORCE = 100.0
 I_BEAM = BW * H ** 3 / 12.0          # 1666.67 mm4 (flessione attorno a y, carico lungo z)
-
-
-def sw_pids():
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"],
-                         capture_output=True, text=True).stdout
-    pids = set()
-    for line in out.splitlines():
-        parts = [p.strip('"') for p in line.split('","')]
-        if len(parts) > 1 and parts[0].strip('"').lower() == "sldworks.exe":
-            pids.add(int(parts[1]))
-    return pids
-
-
-class Client:
-    def __init__(self, session):
-        self.s = session
-
-    async def call(self, tool_name, /, **args):
-        if tool_name in OVERWRITE_TOOLS:       # gruppo B: i file di test_output vengono riscritti a ogni esecuzione
-            args.setdefault("overwrite", True)
-        r = await self.s.call_tool(tool_name, args)
-        text = "".join(c.text for c in r.content if hasattr(c, "text"))
-        ok = text.startswith("[SUCCESS]")
-        data = {}
-        if "Details: " in text:
-            try:
-                data = json.loads(text.split("Details: ", 1)[1])
-            except Exception:
-                data = {}
-        return ok, text, data
 
 
 def record(name, ok, note=""):
@@ -158,15 +120,6 @@ async def run():
     finally:
         cleanup(my_pid, elia_pids)
     return True
-
-
-def cleanup(my_pid, elia_pids):
-    import time
-    if my_pid and my_pid in sw_pids():
-        subprocess.run(["taskkill", "/PID", str(my_pid), "/F"], capture_output=True)
-    time.sleep(3)
-    left = sw_pids() - elia_pids
-    print(f"Processi SolidWorks orfani dopo il test: {sorted(left)}; istanza utente intatta: {elia_pids <= sw_pids()}")
 
 
 async def delete_loads(c, keep_restraints=True):

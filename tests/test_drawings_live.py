@@ -10,7 +10,6 @@ Output: C:\\Users\\elia\\Downloads\\solidworks-mcp\\test_output\\
 
 import os
 import sys
-import json
 import asyncio
 import subprocess
 from datetime import timedelta
@@ -19,48 +18,13 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "test_output"
-OUT.mkdir(exist_ok=True)
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client
 PART = OUT / "prova_disegno.SLDPRT"
 PIN = OUT / "perno_prova.SLDPRT"
 ASM = OUT / "prova_assieme.SLDASM"
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
-SERVER = ROOT / "solidworks_mcp_server.py"
 
 MY_PID = None
-OVERWRITE_TOOLS = {"save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot", "create_drawing"}
 RESULTS = []   # (tool, PASS/FAIL, note)
-
-
-def sw_pids():
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"],
-                         capture_output=True, text=True).stdout
-    pids = set()
-    for line in out.splitlines():
-        parts = [p.strip('"') for p in line.split('","')]
-        if len(parts) > 1 and parts[0].strip('"').lower() == "sldworks.exe":
-            pids.add(int(parts[1]))
-    return pids
-
-
-class Client:
-    def __init__(self, session):
-        self.s = session
-
-    async def call(self, tool_name, /, **args):
-        if tool_name in OVERWRITE_TOOLS:       # gruppo B: i file di test_output vengono riscritti a ogni esecuzione
-            args.setdefault("overwrite", True)
-        r = await self.s.call_tool(tool_name, args)
-        text = "".join(c.text for c in r.content if hasattr(c, "text"))
-        ok = text.startswith("[SUCCESS]")
-        data = {}
-        if "Details: " in text:
-            try:
-                data = json.loads(text.split("Details: ", 1)[1])
-            except Exception:
-                data = {}
-        return ok, text, data
 
 
 def record(tool, ok, note=""):

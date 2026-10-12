@@ -1,0 +1,21 @@
+# Test senza SolidWorks a ogni push e pull request: registro dei tool, smistamento, sicurezza, lettori dei file.
+# I test live (tests/test_*_live.py) richiedono Windows + SolidWorks e si eseguono solo sul PC.
+name: test offline
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "mcp>=1.0.0,<2" pyflakes
+      - run: python tests/test_offline.py
+      - name: pyflakes (solo nomi non definiti)
+        run: |
+          python -m pyflakes solidworks_mcp tests | grep -E "undefined name" && exit 1 || exit 0

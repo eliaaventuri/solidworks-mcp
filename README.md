@@ -65,7 +65,8 @@ claude mcp add solidworks -- C:\percorso\solidworks-mcp\.venv\Scripts\python.exe
 Avviare SolidWorks, riavviare il client e chiedere *"collegati a SolidWorks"*.
 
 ## Configurazione
-- `solidworks_mcp/config.json`: percorso di `SLDWORKS.exe` e dei template (`auto` = li chiede a SolidWorks), unita' predefinita, timeout, livello di log.
+- `solidworks_mcp/config.json`: percorso di `SLDWORKS.exe` (`auto` = ricerca automatica), timeout di avvio, unita' predefinita, livello e file di log.
+  I template di pezzo/assieme/disegno sono quelli predefiniti di SolidWorks (Opzioni > Modelli predefiniti).
 - Variabili d'ambiente:
   - `SW_MCP_INSTANCE=dedicated`: invece di usare il SolidWorks aperto dall'utente, il server avvia una **propria istanza nascosta** e
     alla fine chiude solo quella (e' la modalita' dei test).
@@ -77,6 +78,7 @@ python tests/test_offline.py                         # senza SolidWorks, anche s
 .venv\Scripts\python.exe tests\test_modeling_live.py  # con SolidWorks (istanza dedicata): uno script per area, vedi ATLANTE.md
 ```
 I test live costruiscono i pezzi solo tramite i tool MCP e confrontano i numeri con i valori attesi; esiti in `STATO.md`.
+Il test offline gira anche su GitHub a ogni push (`.github/workflows/test-offline.yml`).
 
 ## Documentazione
 - `STATO.md`: stato attuale ed esiti dei test. `STATO_STORICO.md`: diario completo e trappole dell'API di SolidWorks.

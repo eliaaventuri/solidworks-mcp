@@ -83,24 +83,25 @@ def test_registry():
            f"{len(names)} tool, duplicati {dups}")
 
     dispatch = {}
-    for d in (srv.MODELING_DISPATCH, srv.SIMULATION_DISPATCH, srv.DATA_DISPATCH, srv.ASSEMBLY_DISPATCH, srv.DRAWING_DISPATCH):
-        for k, v in d.items():
-            dispatch.setdefault(k, v)
-    src = (ROOT / "solidworks_mcp" / "server.py").read_text(encoding="utf-8")
     problems = []
+    for d in srv.DISPATCH_TABLES:
+        for k, v in d.items():
+            if k in dispatch:
+                problems.append(f"{k}: in due tabelle di smistamento")
+            dispatch.setdefault(k, v)
     for t in tools:
         schema = t.inputSchema or {}
         props = set(schema.get("properties", {}))
         req = set(schema.get("required", []))
         if req - props:
             problems.append(f"{t.name}: required fuori dalle proprieta' {sorted(req - props)}")
-        handled_elif = f'name == "{t.name}"' in src
+        special = t.name in srv.SPECIAL_HANDLERS
         if t.name not in dispatch:
-            if not handled_elif:
+            if not special:
                 problems.append(f"{t.name}: nessuno smistamento")
             continue
-        if handled_elif:
-            problems.append(f"{t.name}: smistato due volte (elif e dispatch)")
+        if special:
+            problems.append(f"{t.name}: smistato due volte (gestore speciale e tabella)")
         method, allowed = dispatch[t.name]
         fn = getattr(SolidWorksAutomation, method, None)
         if fn is None:
@@ -118,18 +119,80 @@ def test_registry():
                   if v.default is inspect.Parameter.empty and v.kind not in (v.VAR_KEYWORD, v.VAR_POSITIONAL)}
         if needed - req:
             problems.append(f"{t.name}: {method}() richiede {sorted(needed - req)} ma lo schema non li dichiara required")
-    orphans = sorted(k for k in dispatch if k not in names)
+    orphans = sorted(k for k in list(dispatch) + list(srv.SPECIAL_HANDLERS) if k not in names)
     if orphans:
         problems.append(f"smistamenti senza tool: {orphans}")
     record("schema / smistamento / firma dei metodi coerenti per ogni tool", not problems, "; ".join(problems[:8]))
 
     unknown = sorted(n for n in list(safety.DESTRUCTIVE_TOOLS) + list(safety.OVERWRITE_GUARDS) if n not in names)
     record("safety.py nomina solo tool esistenti", not unknown, str(unknown))
-    bad =[t.name for t in tools if t.name in safety.DESTRUCTIVE_TOOLS and
+    bad = [t.name for t in tools if t.name in safety.DESTRUCTIVE_TOOLS and
            not (t.annotations and t.annotations.destructiveHint and "[DISTRUTTIVO" in (t.description or ""))]
     record("tool distruttivi annotati (destructiveHint + nota)", not bad, str(bad))
     no_ow = [t.name for t in tools if t.name in safety.OVERWRITE_GUARDS and "overwrite" not in (t.inputSchema or {}).get("properties", {})]
     record("tool che scrivono file espongono overwrite", not no_ow, str(no_ow))
+
+
+# ============================================================================ smistamento end-to-end (call_tool)
+class _FakeAutomation:
+    """Al posto di SolidWorksAutomation: registra metodo e argomenti invece di parlare con SolidWorks."""
+
+    def __init__(self):
+        self.calls = []
+        self._units = types.SimpleNamespace(default_unit="mm")
+
+    def _result(self, success, message, error_code=0, data=None):
+        return SolidWorksAutomation._result(self, success, message, error_code, data)
+
+    def __getattr__(self, name):
+        def method(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            return {"success": True, "message": name, "error_code": 0, "error_name": "swSuccess", "data": {}}
+        return method
+
+
+def test_call_tool(tmp):
+    real = srv.sw_automation
+    fake = _FakeAutomation()
+    srv.sw_automation = fake
+    try:
+        def call(name, args):
+            fake.calls.clear()
+            out = asyncio.run(srv.call_tool(name, args))
+            return out[0].text, list(fake.calls)
+
+        text, calls = call("draw_arc", {"cx": 1, "cy": 2, "radius": 3, "start_angle": 10, "end_angle": 80, "unit": "mm", "extra": 9})
+        record("call_tool: draw_arc -> draw_arc_center con i soli parametri ammessi",
+               calls == [("draw_arc_center", (), {"cx": 1, "cy": 2, "radius": 3, "start_angle": 10, "end_angle": 80, "unit": "mm"})],
+               str(calls))
+        text, calls = call("connect_solidworks", {})
+        record("call_tool: connect_solidworks -> connect()", calls == [("connect", (), {})], str(calls))
+        text, calls = call("close_document", {"discard": True})
+        record("call_tool: close_document passa discard", calls == [("close_document", (), {"discard": True})], str(calls))
+        existing = os.path.join(tmp, "gia.step")
+        open(existing, "w").close()
+        text, calls = call("export_model", {"filepath": existing})
+        record("call_tool: export_model su file esistente rifiutato prima del metodo", not calls and "Rifiutato" in text, text[:80])
+        text, calls = call("set_units", {"unit": "inch"})
+        record("call_tool: set_units cambia l'unita' predefinita", fake._units.default_unit == "inch" and "SUCCESS" in text, text[:60])
+        text, calls = call("execute_python", {})
+        record("call_tool: execute_python senza codice -> errore", text.startswith("[ERROR]") and not calls, text[:60])
+        text, calls = call("tool_inesistente", {})
+        record("call_tool: tool sconosciuto -> errore", "Unknown tool" in text, text[:60])
+
+        tools = asyncio.run(srv.list_tools())
+        failed = []
+        for t in tools:
+            if t.name in srv.SPECIAL_HANDLERS:
+                continue
+            text, calls = call(t.name, {})
+            if not calls or text.startswith("[ERROR]"):
+                failed.append(t.name)
+        record("call_tool: ogni tool di tabella raggiunge il suo metodo", not failed, str(failed[:10]))
+    finally:
+        srv.sw_automation = real
+        from solidworks_mcp.utils import set_default_unit
+        set_default_unit("mm")
 
 
 # ============================================================================ sicurezza
@@ -338,6 +401,20 @@ def test_materials(tmp):
     record("ricerca materiale: inesistente -> errore", hit is None and bool(err), err)
 
 
+# ============================================================================ configurazione
+def test_config(tmp):
+    from solidworks_mcp.config import SolidWorksConfig
+    import json
+    p = os.path.join(tmp, "config.json")
+    with open(p, "w") as f:
+        json.dump({"exe_path": "C:/SW/SLDWORKS.exe", "default_unit": "inch", "capture_width": 1920, "part_template": "auto"}, f)
+    c = SolidWorksConfig.load(p)
+    record("config: chiavi vecchie ignorate senza perdere le altre", c.exe_path == "C:/SW/SLDWORKS.exe" and c.default_unit == "inch")
+    with open(ROOT / "solidworks_mcp" / "config.json", encoding="utf-8") as f:
+        shipped = json.load(f)
+    record("config.json contiene solo chiavi note", set(shipped) <= set(SolidWorksConfig.__dataclass_fields__), str(sorted(shipped)))
+
+
 # ============================================================================ unita'
 def test_units():
     u = UnitConverter("mm")
@@ -349,9 +426,11 @@ def test_units():
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
-        for name, fn in (("registro", test_registry), ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
+        for name, fn in (("registro", test_registry), ("call_tool", lambda: test_call_tool(tmp)),
+                         ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
                          ("lettori", lambda: test_inspectors(tmp)),
-                         ("materiali", lambda: test_materials(tmp)), ("unita'", test_units)):
+                         ("materiali", lambda: test_materials(tmp)),
+                         ("configurazione", lambda: test_config(tmp)), ("unita'", test_units)):
             try:
                 fn()
             except Exception as e:

@@ -1,14 +1,12 @@
 """
 SolidWorks MCP Package
 ----------------------
-Model Context Protocol server for SolidWorks automation.
-
-Version: 3.0.0
-Author: Samsaam Ali Baig
+Server Model Context Protocol per usare SolidWorks da Claude (196 tool).
+Derivato da alisamsam/solidworks-mcp (Samsaam Ali Baig, licenza MIT) e riscritto da Elia (elo-savage).
 """
 
-__version__ = "3.0.0"
-__author__ = "Samsaam Ali Baig"
+__version__ = "5.0.0"
+__author__ = "Elia (elo-savage)"
 
 from .automation import SolidWorksAutomation
 from .config import get_config, reload_config, save_config, SolidWorksConfig
