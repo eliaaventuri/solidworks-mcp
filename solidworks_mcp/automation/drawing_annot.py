@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.sw_lang import drawing_text, all_drawing_texts
 
 logger = logging.getLogger(__name__)
 
@@ -535,9 +536,9 @@ class DrawingAnnotMixin:
         labels = sorted(set(l.replace("\u00b0", "") for l in labels))
         if not labels:
             return False
-        text = "SMUSSI NON QUOTATI: " + ", ".join(labels).replace(".", ",")
+        text = drawing_text("chamfer_note", self._ui_language()) + ": " + ", ".join(labels).replace(".", ",")
         for a in self._dq_annotations(doc):
-            if a["kind"] == "note" and str(a.get("text", "")).startswith("SMUSSI NON QUOTATI"):
+            if a["kind"] == "note" and str(a.get("text", "")).startswith(all_drawing_texts("chamfer_note")):
                 return False
         W, H, _ = self._sheet_dims(doc)
         w_est = self._dq_text_w(text, 0.0035) + 0.004

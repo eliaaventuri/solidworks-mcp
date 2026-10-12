@@ -45,6 +45,7 @@ def _stub_com():
         def __init__(self, vt, value):
             self.varianttype, self.value = vt, value
     client.VARIANT = VARIANT
+    client.CDispatch = type("CDispatch", (), {})
     client.Dispatch = client.DispatchEx = client.GetActiveObject = client.GetObject = lambda *a, **k: None
     pc = sys.modules["pythoncom"]
     for k, v in dict(VT_EMPTY=0, VT_I2=2, VT_I4=3, VT_R8=5, VT_BSTR=8, VT_DISPATCH=9, VT_BOOL=11, VT_VARIANT=12, VT_UI4=19,
@@ -563,6 +564,51 @@ def test_pdf3d(tmp):
     record("D10: inspect_export_file riporta pdf3d senza cambiare has_3d", r.get("has_3d") and r.get("pdf3d", {}).get("prc_ok"), str(r.get("pdf3d", {}).get("notes")))
 
 
+# ============================================================================ lingua di SolidWorks (italiano / inglese)
+class _Feat:
+    def __init__(self, name, typ):
+        self.Name, self.GetTypeName2, self.GetNextFeature, self.selected = name, typ, None, False
+
+    def Select2(self, append, mark):
+        self.selected = True
+        return True
+
+
+def _tree(names_types):
+    feats = [_Feat(n, t) for n, t in names_types]
+    for a, b in zip(feats, feats[1:]):
+        a.GetNextFeature = b
+    return types.SimpleNamespace(FirstFeature=feats[0]), feats
+
+
+def test_language():
+    from solidworks_mcp.utils import sw_lang as L
+    idx = [L.std_plane_index(n) for n in ("Front", "front plane", "Piano frontale", "FRONTALE", "Top Plane", "piano superiore",
+                                            "Right", "Piano  destro", "Piano1", "Plane1", "")]
+    record("lingua: piani standard riconosciuti in italiano e inglese", idx == [0, 0, 0, 0, 1, 1, 2, 2, None, None, None], str(idx))
+    record("lingua: origine", L.is_origin_name("Origine") and L.is_origin_name("origin") and not L.is_origin_name("Origin1"))
+    record("lingua: grafici della simulazione (Stress1 / Sollecitazione1)",
+           L.plot_candidates("von_mises", ["Stress1", "Displacement1", "Strain1"]) == ["Stress1"]
+           and L.plot_candidates("displacement", ["Sollecitazione1", "Spostamento1"]) == ["Spostamento1"]
+           and L.plot_candidates("Grafico7", ["Grafico7"]) == ["Grafico7"] and L.plot_candidates("strain", ["Stress1"]) == [])
+    record("lingua: errore del cartiglio ERRORE:/ERROR:",
+           L.TITLE_BLOCK_ERROR_RE.findall("x ERRORE:DrawnBy y ERROR:Weight") == ["DrawnBy", "Weight"])
+    record("lingua: cartelle lang (prima quella di SolidWorks)", L.lang_folders("english") == ["english", "italian"]
+           and L.lang_folders("Italian") == ["italian", "english"] and L.lang_folders("") == ["english", "italian"])
+    record("lingua: testi delle tavole", L.drawing_text("aux_view", "italian") == "VISTA" and L.drawing_text("aux_view", "english") == "VIEW"
+           and L.drawing_text("chamfer_note", "") == "SMUSSI NON QUOTATI" and L.format_suffix("english") == " en" and L.format_suffix("italian") == "")
+    sw = SolidWorksAutomation()
+    for lang, names in (("italiano", ("Annotazioni", "Origine", "Piano frontale", "Piano superiore", "Piano destro", "Schizzo1")),
+                        ("inglese", ("Annotations", "Origin", "Front Plane", "Top Plane", "Right Plane", "Sketch1"))):
+        doc, feats = _tree(zip(names, ("DetailCabinet", "OriginProfileFeature", "RefPlane", "RefPlane", "RefPlane", "ProfileFeature")))
+        got = [sw._std_ref_feature(doc, q) for q in ("Front", "Piano superiore", "Right Plane", "origin", "Origine", "Schizzo1")]
+        record(f"lingua: piani standard e origine trovati per posizione/tipo in un albero {lang}",
+               [g.Name if g else None for g in got] == [names[2], names[3], names[4], names[1], names[1], None],
+               str([g.Name if g else None for g in got]))
+        record(f"lingua: _select_std_plane('Piano frontale') seleziona il 1° piano ({lang})",
+               sw._select_std_plane(doc, "Piano frontale") and feats[2].selected)
+
+
 # ============================================================================ configurazione
 def test_config(tmp):
     from solidworks_mcp.config import SolidWorksConfig
@@ -593,7 +639,7 @@ def main():
                          ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
                          ("lettori", lambda: test_inspectors(tmp)),
                          ("materiali", lambda: test_materials(tmp)),
-                         ("configurazione", lambda: test_config(tmp)),
+                         ("configurazione", lambda: test_config(tmp)), ("lingua", test_language),
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units)):
             try:

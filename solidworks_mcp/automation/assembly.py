@@ -46,8 +46,6 @@ CONSTRAINED = {1: "sconosciuto", 2: "sottovincolato", 3: "completamente vincolat
 ADD_MATE_ERRORS = {0: "errore sconosciuto", 1: "nessun errore", 2: "tipo di accoppiamento non adatto alle entita'",
                    3: "allineamento non valido", 4: "selezioni non valide", 5: "assieme sovravincolato",
                    6: "rapporto di ingranaggio non valido"}
-_PLANE_ALIASES = {"front plane": "Piano frontale", "top plane": "Piano superiore", "right plane": "Piano destro",
-                  "origin": "Origine", "frontale": "Piano frontale", "superiore": "Piano superiore", "destro": "Piano destro"}
 _AXIS_DIR = {"x": (0, False), "+x": (0, False), "-x": (0, True), "y": (1, False), "+y": (1, False), "-y": (1, True),
              "z": (2, False), "+z": (2, False), "-z": (2, True)}
 
@@ -300,14 +298,13 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             f = None
         if f is not None:
             return f
-        alias = _PLANE_ALIASES.get(fname.lower())
-        if alias:
-            try:
-                f = comp.FeatureByName(alias)
-            except Exception:
-                f = None
-            if f is not None:
-                return f
+        # piani standard e origine per posizione/tipo: "Piano frontale" e "Front Plane" valgono in ogni lingua di SolidWorks
+        try:
+            f = self._std_ref_feature(comp, fname)
+        except Exception:
+            f = None
+        if f is not None:
+            return f
         # confronto senza maiuscole sulle feature del componente
         try:
             g = self._com(comp, "FirstFeature")
@@ -405,7 +402,7 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                     if key in spec:
                         if comp is None:
                             return None, f"'{key}' richiede anche 'component'"
-                        f = self._as_feature_of(comp, str(spec[key]) if key != "origin" else "Origine")
+                        f = self._as_feature_of(comp, str(spec[key]) if key != "origin" else "origin")
                         if f is None:
                             return None, f"Feature '{spec[key]}' non trovata in {comp.Name2}"
                         ok = bool(f.Select2(append, mark))
@@ -1024,13 +1021,12 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             return self._as_fail("mirror_components", e)
 
     def _as_feature_of_doc(self, doc, name: str):
-        alias = _PLANE_ALIASES.get(name.lower(), name)
         g = self._com(doc, "FirstFeature")
         while g is not None:
-            if str(self._com(g, "Name")).lower() in (name.lower(), alias.lower()):
+            if str(self._com(g, "Name")).lower() == name.lower():
                 return g
             g = self._com(g, "GetNextFeature")
-        return None
+        return self._std_ref_feature(doc, name)        # piani standard / origine in qualunque lingua
 
     # ====================================================================
     # Accoppiamenti

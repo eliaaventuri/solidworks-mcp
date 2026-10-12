@@ -19,6 +19,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.sw_lang import std_plane_index
 
 logger = logging.getLogger(__name__)
 
@@ -322,17 +323,7 @@ class ModelingBase:
 
     def _std_plane_feature(self, doc, name: str):
         """Piano standard per nome inglese (front/top/right) o italiano, in base alla posizione nell'albero."""
-        idx = {"front": 0, "frontale": 0, "top": 1, "superiore": 1, "right": 2, "destro": 2}
-        low = str(name).lower().replace("piano", "").replace("plane", "").strip()
-        if low not in idx:
-            return None
-        k = idx[low]
-        for n, t, f in self._features(doc):
-            if t == "RefPlane":
-                if k == 0:
-                    return f
-                k -= 1
-        return None
+        return self._std_ref_feature(doc, name) if std_plane_index(name) is not None else None
 
     def _select_edge_or_axis(self, doc, spec, unit, mark=0, append=False, tol_mm=0.05):
         """Direzione / asse: {"edge":[x,y,z]} (spigolo), {"face":[x,y,z]} (faccia piana o cilindrica),

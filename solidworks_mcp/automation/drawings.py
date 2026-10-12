@@ -34,6 +34,7 @@ from .drawing_aux import DrawingAuxMixin
 from .drawing_pos import DrawingPosMixin
 from .drawing_layout import (DrawingLayoutMixin, STD_SCALES, VIEW_PAD, GAP_X, GAP_Y,
                              MARGIN_L, MARGIN_R, MARGIN_T, MARGIN_B)
+from ..utils.sw_lang import lang_folders
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +307,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 return str(p_) if p_.is_file() else ""
         else:
             names = [f"{paper} - {style}.slddrt", f"{paper} - landscape.slddrt"]
-        for lang in ("italian", "english"):
+        for lang in lang_folders(self._ui_language()):
             for n in names:
                 p = os.path.join(root, "lang", lang, "sheetformat", n)
                 if os.path.isfile(p):
@@ -1802,7 +1803,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
         if tpl:
             roots.append(os.path.dirname(os.path.dirname(tpl)))
         for root in roots:
-            for lang in ("italian", "english"):
+            for lang in lang_folders(self._ui_language()):
                 p = os.path.join(root, "lang", lang, "bom-standard.sldbomtbt")
                 if os.path.isfile(p):
                     return p

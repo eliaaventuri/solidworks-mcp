@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 70/70 (2026-10-12, Linux; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 80/80 (2026-10-12, Linux; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -66,10 +66,19 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
     e il file col nome nuovo esiste, rifiuto (prima veniva cancellato e riscritto senza `overwrite`);
   - `tests/test_data_live.py`: refuso `dx_a` -> `dx_b` nella pulizia prima degli export IGES/x_t/x_b/PDF/eDrawings.
 
+## Lingua inglese (G1, 2026-10-12, non ancora provato dal vivo)
+Il server non usa piu' nomi italiani fissi (dettagli in `LIMITI.md`, G1, e in `solidworks_mcp/utils/sw_lang.py`); `connect_solidworks`
+riporta `ui_language`. Le scritte che il server mette sulle tavole (cartiglio dei formati verticali, "VISTA A", nota degli smussi) sono in
+italiano con SolidWorks italiano e in inglese altrimenti; i formati verticali inglesi si generano come `formats/a3 - iso portrait en.slddrt`.
+Come provarlo sul PC: in SolidWorks Strumenti > Opzioni > Generale attivare "Usa lingua inglese" e anche l'opzione dei nomi di feature
+e file in inglese (i nomi delle opzioni sono da controllare; serve riavviare SolidWorks), poi `tests\run_all.py`: i test traducono da soli
+i nomi italiani (`tests/live_common.py`, tabella `_IT_EN`). Un rosso dovuto a un nome inglese diverso si corregge in quella tabella o in
+`sw_lang.py`. Alla fine rimettere le opzioni in italiano. Le preferenze sono globali: farlo quando non si lavora a mano.
+
 ## Prossimo passo (sul PC con SolidWorks, dopo `git pull` di main)
 1. Regressione completa con `.venv\Scripts\python.exe tests\run_all.py` (un test alla volta, istanza dedicata, worker fermato da solo) per confermare A, B, C dopo le modifiche del
    2026-10-12 (smistamento dei tool base, `tests/live_common.py`, config):
    `test_offline`, `test_modeling_live`, `test_modeling_extra_live`, `test_drawings_live`, `test_drawing_quality_live`,
    `test_assembly_live`, `test_assembly_extra_live`, `test_data_live`, `test_simulation_live`. Annotare qui gli esiti; un rosso si corregge prima di andare avanti.
 2. Ripresa dei parziali B4 (posizione dei fori su cilindri) e C5 (ingranaggio/vite/blocco), poi C3: `PIANO_D_E.md`.
-3. Gruppo D e poi E nell'ordine di `PIANO_D_E.md`.
+3. Prova in inglese (G1, sezione sopra), poi gruppo D e poi E nell'ordine di `PIANO_D_E.md`.

@@ -32,7 +32,8 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup, LANG
+from solidworks_mcp.utils.sw_lang import drawing_text
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 RESULTS = []
@@ -639,7 +640,7 @@ async def sheet_verticale(c):
         dxf.unlink()
     okx, _, _ = await c.call("export_drawing", filepath=str(dxf), format="dxf")
     txt = dxf.read_text(encoding="latin-1", errors="ignore") if dxf.exists() else ""
-    record("formato verticale: nessun 'ERRORE:' nel cartiglio (DXF)", okx and "ERRORE" not in txt and "SCALA" in txt and "TITOLO" in txt,
+    record("formato verticale: nessun 'ERRORE:' nel cartiglio (DXF)", okx and "ERROR" not in txt and drawing_text("scale", LANG["ui"]) in txt and drawing_text("title", LANG["ui"]) in txt,
            f"{len(txt)} byte")
     record("formato verticale: cartiglio con ISO 'FORMATO' e 'PESO' e nome file nel DXF", "FORMATO" in txt and "PESO" in txt and "verticale_nome" in txt)
     await c.call("save_drawing", filepath=str(drw))

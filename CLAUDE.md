@@ -1,6 +1,6 @@
 # CLAUDE.md — istruzioni per lavorare su SolidWorks MCP
 
-Server MCP (Python, COM via pywin32) che espone 196 tool per SolidWorks 2026 in italiano. Si lavora in italiano.
+Server MCP (Python, COM via pywin32) che espone 196 tool per SolidWorks 2026 (interfaccia italiana o inglese). Si lavora in italiano.
 Lo sviluppo vero avviene sul PC di Elia (Windows 11 ARM64, SolidWorks 2026 SP4.1 Student, Python x64 in `.venv`).
 
 ## Da leggere all'inizio di ogni sessione
@@ -35,8 +35,11 @@ Lo sviluppo vero avviene sul PC di Elia (Windows 11 ARM64, SolidWorks 2026 SP4.1
 - `solidworks_mcp/automation/`: un mixin per area, riuniti in `SolidWorksAutomation`. Risultati sempre con `self._result(...)`.
 - Late binding pywin32: i membri senza argomenti sono PROPRIETA' (usare l'helper `_com`); array di oggetti COM come
   `VARIANT(VT_ARRAY|VT_DISPATCH/VT_VARIANT, ...)`; parametri per riferimento con `VARIANT(VT_BYREF|...)`.
-- Interfaccia italiana: i piani si chiamano "Piano frontale", "Piano destro"...; per i piani standard usare `_select_std_plane`
-  (1°/2°/3° RefPlane dell'albero), i template si chiedono a SolidWorks, i materiali hanno nomi italiani: mai nomi inglesi fissi.
+- Lingua: il server deve funzionare con SolidWorks in italiano E in inglese. Mai nomi fissi in una lingua: piani standard e origine
+  con `_std_ref_feature` (posizione/tipo), tipi di feature con `GetTypeName2` (uguali in ogni lingua), template chiesti a SolidWorks,
+  cartelle `lang\<lingua>` con `lang_folders(self._ui_language())`. Quando un nome serve per forza (grafici, testi del cartiglio,
+  scritte sulle tavole) va in `solidworks_mcp/utils/sw_lang.py` con entrambe le varianti.
+- Test live: scritti con i nomi italiani; con SolidWorks in inglese `tests/live_common.py` traduce gli argomenti (`L()` per i controlli).
 - Strumenti locali non versionati in `scripts_tmp/` (worker con istanza dedicata, esplorazione della type library).
 
 ## Git

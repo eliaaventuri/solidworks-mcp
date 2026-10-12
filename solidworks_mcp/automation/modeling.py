@@ -30,6 +30,7 @@ import pythoncom
 from ..constants import SwErrors
 from .modeling_base import ModelingBase, null_variant, r8_array
 from .sketch_constraints import SketchConstraintOperations
+from ..utils.sw_lang import lang_folders
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 base = os.path.dirname(base)
         except Exception:
             base = r"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS"
-        for sub in (r"lang\italian\sldmaterials", r"lang\english\sldmaterials", "sldmaterials"):
+        for sub in [os.path.join("lang", lg, "sldmaterials") for lg in lang_folders(self._ui_language())] + ["sldmaterials"]:
             p = os.path.join(base, sub, "solidworks materials.sldmat")
             if os.path.exists(p):
                 return p

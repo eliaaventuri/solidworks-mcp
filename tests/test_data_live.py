@@ -26,7 +26,7 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup, L
 PI = math.pi
 
 RESULTS = []
@@ -154,7 +154,7 @@ async def scenario(c: Client, tools):
     d = await T(c, "list_materials", "AISI 304", query="AISI 304", check=lambda d: d["materials"][0]["name"] == "AISI 304")
     dens304 = d["materials"][0]["density_kg_m3"] if d.get("materials") else None
     d = await T(c, "list_materials", "Lega 6061", category="alluminio", query="Lega 6061")
-    dens6061 = next((m["density_kg_m3"] for m in d.get("materials", []) if m["name"] == "Lega 6061"), None)
+    dens6061 = next((m["density_kg_m3"] for m in d.get("materials", []) if m["name"] == L("Lega 6061")), None)
     print(f"  densita' dalla libreria: AISI 304 {dens304}, Lega 6061 {dens6061}, ABS {dens_abs}")
 
     await T(c, "assign_material", "AISI 304", material="AISI 304", check=lambda d: d["material"] == "AISI 304" and d["title_block_link"])
@@ -395,7 +395,7 @@ async def scenario(c: Client, tools):
     ok, text, d = await c.call("export_drawing", filepath=F("dx_blocco_tav", "dxf"))
     txt = Path(F("dx_blocco_tav", "dxf")).read_text(encoding="latin-1", errors="ignore") if Path(F("dx_blocco_tav", "dxf")).exists() else ""
     record("CARTIGLIO: il materiale 'AISI 304' compare nel DXF", ok and "AISI 304" in txt, f"{txt.count('AISI 304')} occorrenze")
-    record("CARTIGLIO: nessun 'ERRORE' nel testo DXF", len(txt) > 1000 and "ERRORE" not in txt, f"{txt.count('ERRORE')} occorrenze")
+    record("CARTIGLIO: nessun 'ERRORE' nel testo DXF", len(txt) > 1000 and "ERROR" not in txt, f"{txt.count('ERROR')} occorrenze")
     await c.call("close_document", discard=True)       # disegno
     await c.call("activate_document", name="dx_blocco")
     # cambio materiale: il cartiglio segue
@@ -406,8 +406,8 @@ async def scenario(c: Client, tools):
     rm(F("dx_blocco_tav2", "dxf"))
     ok, text, d = await c.call("export_drawing", filepath=F("dx_blocco_tav2", "dxf"))
     txt = Path(F("dx_blocco_tav2", "dxf")).read_text(encoding="latin-1", errors="ignore") if Path(F("dx_blocco_tav2", "dxf")).exists() else ""
-    record("CARTIGLIO: dopo il cambio compare 'Lega 6061' e non piu' 'AISI 304'", ok and "Lega 6061" in txt and "AISI 304" not in txt and "ERRORE" not in txt,
-           f"6061 x{txt.count('Lega 6061')}, 304 x{txt.count('AISI 304')}")
+    record("CARTIGLIO: dopo il cambio compare 'Lega 6061' e non piu' 'AISI 304'", ok and L("Lega 6061") in txt and "AISI 304" not in txt and "ERROR" not in txt,
+           f"6061 x{txt.count(L('Lega 6061'))}, 304 x{txt.count('AISI 304')}")
     await c.call("close_document", discard=True)
     await c.call("activate_document", name="dx_blocco")
     await T(c, "assign_material", "AISI 304 (finale)", material="AISI 304")

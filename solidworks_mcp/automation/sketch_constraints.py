@@ -231,9 +231,10 @@ class SketchConstraintOperations:
             return False, e
         if obj == "origin":
             ok = doc.Extension.SelectByID2("", "EXTSKETCHPOINT", 0, 0, 0, append, mark, null_variant(), 0)
-            if not ok:
-                ok = doc.Extension.SelectByID2("Punto1@Origine", "EXTSKETCHPOINT", 0, 0, 0, append, mark,
-                                               null_variant(), 0)
+            for name in ("Punto1@Origine", "Point1@Origin"):          # nome del punto origine: italiano / inglese
+                if ok:
+                    break
+                ok = doc.Extension.SelectByID2(name, "EXTSKETCHPOINT", 0, 0, 0, append, mark, null_variant(), 0)
             return bool(ok), "origine non selezionabile"
         ok = bool(obj.Select4(append, self._sd(doc, mark)))
         return ok, f"selezione di '{desc}' rifiutata"

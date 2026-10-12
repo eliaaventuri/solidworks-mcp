@@ -32,7 +32,9 @@ Esempi di richieste:
 
 ## Requisiti
 - Windows 10/11 con SolidWorks installato e con licenza. Sviluppato e testato su **SolidWorks 2026 SP4.1** con interfaccia
-  **italiana** (nomi di piani, template e materiali italiani gestiti); altre versioni o lingue non sono state provate.
+  **italiana**. Il server funziona anche con SolidWorks in **inglese**: piani standard e origine si trovano per posizione nell'albero,
+  template e librerie si prendono dalla lingua attuale di SolidWorks, le scritte sulle tavole seguono la lingua (italiano o inglese).
+  La prova completa in inglese non e' ancora stata fatta (vedi `STATO.md`); altre versioni non sono state provate.
 - Python 3.10+ **x64** (anche su Windows ARM64: Python x64 emulato).
 - Per la simulazione: l'add-in SOLIDWORKS Simulation.
 

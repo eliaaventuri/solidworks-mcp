@@ -26,6 +26,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.sw_lang import drawing_text
 
 logger = logging.getLogger(__name__)
 
@@ -423,7 +424,7 @@ class DrawingAuxMixin:
         try:
             ar = self._view_rect(av)
             h = 0.0035
-            txt = f"VISTA {lab}"
+            txt = f"{drawing_text('aux_view', self._ui_language())} {lab}"
             tw = 0.0028 * len(txt)
             x0 = (ar[0] + ar[2]) / 2.0 - tw / 2.0
             y0 = ar[1] - 0.004 - h

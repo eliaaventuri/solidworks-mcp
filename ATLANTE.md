@@ -31,6 +31,7 @@ solidworks_mcp/
   utils/config_table.py       D1: lettura/controllo della tabella delle configurazioni (CSV/JSON) e piano delle modifiche (puro)
   utils/inertia.py            D7: baricentro e tensore d'inerzia in un sistema di coordinate utente (puro)
   utils/pdf3d.py              D10: lettura della struttura 3D di un PDF (stream PRC/U3D, viste), usata da inspect_export_file
+  utils/sw_lang.py            G1: tutto cio' che dipende dalla lingua di SolidWorks (piani standard, grafici, testi delle tavole, cartelle lang)
   automation/                 un mixin per area, riuniti in SolidWorksAutomation (__init__.py)
     base.py                   connessione COM (istanza dell'utente o dedicata con SW_MCP_INSTANCE=dedicated), helper _com, template, piani standard
     documents.py              nuovo/apri/salva/chiudi/elenca; close_document sicuro (save/discard/document), save_document con overwrite

@@ -345,7 +345,7 @@ async def main_assembly(c):
         await T(c, "export_drawing", f"esporta {ext}", filepath=str(p), format=ext)
         record(f"export {ext}: file > 0 byte", p.exists() and p.stat().st_size > 0, f"{p.stat().st_size if p.exists() else 0} B")
     txt = Path(F("asm_main_tavola", "dxf")).read_text(encoding="latin-1", errors="ignore") if Path(F("asm_main_tavola", "dxf")).exists() else ""
-    record("cartiglio senza 'ERRORE'", len(txt) > 1000 and "ERRORE" not in txt, f"{txt.count('ERRORE')} occorrenze")
+    record("cartiglio senza 'ERRORE'", len(txt) > 1000 and "ERROR" not in txt, f"{txt.count('ERROR')} occorrenze")
     record("cartiglio: titolo e peso presenti nel DXF", "asm_main" in txt and "563.5" in txt.replace(",", "."), "")
     await c.call("close_document", discard=True)       # tavola
     await c.call("close_document", discard=True)       # assieme

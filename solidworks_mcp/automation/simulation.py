@@ -38,6 +38,7 @@ import win32com.client
 from win32com.client import VARIANT
 
 from ..constants import SwErrors
+from ..utils.sw_lang import plot_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -875,12 +876,8 @@ class SimulationOperations:
                 return err
             res = st.Results
             names = list(res.GetPlotNames)
-            alias = {"von_mises": ["Sollecitazione1"], "displacement": ["Spostamento1"], "strain": ["Deformazione1"]}
-            name = None
-            for cand in alias.get(str(result).lower(), [result]) + [result]:
-                if cand in names:
-                    name = cand
-                    break
+            cands = plot_candidates(result, names)          # Stress1 / Sollecitazione1 ... in ogni lingua
+            name = cands[0] if cands else None
             if name is None:
                 return self._result(False, f"Grafico '{result}' non trovato: {names}", SwErrors.swInvalidInput)
             if not res.ActivatePlot(name):

@@ -59,6 +59,12 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [ ] E4 Carichi remoti e carico da cuscinetto
 - [ ] E5 Studi non statici: frequenze proprie, buckling, termico stazionario
 
+## Gruppo G — Lingua di SolidWorks
+- [~] G1 Server indipendente dalla lingua (italiano / inglese) -- FATTO nel codice (2026-10-12, `utils/sw_lang.py`): piani standard e
+  origine per posizione/tipo, cartelle lang della lingua attuale, grafici Stress1/Sollecitazione1, ERRORE:/ERROR: del cartiglio,
+  punto origine, scritte delle tavole e formati verticali nella lingua di SolidWorks, `ui_language` in connect_solidworks. Test offline
+  80/80. DA FARE: regressione completa con SolidWorks in inglese (i test traducono i nomi italiani; tabella in `tests/live_common.py`).
+
 ## Gruppo F — Sicurezza e pulizia (decide Elia)
 - [x] F1 `.env` dell'autore con una chiave API OpenRouter esposta: togliere dal repository (resta in .gitignore)
 - [x] F2 `execute_python` esegue codice arbitrario: lasciarlo con avviso nella descrizione del tool

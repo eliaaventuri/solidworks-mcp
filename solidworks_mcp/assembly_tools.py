@@ -17,7 +17,8 @@ _UNIT = (S, "Unita delle misure (default mm)")
 _COMP = (S, "Nome istanza del componente (es. 'perno-1')")
 _COMPS = (A, "Nomi istanza dei componenti (es. ['vite-1'])")
 _ENT = (None, "Entita': 'Piano frontale@perno-1' | 'Assi1@staffa-1' | {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | "
-              "{\"component\":'perno-1',\"plane\":'Piano destro'}")
+              "{\"component\":'perno-1',\"plane\":'Piano destro'}. Piani standard e origine in qualunque lingua: "
+              "'Piano frontale' = 'Front Plane' = 'front' (anche 'top'/'right', 'origin')")
 _POS = (A, "[x,y,z] posizione dell'ORIGINE del componente")
 _ROT = (A, "[rx,ry,rz] rotazione in gradi (X poi Y poi Z, assi dell'assieme)")
 

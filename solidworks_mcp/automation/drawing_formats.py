@@ -22,6 +22,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from ..utils.sw_lang import drawing_text, format_suffix
+
 logger = logging.getLogger(__name__)
 
 PORTRAIT_PAPER_MM = {"A3": (297.0, 420.0), "A2": (420.0, 594.0), "A1": (594.0, 841.0), "A0": (841.0, 1189.0)}
@@ -32,7 +34,8 @@ MM = 0.001
 class DrawingFormatsMixin:
 
     def _pf_path(self, paper: str) -> Path:
-        return FORMATS_DIR / f"{paper.lower()} - iso portrait.slddrt"
+        # un file per lingua delle scritte del cartiglio: italiano = file storici, altre lingue = suffisso ' en'
+        return FORMATS_DIR / f"{paper.lower()} - iso portrait{format_suffix(self._ui_language())}.slddrt"
 
     def _pf_build(self, doc, W: float, H: float, paper: str) -> Dict:
         """Disegna cornice e cartiglio nel formato (siamo in EditTemplate). W, H in mm."""
@@ -93,36 +96,41 @@ class DrawingFormatsMixin:
         line(X0 + 60, Y0 + 30, X0 + 60, Y0 + 70)   # nome | data
         lab, val = 1.8, 3.5
 
+        lang = self._ui_language()
+
+        def T(key):
+            return drawing_text(key, lang)
+
         def cell(label, value, x, y_top, w_cell, h_cell, vh=val):
             note(label, x + 1.0, y_top - 1.0, lab)
             if value:
                 note(value, x + 2.0, y_top - 1.0 - lab - 1.5 - (0.0 if vh <= val else 0.0), vh)
 
         # riga bassa
-        cell("SCALA", '$PRP:"SW-Sheet Scale"', X0, Y0 + 10, 62, 10)
-        cell("FORMATO", paper, X0 + 62, Y0 + 10, 62, 10)
-        cell("FOGLIO", '$PRP:"SW-Current Sheet" / $PRP:"SW-Total Sheets"', X0 + 124, Y0 + 10, 61, 10)
+        cell(T("scale"), '$PRP:"SW-Sheet Scale"', X0, Y0 + 10, 62, 10)
+        cell(T("size"), paper, X0 + 62, Y0 + 10, 62, 10)
+        cell(T("sheet"), '$PRP:"SW-Current Sheet" / $PRP:"SW-Total Sheets"', X0 + 124, Y0 + 10, 61, 10)
         # materiale / n. disegno
-        cell("MATERIALE", '$PRPSHEET:"Material"', X0, Y0 + 30, 92, 20)
-        note("N. DISEGNO", X0 + 93.0, Y0 + 29.0, lab)
+        cell(T("material"), '$PRPSHEET:"Material"', X0, Y0 + 30, 92, 20)
+        note(T("dwg_no"), X0 + 93.0, Y0 + 29.0, lab)
         note('$PRP:"SW-File Name"', X0 + 95.0, Y0 + 25.0, 6.35)
         # titolo
-        note("TITOLO", X0 + 93.0, Y0 + 59.0, lab)
+        note(T("title"), X0 + 93.0, Y0 + 59.0, lab)
         note('$PRPSHEET:"Description"', X0 + 95.0, Y0 + 52.0, 5.0)
         # azienda / revisione
-        cell("AZIENDA", '$PRPSHEET:"CompanyName"', X0 + 92, Y0 + 70, 58, 10)
-        cell("REV.", '$PRPSHEET:"Revision"', X0 + 150, Y0 + 70, 35, 10)
+        cell(T("company"), '$PRPSHEET:"CompanyName"', X0 + 92, Y0 + 70, 58, 10)
+        cell(T("rev"), '$PRPSHEET:"Revision"', X0 + 150, Y0 + 70, 35, 10)
         # firme
-        cell("DISEGNATO", '$PRPSHEET:"DrawnBy"', X0, Y0 + 70, 60, 10, vh=2.5)
-        cell("DATA", '$PRPSHEET:"DrawnDate"', X0 + 60, Y0 + 70, 32, 10, vh=2.5)
-        cell("VERIFICATO", '$PRPSHEET:"CheckedBy"', X0, Y0 + 60, 60, 10, vh=2.5)
-        cell("DATA", '$PRPSHEET:"CheckedDate"', X0 + 60, Y0 + 60, 32, 10, vh=2.5)
-        cell("APPROVATO", '$PRPSHEET:"EngineeringApproval"', X0, Y0 + 50, 60, 10, vh=2.5)
-        cell("DATA", '$PRPSHEET:"EngAppDate"', X0 + 60, Y0 + 50, 32, 10, vh=2.5)
-        cell("PESO [kg]", '$PRPSHEET:"Weight"', X0, Y0 + 40, 92, 10, vh=2.5)
+        cell(T("drawn"), '$PRPSHEET:"DrawnBy"', X0, Y0 + 70, 60, 10, vh=2.5)
+        cell(T("date"), '$PRPSHEET:"DrawnDate"', X0 + 60, Y0 + 70, 32, 10, vh=2.5)
+        cell(T("checked"), '$PRPSHEET:"CheckedBy"', X0, Y0 + 60, 60, 10, vh=2.5)
+        cell(T("date"), '$PRPSHEET:"CheckedDate"', X0 + 60, Y0 + 60, 32, 10, vh=2.5)
+        cell(T("approved"), '$PRPSHEET:"EngineeringApproval"', X0, Y0 + 50, 60, 10, vh=2.5)
+        cell(T("date"), '$PRPSHEET:"EngAppDate"', X0 + 60, Y0 + 50, 32, 10, vh=2.5)
+        cell(T("weight"), '$PRPSHEET:"Weight"', X0, Y0 + 40, 92, 10, vh=2.5)
         # note generali e proiezione
-        note("SE NON SPECIFICATO: QUOTE IN MILLIMETRI", FX0 + 2.0, Y0 + 14.0, 2.5)
-        note("SPIGOLI NETTI - PRIMO DIEDRO (ISO 5456-2)", FX0 + 2.0, Y0 + 9.0, 2.5)
+        note(T("units_note"), FX0 + 2.0, Y0 + 14.0, 2.5)
+        note(T("projection_note"), FX0 + 2.0, Y0 + 9.0, 2.5)
         return {"lines": n_lines, "notes": n_notes, "title_block_mm": [X0, Y0, X1, Y1], "frame_mm": [FX0, FY0, FX1, FY1]}
 
     def ensure_portrait_format(self, paper_size: str) -> Optional[str]:

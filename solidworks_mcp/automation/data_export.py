@@ -10,7 +10,7 @@ Trappole API scoperte (SW 2026 italiano, late binding) — dettagli anche in STA
    (provato: ripetere la chiamata non serve, la selezione nella massa si'); dopo il set si ricostruisce e si ripesca il corpo.
    `Body2.SetMaterialProperty(cfg, db, nome)` / `GetMaterialPropertyName(cfg, ByRef db)` (i metodi `...PropertyName2` NON esistono su Body2;
    su Body2 `db` va dato SENZA percorso/estensione, 'solidworks materials': col percorso restituisce True ma non applica nulla; GetMaterialPropertyName ritorna (nome, db)).
- - Materiali: file `.sldmat` = XML UTF-16 in `lang\\italian\\sldmaterials` (`<classification name=categoria><material name=...>` con
+ - Materiali: file `.sldmat` = XML UTF-16 in `lang\\<lingua di SolidWorks>\\sldmaterials` (`<classification name=categoria><material name=...>` con
    `<DENS value=kg/m3>`). Pezzo: `SetMaterialPropertyName2(config, path_db, nome)`; corpo: `Body2.SetMaterialProperty(...)`.
    `GetMaterialPropertyName2(cfg, ByRef db)` restituisce il nome e il db SENZA percorso/estensione.
    Cartiglio: la proprieta' Material del MODELLO deve essere l'espressione `"SW-Material@<file>"`.
@@ -61,6 +61,7 @@ import pythoncom
 from ..constants import SwErrors
 from .modeling_base import null_variant, r8_array
 from ..utils.pdf3d import inspect_pdf3d
+from ..utils.sw_lang import lang_folders
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +390,7 @@ class DataExportOperations:
                 base = os.path.dirname(base)
         except Exception:
             base = r"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS"
-        for sub in (r"lang\italian\sldmaterials", r"lang\english\sldmaterials", "sldmaterials"):
+        for sub in [os.path.join("lang", lg, "sldmaterials") for lg in lang_folders(self._ui_language())] + ["sldmaterials"]:
             p = os.path.join(base, sub)
             if os.path.isdir(p):
                 return p

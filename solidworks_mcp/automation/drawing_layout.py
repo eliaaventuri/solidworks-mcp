@@ -8,12 +8,12 @@ All lengths are in metres (sheet space), like the SolidWorks API.
 """
 
 import os
-import re
 import logging
 import tempfile
 from typing import Dict, List, Optional, Tuple, Any
 
 from ..constants import SwErrors
+from ..utils.sw_lang import TITLE_BLOCK_ERROR_RE
 
 import win32com.client
 import pythoncom
@@ -516,7 +516,7 @@ class DrawingLayoutMixin:
             if not ok or not os.path.exists(tmp):
                 return []
             txt = open(tmp, "r", encoding="latin-1", errors="ignore").read()
-            return sorted(set(re.findall(r"ERRORE:([A-Za-z0-9_]+)", txt)))
+            return sorted(set(TITLE_BLOCK_ERROR_RE.findall(txt)))      # "ERRORE:<nome>" (it) / "ERROR:<nome>" (en)
         except Exception as e:
             logger.debug(f"missing props probe failed: {e}")
             return []

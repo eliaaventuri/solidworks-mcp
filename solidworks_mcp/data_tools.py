@@ -17,12 +17,12 @@ _ENT = (O, "Entita' per coordinate: {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | {\
 _TOOLS = {
     # ---------------------------------------------------------------- materiali
     "list_materials": ("list_materials",
-        "Libreria materiali SolidWorks (file .sldmat, nomi italiani). Senza argomenti: categorie con conteggio; con `category` "
+        "Libreria materiali SolidWorks (file .sldmat, nomi nella lingua di SolidWorks: 'Lega 6061' in italiano, '6061 Alloy' in inglese). Senza argomenti: categorie con conteggio; con `category` "
         "(es. 'Acciaio', 'Plastiche', 'Leghe di alluminio') o `query` (es. '304', 'ABS'): elenco con densita' kg/m3.",
         {"category": (S, "Categoria (anche parziale)"), "query": (S, "Testo nel nome"),
          "include_properties": (B, "Aggiunge modulo elastico, snervamento, ecc."), "limit": (N, "")}, []),
     "assign_material": ("assign_material",
-        "Assegna un materiale della libreria al pezzo (o a un corpo con `body`): 'AISI 304', 'Lega 6061', 'ABS generico'. Imposta anche "
+        "Assegna un materiale della libreria al pezzo (o a un corpo con `body`): 'AISI 304', 'Lega 6061' (SolidWorks in inglese: '6061 Alloy'). Imposta anche "
         "la proprieta' Material del modello (\"SW-Material@file\") cosi' il cartiglio dei disegni lo mostra.",
         {"material": (S, "Nome materiale (anche parziale se univoco)"), "category": (S, "Restringe la ricerca"),
          "body": (S, "Nome del corpo (default tutto il pezzo)"), "configuration": _CFGS,

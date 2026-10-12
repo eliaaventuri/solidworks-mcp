@@ -19,6 +19,7 @@ import pythoncom
 from ..constants import SwErrors, SwPlanes, SwDocumentTypes, SwViews
 from ..config import get_config
 from ..utils import UnitConverter, find_solidworks, find_template
+from ..utils.sw_lang import std_plane_index, is_origin_name
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,8 @@ class SolidWorksAutomation:
         version = self._com(app, "RevisionNumber")
         return self._result(True, f"Connected to dedicated SolidWorks {version} (PID {proc.pid})",
                             SwErrors.swSuccess,
-                            {"version": str(version), "launched": True, "pid": proc.pid, "dedicated": True})
+                            {"version": str(version), "launched": True, "pid": proc.pid, "dedicated": True,
+                             "ui_language": self._ui_language()})
 
     def _keep_hidden(self):
         """In dedicated mode SolidWorks tends to re-show itself: hide it again (cheap)."""
@@ -284,7 +286,7 @@ class SolidWorksAutomation:
                 
                 return self._result(True, f"Connected to SolidWorks {version}",
                                   SwErrors.swSuccess,
-                                  {"version": str(version), "launched": False})
+                                  {"version": str(version), "launched": False, "ui_language": self._ui_language()})
             
             # Step 2: Find SolidWorks executable
             if self._sw_exe_path is None:
@@ -323,7 +325,8 @@ class SolidWorksAutomation:
                     return self._result(True,
                         f"Launched and connected to SolidWorks {version} (took {elapsed}s)",
                         SwErrors.swSuccess,
-                        {"version": str(version), "launched": True, "startup_time": elapsed})
+                        {"version": str(version), "launched": True, "startup_time": elapsed,
+                         "ui_language": self._ui_language()})
             
             return self._result(False,
                 f"Timeout after {max_wait}s. Close any dialogs and try again.",
@@ -394,17 +397,32 @@ class SolidWorksAutomation:
 
     def _select_std_plane(self, doc, plane: str) -> bool:
         """Select Front/Top/Right plane by position in the tree (works in any UI language)"""
-        index = {"front": 0, "top": 1, "right": 2}.get(plane.lower())
-        if index is None:
-            return False
-        feat = self._com(doc, "FirstFeature")
+        feat = self._std_ref_feature(doc, plane)
+        return bool(feat is not None and feat.Select2(False, 0))
+
+    def _std_ref_feature(self, owner, name: str):
+        """Piano standard (front/top/right, 'Piano frontale', 'Front Plane'...) o origine di un documento o di un componente,
+        trovati per POSIZIONE e TIPO nell'albero: funziona con SolidWorks in qualunque lingua. None se `name` non e' uno di questi."""
+        index = std_plane_index(name)
+        want = "RefPlane" if index is not None else ("OriginProfileFeature" if is_origin_name(name) else None)
+        if want is None:
+            return None
+        index = index or 0
+        feat = self._com(owner, "FirstFeature")
         while feat is not None:
-            if self._com(feat, "GetTypeName2") == "RefPlane":
+            if self._com(feat, "GetTypeName2") == want:
                 if index == 0:
-                    return bool(feat.Select2(False, 0))
+                    return feat
                 index -= 1
             feat = self._com(feat, "GetNextFeature")
-        return False
+        return None
+
+    def _ui_language(self) -> str:
+        """Lingua dell'interfaccia di SolidWorks ('italian', 'english'...), '' se non leggibile."""
+        try:
+            return str(self._com(self._sw_app, "GetCurrentLanguage") or "").lower()
+        except Exception:
+            return ""
 
     def _default_template(self, template_type: str) -> str:
         """Ask SolidWorks for its default template (works with localized names)"""

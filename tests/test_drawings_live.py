@@ -255,8 +255,8 @@ async def scenario(c: Client):
         record(f"export_drawing {ext}", ok and p.exists() and p.stat().st_size > 0,
                f"{p.stat().st_size if p.exists() else 0} B " + ("" if ok else text[:80]))
     txt = dxf_text(OUT / "prova_disegno.dxf")
-    record("QUALITA: nessun 'ERRORE' nel cartiglio (testo DXF)", len(txt) > 1000 and "ERRORE" not in txt,
-           f"{txt.count('ERRORE')} occorrenze")
+    record("QUALITA: nessun 'ERRORE' nel cartiglio (testo DXF)", len(txt) > 1000 and "ERROR" not in txt,
+           f"{txt.count('ERROR')} occorrenze")
     record("QUALITA: cartiglio con titolo, N. disegno e peso", "Piastra" in txt and "bossolo" in txt and "prova_disegno" in txt and "72.13" in txt,
            "titolo/numero/peso presenti" if "72.13" in txt else "peso mancante")
     record("QUALITA: tratteggio presente nella sezione (HATCH nel DXF)", txt.count("HATCH") >= 1, f"{txt.count('HATCH')} HATCH")
@@ -350,7 +350,7 @@ async def scenario(c: Client):
         record(f"export_drawing {ext} (assieme)", ok and p.exists() and p.stat().st_size > 0,
                f"{p.stat().st_size if p.exists() else 0} B")
     txt = dxf_text(OUT / "prova_assieme.dxf")
-    record("QUALITA (assieme): nessun 'ERRORE' nel cartiglio", len(txt) > 1000 and "ERRORE" not in txt, f"{txt.count('ERRORE')} occorrenze")
+    record("QUALITA (assieme): nessun 'ERRORE' nel cartiglio", len(txt) > 1000 and "ERROR" not in txt, f"{txt.count('ERROR')} occorrenze")
 
 
 def add_components(part_path, pin_path):
