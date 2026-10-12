@@ -428,3 +428,14 @@ Codice: nuovo `automation/assembly_explode.py` (C3/C4), nuovo `automation/assemb
 Strumenti di sviluppo: `scripts_tmp/rla.py` (ricarica i mixin degli assiemi nel worker), `cx_lib.py` (pezzi di prova), c*.py/m*.py (prove).
 Regressioni finali (sequenza, istanza dedicata, worker di sviluppo fermo, 0 orfani, istanza utente intatta): test_assembly_extra_live **213/213**, test_drawings_live 65/65, test_modeling_live 175/175, test_modeling_extra_live 240/240, test_assembly_live 113/113, test_data_live 159/159 (196 tool), test_drawing_quality_live 139/139, test_simulation_live 120/120.
 Ultimo aggiornamento: 2026-10-11
+
+
+## Sessione cloud senza SolidWorks (2026-10-12)
+Container Linux: nessun test live eseguibile. Fatto solo cio' che si verifica senza SolidWorks:
+- `tests/test_offline.py` (nuovo): **36/36 PASS** con COM simulato (gira anche su Windows con pywin32, senza usare SolidWorks).
+  Registro dei 196 tool coerente (schema = parametri passati = firma del metodo; nessun tool senza smistamento), `safety.py`,
+  PNG puro Python, lettori dei file esportati, libreria `.sldmat`, unita'. Uso: `python tests/test_offline.py`.
+- `_dx_inspect_step`: nuovi contatori `product_definitions` e `assembly_occurrences` (struttura d'assieme dello STEP, per D6). NON ancora provato su uno STEP vero di SolidWorks.
+- `PIANO_D_E.md` (nuovo): piano per D1-D10 ed E1-E5 con API candidate (marcate "da verificare"), test e numeri attesi
+  (es. mensola 200x20x10 AISI 1020: f1 = 203,2 Hz, Pcr = 20562 N).
+Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.md`, dopo aver rieseguito `test_data_live.py` (controlla il nuovo inspector STEP).

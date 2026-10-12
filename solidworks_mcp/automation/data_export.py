@@ -1155,6 +1155,9 @@ class DataExportOperations:
         info["manifold_solid_brep"] = len(re.findall(r"\bMANIFOLD_SOLID_BREP\b", txt))
         info["advanced_brep"] = len(re.findall(r"\bADVANCED_BREP_SHAPE_REPRESENTATION\b", txt))
         info["advanced_faces"] = len(re.findall(r"\bADVANCED_FACE\b", txt))
+        # struttura d'assieme: un PRODUCT_DEFINITION per pezzo/sottoassieme, un NAUO per ogni istanza di componente
+        info["product_definitions"] = len(re.findall(r"\bPRODUCT_DEFINITION\s*\(", txt))
+        info["assembly_occurrences"] = len(re.findall(r"\bNEXT_ASSEMBLY_USAGE_OCCURRENCE\b", txt))
         info["valid_solid"] = (info["manifold_solid_brep"] + info["advanced_brep"]) > 0 and "END-ISO-10303-21" in txt
         return info
 

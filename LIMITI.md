@@ -43,6 +43,7 @@ Chi lavora su un gruppo aggiorna questo file man mano.
 - C1-C7 chiusi: C1, C2, C4, C6, C7 `[x]`; C3 e C5 `[~]` (rotazione nei passi di traslazione dell'esploso; blocco/ingranaggio/vite non propagati dal solutore via API). Test: `tests/test_assembly_extra_live.py` 213/213. Regressioni in sequenza: drawings 65/65, modeling 175/175, modeling_extra 240/240, assembly 113/113, data 159/159, drawing_quality 139/139, simulation 120/120. Nessun tool nuovo (196). Dettagli in STATO.md, sezione "Limiti gruppo C".
 
 ## Gruppo D — Dati ed export
+Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIANO_D_E.md` (2026-10-12, non ancora provato dal vivo).
 - [ ] D1 Tabella dati (design table): Excel non installato → alternativa: configurazioni generate da tabella CSV/JSON (stessa funzione), più design table vera se Excel presente
 - [ ] D2 STEP AP242 reale
 - [ ] D3 eDrawings `.eprt` verificato (apertura/lettura)

@@ -1,0 +1,367 @@
+"""
+Test OFFLINE: girano senza SolidWorks e senza Windows (pywin32 assente -> moduli COM finti).
+
+Coprono solo cio' che non tocca l'API di SolidWorks:
+  - registro dei tool: 196 tool, nomi unici, ogni tool smistato (elif in server.py o *_DISPATCH), ogni metodo esistente,
+    parametri dello schema = parametri passati al metodo = parametri accettati dal metodo (nessun argomento perso o in piu'),
+    `required` dello schema contenuti nelle proprieta' e uguali ai parametri obbligatori del metodo;
+  - sicurezza (safety.py): rifiuto della sovrascrittura senza overwrite=true, annotazioni dei tool distruttivi;
+  - PNG puro Python (_write_png / _read_png / _resize_png): andata e ritorno, palette, grigio, riduzione;
+  - lettori dei file esportati (inspect_export_file): STL binario/ASCII, 3MF, STEP (AP203/214/242), IGES, Parasolid, PDF;
+  - conversione delle unita' (utils/units.py).
+Non sostituiscono i test live: servono a trovare subito gli errori di registrazione e di logica pura (anche nel cloud).
+
+Uso:  python tests/test_offline.py          (oppure .venv\\Scripts\\python.exe tests\\test_offline.py su Windows)
+"""
+
+import os
+import sys
+import types
+import asyncio
+import inspect
+import struct
+import tempfile
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+
+def _stub_com():
+    """Moduli COM finti se pywin32 non c'e' (Linux/macOS): bastano per importare il pacchetto."""
+    try:
+        import pythoncom  # noqa: F401
+        import win32com.client  # noqa: F401
+        return False
+    except ImportError:
+        pass
+    for n in ("win32com", "win32com.client", "pythoncom", "pywintypes", "win32api", "win32con", "win32process", "win32gui"):
+        sys.modules[n] = types.ModuleType(n)
+    client = sys.modules["win32com.client"]
+    sys.modules["win32com"].client = client
+
+    class VARIANT:
+        def __init__(self, vt, value):
+            self.varianttype, self.value = vt, value
+    client.VARIANT = VARIANT
+    client.Dispatch = client.DispatchEx = client.GetActiveObject = client.GetObject = lambda *a, **k: None
+    pc = sys.modules["pythoncom"]
+    for k, v in dict(VT_EMPTY=0, VT_I2=2, VT_I4=3, VT_R8=5, VT_BSTR=8, VT_DISPATCH=9, VT_BOOL=11, VT_VARIANT=12, VT_UI4=19,
+                     VT_ARRAY=0x2000, VT_BYREF=0x4000, DISPATCH_METHOD=1, DISPATCH_PROPERTYGET=2, DISPATCH_PROPERTYPUT=4,
+                     COINIT_MULTITHREADED=0, COINIT_APARTMENTTHREADED=2).items():
+        setattr(pc, k, v)
+    pc.CoInitialize = pc.CoUninitialize = pc.CoInitializeEx = lambda *a: None
+    pc.com_error = type("com_error", (Exception,), {})
+    sys.modules["pywintypes"].com_error = pc.com_error
+    return True
+
+
+STUBBED = _stub_com()
+
+import solidworks_mcp.server as srv                                   # noqa: E402
+from solidworks_mcp.automation import SolidWorksAutomation             # noqa: E402
+from solidworks_mcp.automation import data_export as dx                # noqa: E402
+from solidworks_mcp import safety                                      # noqa: E402
+from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
+
+RESULTS = []
+EXPECTED_TOOLS = 196
+
+
+def record(name, ok, note=""):
+    RESULTS.append((name, bool(ok), note))
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  -- {note}" if note else ""))
+
+
+# ============================================================================ registro dei tool
+def test_registry():
+    tools = asyncio.run(srv.list_tools())
+    names = [t.name for t in tools]
+    dups = sorted({n for n in names if names.count(n) > 1})
+    record(f"{EXPECTED_TOOLS} tool esposti, nessun duplicato", len(names) == EXPECTED_TOOLS and not dups,
+           f"{len(names)} tool, duplicati {dups}")
+
+    dispatch = {}
+    for d in (srv.MODELING_DISPATCH, srv.SIMULATION_DISPATCH, srv.DATA_DISPATCH, srv.ASSEMBLY_DISPATCH, srv.DRAWING_DISPATCH):
+        for k, v in d.items():
+            dispatch.setdefault(k, v)
+    src = (ROOT / "solidworks_mcp" / "server.py").read_text(encoding="utf-8")
+    problems = []
+    for t in tools:
+        schema = t.inputSchema or {}
+        props = set(schema.get("properties", {}))
+        req = set(schema.get("required", []))
+        if req - props:
+            problems.append(f"{t.name}: required fuori dalle proprieta' {sorted(req - props)}")
+        handled_elif = f'name == "{t.name}"' in src
+        if t.name not in dispatch:
+            if not handled_elif:
+                problems.append(f"{t.name}: nessuno smistamento")
+            continue
+        if handled_elif:
+            problems.append(f"{t.name}: smistato due volte (elif e dispatch)")
+        method, allowed = dispatch[t.name]
+        fn = getattr(SolidWorksAutomation, method, None)
+        if fn is None:
+            problems.append(f"{t.name}: metodo {method} inesistente")
+            continue
+        sig = inspect.signature(fn)
+        params = {p: v for p, v in sig.parameters.items() if p != "self"}
+        varkw = any(v.kind == v.VAR_KEYWORD for v in params.values())
+        if not varkw and allowed - set(params):
+            problems.append(f"{t.name}: {method}() non accetta {sorted(allowed - set(params))}")
+        lost = props - allowed - {"overwrite"}             # overwrite e' consumato dalla guardia in server.py
+        if lost:
+            problems.append(f"{t.name}: proprieta' dello schema mai passate al metodo {sorted(lost)}")
+        needed = {p for p, v in params.items()
+                  if v.default is inspect.Parameter.empty and v.kind not in (v.VAR_KEYWORD, v.VAR_POSITIONAL)}
+        if needed - req:
+            problems.append(f"{t.name}: {method}() richiede {sorted(needed - req)} ma lo schema non li dichiara required")
+    orphans = sorted(k for k in dispatch if k not in names)
+    if orphans:
+        problems.append(f"smistamenti senza tool: {orphans}")
+    record("schema / smistamento / firma dei metodi coerenti per ogni tool", not problems, "; ".join(problems[:8]))
+
+    unknown = sorted(n for n in list(safety.DESTRUCTIVE_TOOLS) + list(safety.OVERWRITE_GUARDS) if n not in names)
+    record("safety.py nomina solo tool esistenti", not unknown, str(unknown))
+    bad =[t.name for t in tools if t.name in safety.DESTRUCTIVE_TOOLS and
+           not (t.annotations and t.annotations.destructiveHint and "[DISTRUTTIVO" in (t.description or ""))]
+    record("tool distruttivi annotati (destructiveHint + nota)", not bad, str(bad))
+    no_ow = [t.name for t in tools if t.name in safety.OVERWRITE_GUARDS and "overwrite" not in (t.inputSchema or {}).get("properties", {})]
+    record("tool che scrivono file espongono overwrite", not no_ow, str(no_ow))
+
+
+# ============================================================================ sicurezza
+def test_safety(tmp):
+    existing = os.path.join(tmp, "esiste.step")
+    open(existing, "w").close()
+    nuovo = os.path.join(tmp, "nuovo.step")
+    record("check_call: file esistente senza overwrite -> rifiuto",
+           safety.check_call("export_model", {"filepath": existing}) is not None)
+    record("check_call: file esistente con overwrite=true -> ammesso",
+           safety.check_call("export_model", {"filepath": existing, "overwrite": True}) is None)
+    record("check_call: file nuovo -> ammesso", safety.check_call("export_model", {"filepath": nuovo}) is None)
+    record("check_call: create_drawing usa save_as",
+           safety.check_call("create_drawing", {"save_as": existing}) is not None)
+    record("check_call: save_document lasciato al metodo",
+           safety.check_call("save_document", {"filepath": existing}) is None)
+    record("check_call: tool non protetto -> None", safety.check_call("get_document_info", {}) is None)
+
+
+# ============================================================================ PNG
+def _gradient(w, h):
+    return [bytes(c for x in range(w) for c in (x * 255 // max(1, w - 1), y * 255 // max(1, h - 1), 128)) for y in range(h)]
+
+
+def _png_chunk(t, d):
+    import zlib
+    c = struct.pack(">I", len(d)) + t + d
+    return c + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+
+
+def _write_png_raw(path, w, h, bd, ct, raw_rows, plte=b""):
+    import zlib
+    raw = b"".join(b"\x00" + r for r in raw_rows)
+    data = b"\x89PNG\r\n\x1a\n" + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, bd, ct, 0, 0, 0))
+    if plte:
+        data += _png_chunk(b"PLTE", plte)
+    data += _png_chunk(b"IDAT", zlib.compress(raw)) + _png_chunk(b"IEND", b"")
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def test_png(tmp):
+    w, h = 40, 30
+    rows = _gradient(w, h)
+    p = os.path.join(tmp, "g.png")
+    dx._write_png(p, w, h, rows)
+    rw, rh, _, back = dx._read_png(p)
+    record("PNG RGB: scrittura e rilettura identiche", (rw, rh) == (w, h) and [bytes(r) for r in back] == rows)
+
+    # palette 2 bit: 4 colori
+    pal = bytes((255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255))
+    idx = [[(x + y) % 4 for x in range(9)] for y in range(3)]
+    packed = []
+    for r in idx:
+        b = bytearray()
+        for i in range(0, len(r), 4):
+            q = r[i:i + 4] + [0] * (4 - len(r[i:i + 4]))
+            b.append(q[0] << 6 | q[1] << 4 | q[2] << 2 | q[3])
+        packed.append(bytes(b))
+    pp = os.path.join(tmp, "pal.png")
+    _write_png_raw(pp, 9, 3, 2, 3, packed, pal)
+    _, _, _, prow = dx._read_png(pp)
+    ok = all(bytes(prow[y][3 * x:3 * x + 3]) == pal[3 * idx[y][x]:3 * idx[y][x] + 3] for y in range(3) for x in range(9))
+    record("PNG palette 2 bit -> RGB", ok)
+
+    gp = os.path.join(tmp, "grey.png")
+    _write_png_raw(gp, 4, 2, 8, 0, [bytes((0, 85, 170, 255))] * 2)
+    _, _, _, grow = dx._read_png(gp)
+    record("PNG grigio 8 bit -> RGB", bytes(grow[0]) == bytes(c for v in (0, 85, 170, 255) for c in (v, v, v)))
+
+    ap = os.path.join(tmp, "rgba.png")
+    _write_png_raw(ap, 2, 1, 8, 6, [bytes((10, 20, 30, 255, 40, 50, 60, 0))])
+    _, _, _, arow = dx._read_png(ap)
+    record("PNG RGBA -> RGB (alfa scartato)", bytes(arow[0]) == bytes((10, 20, 30, 40, 50, 60)))
+
+    out = os.path.join(tmp, "small.png")
+    W, H, shrunk = dx._resize_png(p, out, 20, 15)
+    sw, sh, _, _ = dx._read_png(out)
+    record("riduzione PNG 40x30 -> 20x15", shrunk and (W, H) == (20, 15) == (sw, sh), f"{W}x{H} letto {sw}x{sh}")
+    W2, H2, shrunk2 = dx._resize_png(p, os.path.join(tmp, "big.png"), 400, 300)
+    record("PNG mai ingrandito oltre il nativo", not shrunk2 and (W2, H2) == (w, h), f"{W2}x{H2}")
+
+
+# ============================================================================ lettori dei file esportati
+def _cube_tris(s=10.0):
+    v = [(x, y, z) for x in (0, s) for y in (0, s) for z in (0, s)]
+    faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+    tris = []
+    for a, b, c, d in faces:
+        tris += [(v[a], v[b], v[c]), (v[a], v[c], v[d])]
+    return tris
+
+
+def test_inspectors(tmp):
+    sw = SolidWorksAutomation()
+    tris = _cube_tris()
+    stl_b = os.path.join(tmp, "c_bin.stl")
+    with open(stl_b, "wb") as f:
+        f.write(b"\0" * 80 + struct.pack("<I", len(tris)))
+        for t in tris:
+            f.write(struct.pack("<12fH", 0, 0, 0, *[c for p in t for c in p], 0))
+    d = sw.inspect_export_file(stl_b)["data"]
+    record("STL binario: 12 triangoli, box 10x10x10", d.get("encoding") == "binary" and d.get("triangles") == 12
+           and d.get("bbox_size") == [10.0, 10.0, 10.0], str({k: d.get(k) for k in ("encoding", "triangles", "bbox_size")}))
+
+    stl_a = os.path.join(tmp, "c_asc.stl")
+    with open(stl_a, "w") as f:
+        f.write("solid c\n")
+        for t in tris:
+            f.write(" facet normal 0 0 0\n  outer loop\n" + "".join(f"   vertex {p[0]} {p[1]} {p[2]}\n" for p in t)
+                    + "  endloop\n endfacet\n")
+        f.write("endsolid c\n")
+    d = sw.inspect_export_file(stl_a)["data"]
+    record("STL ASCII: 12 triangoli, box 10x10x10", d.get("encoding") == "ascii" and d.get("triangles") == 12
+           and d.get("bbox_size") == [10.0, 10.0, 10.0], str({k: d.get(k) for k in ("encoding", "triangles", "bbox_size")}))
+
+    p3 = os.path.join(tmp, "c.3mf")
+    model = ('<?xml version="1.0"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+             '<resources><object id="1" type="model"><mesh><vertices>'
+             + "".join(f'<vertex x="{x}" y="{y}" z="{z}"/>' for x in (0, 5) for y in (0, 7) for z in (0, 9))
+             + '</vertices><triangles><triangle v1="0" v2="1" v3="2"/><triangle v1="1" v2="3" v3="2"/></triangles>'
+             '</mesh></object></resources><build><item objectid="1"/></build></model>')
+    with zipfile.ZipFile(p3, "w") as z:
+        z.writestr("3D/3dmodel.model", model)
+    d = sw.inspect_export_file(p3)["data"]
+    record("3MF: unita', 8 vertici, 2 triangoli, box 5x7x9", d.get("unit") == "millimeter" and d.get("vertices") == 8
+           and d.get("triangles") == 2 and d.get("bbox_size") == [5.0, 7.0, 9.0], str(d))
+
+    for schema, ap in (("CONFIG_CONTROL_DESIGN", "AP203"), ("AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }", "AP214"),
+                       ("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }", "AP242")):
+        sp = os.path.join(tmp, f"{ap}.step")
+        with open(sp, "w") as f:
+            f.write(f"ISO-10303-21;\nHEADER;\nFILE_SCHEMA (('{schema}'));\nENDSEC;\nDATA;\n"
+                    "#1=MANIFOLD_SOLID_BREP('',#2);\n#3=ADVANCED_FACE('',(#4),#5,.T.);\nENDSEC;\nEND-ISO-10303-21;\n")
+        d = sw.inspect_export_file(sp)["data"]
+        record(f"STEP {ap}: protocollo riconosciuto, solido valido", d.get("application_protocol") == ap and d.get("valid_solid")
+               and d.get("advanced_faces") == 1, str({k: d.get(k) for k in ("application_protocol", "valid_solid", "schema")}))
+    sp = os.path.join(tmp, "assieme.step")
+    with open(sp, "w") as f:
+        f.write("ISO-10303-21;\nHEADER;\nFILE_SCHEMA (('AUTOMOTIVE_DESIGN'));\nENDSEC;\nDATA;\n"
+                "#10=PRODUCT_DEFINITION('design','',#11,#12);\n#20=PRODUCT_DEFINITION ('design','',#21,#12);\n"
+                "#30=PRODUCT_DEFINITION('design','',#31,#12);\n#40=PRODUCT_DEFINITION_SHAPE('','',#10);\n"
+                "#50=NEXT_ASSEMBLY_USAGE_OCCURRENCE('1','a','',#10,#20,$);\n"
+                "#51=NEXT_ASSEMBLY_USAGE_OCCURRENCE('2','b','',#10,#20,$);\n"
+                "#52=NEXT_ASSEMBLY_USAGE_OCCURRENCE('3','c','',#10,#30,$);\n"
+                "#60=MANIFOLD_SOLID_BREP('',#2);\n#61=MANIFOLD_SOLID_BREP('',#3);\nENDSEC;\nEND-ISO-10303-21;\n")
+    d = sw.inspect_export_file(sp)["data"]
+    record("STEP d'assieme: 3 PRODUCT_DEFINITION (non _SHAPE), 3 istanze, 2 solidi",
+           d.get("product_definitions") == 3 and d.get("assembly_occurrences") == 3 and d.get("manifold_solid_brep") == 2,
+           str({k: d.get(k) for k in ("product_definitions", "assembly_occurrences", "manifold_solid_brep")}))
+    sp = os.path.join(tmp, "troncato.step")
+    with open(sp, "w") as f:
+        f.write("ISO-10303-21;\nHEADER;\nFILE_SCHEMA (('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#1=MANIFOLD_SOLID_BREP('',#2);\n")
+    record("STEP troncato (senza END-ISO-10303-21) -> non valido", not sw.inspect_export_file(sp)["data"].get("valid_solid"))
+
+    ip = os.path.join(tmp, "c.igs")
+    with open(ip, "w") as f:
+        f.write("S" * 72 + "S      1\n" + " " * 72 + "T      1\n")
+    d = sw.inspect_export_file(ip)["data"]
+    record("IGES: riga di chiusura T riconosciuta", d.get("format") == "iges" and d.get("terminate_line"), str(d))
+
+    xp = os.path.join(tmp, "c.x_t")
+    with open(xp, "w") as f:
+        f.write("**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz***\n**PARASOLID !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\n")
+    record("Parasolid x_t: intestazione riconosciuta", sw.inspect_export_file(xp)["data"].get("parasolid_header"))
+
+    pp = os.path.join(tmp, "c.pdf")
+    with open(pp, "wb") as f:
+        f.write(b"%PDF-1.7\n1 0 obj << /Type /3D /Subtype /PRC >> endobj\n%%EOF")
+    record("PDF 3D: /3D + PRC riconosciuti", sw.inspect_export_file(pp)["data"].get("has_3d"))
+    with open(pp, "wb") as f:
+        f.write(b"%PDF-1.7\n%%EOF")
+    record("PDF piatto: has_3d falso", not sw.inspect_export_file(pp)["data"].get("has_3d"))
+    record("file mancante -> errore", not sw.inspect_export_file(os.path.join(tmp, "manca.stl"))["success"])
+
+
+# ============================================================================ libreria materiali (.sldmat)
+def test_materials(tmp):
+    d = os.path.join(tmp, "sldmaterials")
+    os.makedirs(d)
+    xml = ('<?xml version="1.0" encoding="UTF-16"?><mstns:materials xmlns:mstns="http://www.solidworks.com/sldmaterials">'
+           '<classification name="Acciaio"><material name="AISI 304"><physicalproperties>'
+           '<DENS displayname="Densita\'" value="8000"/><EX value="1.9e11"/><NUXY value="0.29"/><SIGYLD value="2.068e8"/>'
+           '</physicalproperties></material><material name="AISI 1020"><physicalproperties><DENS value="7900"/>'
+           '</physicalproperties></material></classification><classification name="Plastica">'
+           '<material name="ABS generico"><physicalproperties><DENS value="1020"/></physicalproperties></material>'
+           '<material name="ABS PC"><physicalproperties><DENS value="1070"/></physicalproperties></material>'
+           '</classification></mstns:materials>')
+    with open(os.path.join(d, "solidworks materials.sldmat"), "wb") as f:
+        f.write(xml.encode("utf-16"))
+    sw = SolidWorksAutomation()
+    sw._dx_material_dir = lambda: d
+    mats = sw._dx_load_materials()
+    m304 = next((m for m in mats if m["name"] == "AISI 304"), None)
+    record(".sldmat UTF-16: 4 materiali, categorie e proprieta' lette",
+           len(mats) == 4 and m304 is not None and m304["category"] == "Acciaio" and m304["density"] == 8000.0
+           and m304["props"].get("elastic_modulus_Pa") == 1.9e11 and m304["props"].get("yield_strength_Pa") == 2.068e8,
+           str([(m["name"], m["category"], m["density"]) for m in mats]))
+    hit, _ = sw._dx_find_material("aisi 304")
+    record("ricerca materiale: nome esatto senza maiuscole", hit is not None and hit["name"] == "AISI 304")
+    hit, err = sw._dx_find_material("ABS")
+    record("ricerca materiale: 'ABS' ambiguo -> messaggio con i candidati", hit is None and "ABS generico" in (err or ""), err)
+    hit, _ = sw._dx_find_material("1020")
+    record("ricerca materiale: frammento unico", hit is not None and hit["name"] == "AISI 1020")
+    hit, err = sw._dx_find_material("PLA")
+    record("ricerca materiale: inesistente -> errore", hit is None and bool(err), err)
+
+
+# ============================================================================ unita'
+def test_units():
+    u = UnitConverter("mm")
+    ok = (abs(u.to_meters(25.4, "inch") - 0.64516) < 1e-12 and abs(u.to_meters(10) - 0.01) < 1e-15
+          and abs(u.from_meters(0.3048, "ft") - 1.0) < 1e-12 and abs(u.convert(1, "inch", "mm") - 25.4) < 1e-12)
+    record("unita': mm/inch/ft andata e ritorno", ok)
+
+
+def main():
+    print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, fn in (("registro", test_registry), ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
+                         ("lettori", lambda: test_inspectors(tmp)),
+                         ("materiali", lambda: test_materials(tmp)), ("unita'", test_units)):
+            try:
+                fn()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                record(f"sezione {name}: eccezione", False, repr(e))
+    bad = [r for r in RESULTS if not r[1]]
+    print(f"\n{len(RESULTS) - len(bad)}/{len(RESULTS)} PASS")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
