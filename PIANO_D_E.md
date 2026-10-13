@@ -1,19 +1,164 @@
-# PIANO — Gruppi D (dati ed export) ed E (simulazione), ripresa dei parziali B4 / C5 / C3
+# PIANO DI LAVORO — dal punto attuale a un server MCP completamente funzionante
 
-Scritto il 2026-10-12 in una sessione cloud **senza SolidWorks**: niente di questo piano e' stato provato dal vivo.
-I nomi di API marcati **(da verificare)** vengono dalla documentazione e dalla memoria, non da prove: prima di scrivere
-codice controllarli nel type library (`sldworks.tlb`, `cosworks.tlb`) o in `scripts_tmp/cosworks_dump.txt`, come nei blocchi precedenti.
-Regole che restano valide: istanza dedicata, 0 orfani, preferenze utente salvate e ripristinate, ogni voce chiusa con un numero misurato.
+Aggiornato il 2026-10-13, scritto in una sessione cloud **senza SolidWorks**: niente di quanto segue e' stato provato dal vivo.
+Le API marcate **(da verificare)** vengono dalla documentazione, non da prove: prima di scrivere codice controllarle nella type
+library (`sldworks.tlb`, `cosworks.tlb`) o in `scripts_tmp/cosworks_dump.txt`, come nei blocchi precedenti.
+Regole sempre valide (vedi `CLAUDE.md`): istanza dedicata, 0 orfani, preferenze salvate e ripristinate, ogni voce chiusa con un numero misurato.
 
-Fatto in questa sessione (verificabile senza SolidWorks):
-- `tests/test_offline.py` (36/36 PASS su Linux con COM simulato): registro dei 196 tool (schema = parametri passati = firma del
-  metodo, `required` = parametri obbligatori), `safety.py`, PNG puro Python, lettori STL/3MF/STEP/IGES/x_t/PDF, libreria `.sldmat`, unita'.
-- `_dx_inspect_step` conta anche `product_definitions` e `assembly_occurrences` (struttura d'assieme dello STEP, serve a D6).
+## Cosa vuol dire "completamente funzionante"
+Il lavoro e' finito quando sono vere TUTTE queste condizioni:
+1. **Copertura**: ogni voce di `LIMITI.md` e' `[x]` (misurata) oppure `[~]` con la prova che il limite e' di SolidWorks e il tool lo
+   dichiara nel risultato. Nessuna voce `[ ]`.
+2. **Regressione verde** in un colpo solo con `tests\run_all.py`: tutti i test live + offline, 0 processi orfani, istanza di Elia intatta,
+   **in italiano e in inglese** (G1).
+3. **Robustezza** (fase 5): nessun tool puo' bloccare il server per sempre; un crash di SolidWorks produce un errore chiaro e il server
+   si riprende; chiudendo il client non restano processi; nessuna preferenza globale cambiata dopo una sessione.
+4. **Uso reale** (fase 6): gli scenari di prova eseguiti da Claude Desktop/Code partendo da una richiesta a parole arrivano al risultato
+   senza interventi manuali, e i file prodotti passano i controlli (`inspect_export_file`, misure).
+5. **Rilascio** (fase 7): installazione da zero seguendo il README su un PC pulito, versione taggata, note di rilascio.
 
-Prima di tutto: regressione completa dei 9 test (vedi `STATO.md`, "Prossimo passo").
-Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (tool composti da metodi gia' verificati, rischio basso) -> E3, E5, E1, E4, E2 -> D4, D9, D10 -> D2, D3 (probabili limiti dell'edizione).
+## Riepilogo delle fasi
+| Fase | Contenuto | Dove | Stima (sessioni sul PC) | Dipende da |
+|---|---|---|---|---|
+| 0 | Verifica di quanto fatto nel cloud (regressione in italiano) | PC | 1 | - |
+| 1 | Prova in inglese (G1) | PC | 1 | 0 |
+| 2 | Ripresa dei parziali B4, C5, C3 | PC | 2-3 | 0 |
+| 3 | Gruppo D (dati ed export) | PC (+ parti offline) | 4-6 | 0 |
+| 4 | Gruppo E (simulazione) | PC | 4-6 | 0 |
+| 5 | Robustezza del server | cloud + PC | 2-3 | 0 |
+| 6 | Prove d'uso reali con un client MCP | PC | 1-2 | 2, 3, 4, 5 |
+| 7 | Rilascio | cloud + PC | 1 | 6 |
+
+Le fasi 2, 3, 4 e 5 sono indipendenti fra loro dopo la fase 0: si possono alternare. Ordine consigliato: 0 -> 1 -> 5 (le parti offline
+si possono fare anche subito nel cloud) -> 2 -> 3 -> 4 -> 6 -> 7. Una "sessione" = una sessione di Claude Code sul PC con una
+regressione completa alla fine (`run_all.py` dura circa 1-2 ore).
 
 ---
+
+## Fase 0 — Verifica di quanto fatto nel cloud (2026-10-12/13)
+Obiettivo: confermare che le modifiche fatte senza SolidWorks non hanno rotto niente. Nessun lavoro nuovo prima che sia verde.
+1. `git pull`, `python tests\test_offline.py` (atteso 83/83).
+2. `.venv\Scripts\python.exe tests\run_all.py` (italiano). Atteso: stessi numeri della regressione del 2026-10-11
+   (modeling 175, modeling_extra 240, drawings 65, drawing_quality 139, assembly 113, assembly_extra 213, data 159, simulation 120).
+3. Se qualcosa e' rosso, i sospettati in ordine di probabilita':
+   - smistamento dei tool base (`server.py`, `BASE_DISPATCH`): un tool base che prima riceveva un default diverso;
+   - preferenze anti-finestre (`_prepare_prefs` all'inizio di ogni tool, `_restore_prefs` alla fine): una finestra di dialogo che
+     compare a meta' di un tool (sintomo: test appeso) -> controllare quale preferenza manca;
+   - `tests/live_common.py` (Client comune, traduzione dei nomi: con SolidWorks italiano non deve cambiare nulla);
+   - `data_export.py`: controllo dei nomi di configurazione (un test che passa un nome di configurazione scritto diverso),
+     rifiuto del rinomina-e-sovrascrivi negli export, `pdf3d` nel risultato di `inspect_export_file`;
+   - `simulation.py`: schizzo temporaneo del sistema di riferimento delle forze (ora si cancella solo quello nuovo);
+   - lingua: `_std_ref_feature` al posto dei nomi italiani nei piani degli assiemi; testi delle tavole (devono restare italiani).
+4. Controlli a mano (5 minuti):
+   - nel proprio SolidWorks, dopo la regressione: Opzioni > Generale, "Immetti il valore della quota" deve essere com'era prima
+     (le preferenze ora si ripristinano dopo ogni tool);
+   - con `SW_MCP_INSTANCE=dedicated`, aprire e chiudere Claude Desktop: il processo SolidWorks nascosto deve sparire
+     (chiusura all'uscita del server, solo se non ci sono documenti non salvati).
+5. Dal vivo, le prime misure nuove: STEP d'assieme (`product_definitions`, `assembly_occurrences` sul file di `test_assembly_live`),
+   `pdf3d.prc_ok` sul PDF 3D di `test_data_live` (aggiungere le due verifiche ai test).
+6. Esiti in `STATO.md` (tabella), eventuali trappole nuove in `STATO_STORICO.md`.
+**Fatto quando**: regressione verde + controlli a mano ok.
+
+## Fase 1 — Prova in inglese (G1)
+1. In SolidWorks: Strumenti > Opzioni > Generale, attivare "Usa lingua inglese" e i nomi di feature/file in inglese (nomi esatti
+   delle opzioni da controllare), riavviare. Le preferenze sono globali: farlo quando non si lavora a mano.
+2. `connect_solidworks` deve riportare `ui_language = english`.
+3. `tests\run_all.py`. I test traducono i nomi italiani (`tests/live_common.py`, tabella `_IT_EN`).
+4. Per ogni rosso: se e' un nome tradotto male -> correggere `_IT_EN`; se e' un nome che il server cerca -> spostarlo in
+   `solidworks_mcp/utils/sw_lang.py` con entrambe le varianti (MAI nomi fissi nel codice, vedi `CLAUDE.md`).
+5. Guardare a occhio le tavole (`test_output/qual_*.png`): scritte del cartiglio verticale, "VIEW A", nota degli smussi in inglese.
+6. Rimettere l'italiano, rilanciare almeno `run_all.py drawings data` per conferma.
+**Fatto quando**: regressione verde in inglese e in italiano -> G1 `[x]` in `LIMITI.md` (con i numeri).
+
+## Fase 2 — Ripresa dei parziali (schede in fondo: B4, C5, C3)
+- **B4** (posizione dei fori su facce cilindriche): provare il piano tangente; misura = asse del foro per il punto richiesto (< 0,01 gradi)
+  su 4 posizioni angolari e 3 orientamenti del cilindro.
+- **C5** (ingranaggio/vite/blocco): studio di movimento in istanza visibile minimizzata; misura = rapporto e passo entro 0,1 %.
+- **C3** (rotazione nei passi di traslazione dell'esploso): priorita' bassa, una sessione al massimo; altrimenti resta `[~]`.
+**Fatto quando**: ogni voce `[x]` con i numeri, oppure `[~]` con la prova fallita descritta e il tool che lo dichiara.
+
+## Fase 3 — Gruppo D (schede tecniche in fondo)
+Ordine e cosa resta da fare per ciascuna voce:
+| Voce | Cosa fare sul PC | Parte gia' pronta | Misura che la chiude |
+|---|---|---|---|
+| D5 | `hide_reference` anche nei componenti (toggle "nascondi tutti i tipi" o per componente) | - | pixel azzurri 0 con, > 50 senza |
+| D6 | test di export/box/immagini sugli assiemi | contatori STEP | n. prodotti/istanze, volume del reimport = somma |
+| D7 | parametro `coordinate_system` in `get_part_mass_properties` | `utils/inertia.py` | formule < 0,01 %; segno dei prodotti d'inerzia stabilito |
+| D8 | librerie dei materiali da tutte le cartelle configurate | lettura `.sldmat` | massa = volume x densita' del materiale di prova |
+| D1 | tool `apply_configuration_table` (`dry_run`) | `utils/config_table.py` | volumi delle 3 configurazioni noti |
+| D10 | verifica `pdf3d` sul PDF vero | `utils/pdf3d.py` | `prc_ok` e viste lette dal PDF di SolidWorks |
+| D4 | immagini 4K (cattura di stampa), prospettiva | riduzione PNG | 3840x2160, contenuto centrato |
+| D9 | opzioni di import (3D Interconnect, assieme/pezzo, diagnostica) | - | n. componenti/corpi, volume dopo riparazione |
+| D2 | STEP AP242 | lettore STEP | `application_protocol == AP242` o `[~]` con la prova |
+| D3 | eDrawings verificato | - | apertura riuscita o `[~]` |
+Per ogni tool nuovo: schema in `data_tools.py` + voce in `DATA_DISPATCH` + metodo (il test offline controlla la coerenza),
+annotazione in `safety.py` se scrive file, numero di tool aggiornato in `tests/test_offline.py` (`EXPECTED_TOOLS`) e in `test_data_live.py`.
+**Fatto quando**: tutte le voci D `[x]` o `[~]` motivate, regressione verde.
+
+## Fase 4 — Gruppo E (schede tecniche in fondo)
+Ordine: **E3** (quasi pronto: posizione del FOS minimo = nodo del von Mises massimo con un solo materiale) -> **E5** (frequenze,
+buckling, termico: valori attesi gia' calcolati, 203,2 Hz / 20562 N / 4,7 W) -> **E1** (contatti locali) -> **E4** (carichi remoti,
+cuscinetto) -> **E2** (controllo locale della mesh).
+Prima di ogni voce: cercare i nomi esatti in `scripts_tmp/cosworks_dump.txt` (rigenerarlo dalla type library se manca).
+Nuovi tool in `simulation_tools.py`/`SIMULATION_DISPATCH`; aggiornare il conteggio dei tool.
+**Fatto quando**: tutte le voci E `[x]` o `[~]` motivate, regressione verde.
+
+## Fase 5 — Robustezza del server
+Oggi le chiamate COM sono sincrone dentro il gestore MCP: se SolidWorks si blocca (finestra di dialogo, calcolo lungo), il server
+non risponde piu'. Lavori, con la parte che si puo' fare nel cloud (C) o solo sul PC (PC):
+1. **Timeout generale dei tool** (C + PC). Oggi solo `run_simulation` ha un watchdog. Generalizzarlo: per ogni tool un tempo
+   massimo (default 300 s, configurabile in `config.json`); allo scadere, in modalita' dedicata si chiude il PID e si restituisce un
+   errore chiaro; con l'istanza dell'utente si restituisce un errore che chiede di controllare SolidWorks (mai uccidere la sua istanza).
+   Attenzione al modello a thread COM (STA): il watchdog osserva, non chiama SolidWorks da un altro thread.
+2. **Ripresa dopo un crash** (PC). Oggi in modalita' dedicata, se SolidWorks muore, il server dice "riavvia il server". Aggiungere
+   `SW_MCP_AUTORESTART=1`: al tool successivo si rilancia l'istanza e si avverte che i documenti aperti sono persi. Test: uccidere
+   il PID a meta' test e verificare che il tool seguente riparta.
+3. **Chiusura all'uscita** (FATTO nel cloud il 2026-10-13, da verificare in fase 0): il server chiude l'istanza dedicata quando il
+   client si disconnette, ma solo se non ci sono documenti non salvati.
+4. **Preferenze** (FATTO nel cloud il 2026-10-13, da verificare in fase 0): impostate all'inizio di ogni tool e ripristinate alla fine.
+5. **Peso dei tool per il client** (C). I 196 tool costano circa 27.000 token di descrizioni a ogni conversazione (base 2.400,
+   modellazione 6.800, disegni 6.300, assiemi 5.600, dati 3.100, simulazione 2.000). Aggiungere `SW_MCP_TOOLSETS`
+   (es. `base,modeling,drawings`) per esporre solo i gruppi che servono; default: tutti. Test offline: con un sottoinsieme, tool esposti =
+   tool smistabili, gli altri rispondono con un errore che dice quale gruppo attivare.
+6. **Descrizioni dei tool** (C). Oggi sono un misto di italiano e inglese. Sceglierne una lingua (proposta: inglese per i client,
+   che e' anche la lingua dei nomi dei parametri), unita' di misura in ogni parametro, un esempio per i tool complessi. Il test offline
+   controlla che ogni parametro abbia una descrizione.
+7. **`execute_python`** (decisione di Elia, C). Esegue codice arbitrario. Proposta: disattivato di default, attivabile con
+   `SW_MCP_ALLOW_PYTHON=1`; nella descrizione resta l'avviso.
+8. **Pulizia** (C). Una trentina di import non usati (pyflakes); poi il CI fallisce su qualunque avviso di pyflakes, non solo sui
+   nomi non definiti.
+9. **Log** (C). File di log nella cartella del pacchetto, senza rotazione: spostarlo in `%LOCALAPPDATA%\solidworks-mcp\` con rotazione
+   (es. 5 file da 5 MB), percorso in `config.json`.
+10. **Extra MCP** (facoltativo, C). Risorse (documento attivo, stato dell'istanza) e prompt pronti per i flussi lunghi (es. "pezzo +
+    messa in tavola + PDF").
+**Fatto quando**: punti 1-4 verificati dal vivo (test che fanno scattare timeout e crash), 5-9 coperti dal test offline.
+
+## Fase 6 — Prove d'uso reali con un client MCP
+I test live chiamano i tool uno per uno con argomenti scritti a mano. Qui si verifica che un modello, partendo da una richiesta a
+parole, sappia usarli. Da Claude Desktop o Claude Code, con istanza dedicata, per ogni scenario: trascrizione salvata, file prodotti
+controllati con `inspect_export_file`/misure, note su dove il modello ha sbagliato tool o parametri (-> migliorare le descrizioni, fase 5.6).
+| Scenario | Richiesta | Controllo |
+|---|---|---|
+| S1 | "Flangia Ø120 x 15 con 6 fori M8 su Ø90, foro centrale Ø30, in AISI 304; messa in tavola A3 quotata; PDF" | volume e massa a mano; tavola a occhio; PDF valido |
+| S2 | "Staffa a L 80x60x40 sp. 6 con due asole, raccordo R10, smusso 1x45 sugli spigoli esterni" | volume a mano; feature presenti |
+| S3 | "Assieme perno-boccola-staffa con accoppiamenti, vista esplosa, distinta e palloncini" | gradi di liberta' attesi; BOM con 3 righe |
+| S4 | "Trave 200x20x10 incastrata, 100 N in punta: freccia e tensione massima, fattore di sicurezza, mappa PNG" | 0,80 mm e 30/60 MPa (blocco 5) |
+| S5 | "Tre configurazioni da questa tabella CSV, esporta uno STEP per ciascuna" | volumi e file STEP validi (D1) |
+| S6 | gli stessi S1 e S4 con SolidWorks in inglese | come sopra |
+| S7 | "Chiudi tutto" con un documento modificato | rifiuto con spiegazione (B6), nessun dato perso |
+**Fatto quando**: tutti gli scenari arrivano al risultato senza correzioni manuali (sono ammessi tentativi del modello, non interventi
+dell'utente). Le trascrizioni utili vanno in `docs/esempi/` come esempi per il README.
+
+## Fase 7 — Rilascio
+1. `pyproject.toml` con dipendenze e comando `solidworks-mcp`; versione presa da `solidworks_mcp/__init__.py`.
+2. `CHANGELOG.md` dal 4.x dell'autore originale al 5.x/6.0 (blocchi 1-5, gruppi A-G).
+3. Installazione da zero su un PC/VM pulito seguendo SOLO il README (Windows x64 e ARM64 con Python x64), con Claude Desktop e Code.
+4. Tag `v6.0.0` su `main` con note di rilascio; README con gli esempi della fase 6.
+**Fatto quando**: installazione pulita riuscita e scenario S1 eseguito sulla macchina pulita.
+
+---
+
+# SCHEDE TECNICHE
 
 ## Gruppo D
 
@@ -187,8 +332,8 @@ Ordine consigliato: B4 e C5 (ripresa, sezione in fondo) -> D5, D6, D7, D8, D1 (t
   creazione (proprieta' di rotazione scrivibili? `BeginEdit/EndEdit` come per i carichi della simulazione), oppure un passo di
   traslazione + un passo di sola rotazione sullo stesso componente. Verifica: angolo letto dalla matrice esplosa (come per il radiale).
 
-## Problemi notati rileggendo il codice (senza SolidWorks)
-- `import_model(merge_faces=...)`: parametro del metodo mai usato, non esposto nello schema (vedi D9).
-- `create_static_study(analysis=...)`: parametro del metodo ignorato, non esposto nello schema; lo studio e' sempre statico (vedi E5).
-- `get_part_mass_properties(configuration=...)`: se la ricerca del corpo dopo il cambio di configurazione fallisce, la funzione esce
-  senza riattivare la configurazione di partenza (il ripristino avviene solo sul percorso normale).
+## Problemi noti ancora aperti nel codice
+- `import_model(merge_faces=...)`: parametro del metodo mai usato, non esposto nello schema (si sistema con D9).
+- `create_static_study(analysis=...)`: parametro del metodo ignorato, non esposto nello schema; lo studio e' sempre statico (si sistema con E5).
+- `_as_collapse` (assiemi) chiude la PRIMA vista esplosa della configurazione, non necessariamente quella attiva: con piu' viste
+  esplose potrebbe non richiudere quella mostrata (da verificare quando capita; basso impatto).

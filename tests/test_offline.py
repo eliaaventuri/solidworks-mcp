@@ -140,10 +140,15 @@ class _FakeAutomation:
 
     def __init__(self):
         self.calls = []
+        self.restored = 0
+        self._sw_app = None
         self._units = types.SimpleNamespace(default_unit="mm")
 
     def _result(self, success, message, error_code=0, data=None):
         return SolidWorksAutomation._result(self, success, message, error_code, data)
+
+    def _restore_prefs(self):
+        self.restored += 1
 
     def __getattr__(self, name):
         def method(*args, **kwargs):
@@ -181,6 +186,10 @@ def test_call_tool(tmp):
         text, calls = call("tool_inesistente", {})
         record("call_tool: tool sconosciuto -> errore", "Unknown tool" in text, text[:60])
 
+        before = fake.restored
+        call("draw_circle", {"radius": 5})
+        call("tool_inesistente", {})
+        record("call_tool: preferenze ripristinate dopo ogni tool (anche se sconosciuto)", fake.restored - before == 2)
         tools = asyncio.run(srv.list_tools())
         failed = []
         for t in tools:
@@ -222,6 +231,30 @@ def test_export_guards(tmp):
     r = sw.export_model(os.path.join(tmp, "nuovo.step"), configuration="Inesistente")
     record("export_model: configurazione inesistente -> errore prima dell'export", not r["success"] and "Inesistente" in r["message"]
            and not os.path.exists(os.path.join(tmp, "nuovo.step")), r["message"][:90])
+
+
+# ============================================================================ preferenze anti-finestre di dialogo
+def test_dialog_prefs():
+    class App:
+        def __init__(self):
+            self.t = {10: True, 96: True, 100: True, 101: False, 55: True}
+
+        def GetUserPreferenceToggle(self, k):
+            return self.t[k]
+
+        def SetUserPreferenceToggle(self, k, v):
+            self.t[k] = v
+    sw = SolidWorksAutomation()
+    sw._sw_app = app = App()
+    orig = dict(app.t)
+    sw._prepare_prefs()
+    during = dict(app.t)
+    sw._prepare_prefs()                         # seconda chiamata nello stesso tool: l'originale salvato non cambia
+    sw._restore_prefs()
+    record("preferenze: durante il tool niente finestre (10/96/100 off, 101 on), dopo valori originali",
+           during == {10: False, 96: False, 100: False, 101: True, 55: True} and app.t == orig, f"{during} -> {app.t}")
+    sw._restore_prefs()
+    record("preferenze: ripristino ripetuto innocuo", app.t == orig)
 
 
 # ============================================================================ sicurezza
@@ -635,7 +668,7 @@ def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
         for name, fn in (("registro", test_registry), ("call_tool", lambda: test_call_tool(tmp)),
-                         ("export_model", lambda: test_export_guards(tmp)),
+                         ("export_model", lambda: test_export_guards(tmp)), ("preferenze", test_dialog_prefs),
                          ("sicurezza", lambda: test_safety(tmp)), ("png", lambda: test_png(tmp)),
                          ("lettori", lambda: test_inspectors(tmp)),
                          ("materiali", lambda: test_materials(tmp)),

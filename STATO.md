@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 80/80 (2026-10-12, Linux; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 83/83 (2026-10-13, Linux; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -38,11 +38,9 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
   e tipo di import STL (int 208 = 2 solido). Controllare in Opzioni > Esporta/Importa se si notano differenze.
 - `_dx_inspect_step` ha due contatori nuovi (struttura d'assieme) non ancora provati su uno STEP scritto da SolidWorks:
   rieseguire `test_data_live.py`.
-- **Preferenze globali cambiate per sempre** da `_prepare_prefs` (`automation/modeling_base.py`) a ogni documento attivo, anche
-  sull'istanza di Elia: richiesta del valore alla creazione di una quota (toggle 10 = off), richiesta di chiudere lo schizzo (96 = off),
-  quote sovradefinite (100 = off, 101 = guidate). Servono per non bloccare l'istanza nascosta con finestre di dialogo, ma restano
-  nel registro anche per il lavoro a mano. Da decidere: applicarle solo in modalita' dedicata, o salvarle e ripristinarle
-  alla chiusura (verificare dal vivo come SolidWorks le salva). Se Elia nota che le quote non chiedono piu' il valore: e' questo.
+- Preferenze anti-finestre di dialogo (toggle 10, 96, 100, 101): fino al 2026-10-12 restavano cambiate per sempre (anche sull'istanza
+  di Elia). CORRETTO nel codice il 2026-10-13, da verificare (piano, fase 0): impostate all'inizio di ogni tool e rimesse ai valori
+  originali alla fine. Se in SolidWorks le quote non chiedono piu' il valore, rimettere a mano l'opzione una volta (Opzioni > Generale).
 - Codice vecchio dell'autore originale (`backup_*`, `scripts/`, `solidworks_com.py`, `solidworks_simulation.py`): solo nella
   copia locale, non nel repository (F3).
 
@@ -65,6 +63,12 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
   - `export_model` / `export_drawing`: se il nome del file viene cambiato (`.iges` -> `.igs`, `format` diverso dall'estensione)
     e il file col nome nuovo esiste, rifiuto (prima veniva cancellato e riscritto senza `overwrite`);
   - `tests/test_data_live.py`: refuso `dx_a` -> `dx_b` nella pulizia prima degli export IGES/x_t/x_b/PDF/eDrawings.
+- 2026-10-13:
+  - preferenze anti-finestre impostate all'inizio di ogni tool e ripristinate alla fine (`server.call_tool`, `_restore_prefs`);
+  - all'uscita del server (client disconnesso) l'istanza dedicata viene chiusa, solo se non ci sono documenti non salvati;
+  - `simulation.py`: lo schizzo temporaneo per il sistema di riferimento delle forze era cancellato come "ultimo schizzo dell'albero"
+    (poteva essere uno schizzo dell'utente): ora si cancella solo quello appena creato, dopo aver chiuso uno schizzo eventualmente aperto;
+  - `modeling.py` (`_seed_effect`, controllo delle ripetizioni): le feature soppresse per la misura tornano attive anche in caso di errore.
 
 ## Lingua inglese (G1, 2026-10-12, non ancora provato dal vivo)
 Il server non usa piu' nomi italiani fissi (dettagli in `LIMITI.md`, G1, e in `solidworks_mcp/utils/sw_lang.py`); `connect_solidworks`
@@ -75,10 +79,7 @@ e file in inglese (i nomi delle opzioni sono da controllare; serve riavviare Sol
 i nomi italiani (`tests/live_common.py`, tabella `_IT_EN`). Un rosso dovuto a un nome inglese diverso si corregge in quella tabella o in
 `sw_lang.py`. Alla fine rimettere le opzioni in italiano. Le preferenze sono globali: farlo quando non si lavora a mano.
 
-## Prossimo passo (sul PC con SolidWorks, dopo `git pull` di main)
-1. Regressione completa con `.venv\Scripts\python.exe tests\run_all.py` (un test alla volta, istanza dedicata, worker fermato da solo) per confermare A, B, C dopo le modifiche del
-   2026-10-12 (smistamento dei tool base, `tests/live_common.py`, config):
-   `test_offline`, `test_modeling_live`, `test_modeling_extra_live`, `test_drawings_live`, `test_drawing_quality_live`,
-   `test_assembly_live`, `test_assembly_extra_live`, `test_data_live`, `test_simulation_live`. Annotare qui gli esiti; un rosso si corregge prima di andare avanti.
-2. Ripresa dei parziali B4 (posizione dei fori su cilindri) e C5 (ingranaggio/vite/blocco), poi C3: `PIANO_D_E.md`.
-3. Prova in inglese (G1, sezione sopra), poi gruppo D e poi E nell'ordine di `PIANO_D_E.md`.
+## Prossimo passo
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Si parte dalla **fase 0** (sul PC, dopo `git pull` di main):
+regressione completa in italiano con `.venv\Scripts\python.exe tests\run_all.py` e i controlli a mano descritti li'.
+Poi fase 1 (inglese), fase 5 (robustezza), fase 2 (B4/C5/C3), fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).

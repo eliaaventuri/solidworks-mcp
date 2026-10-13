@@ -7,7 +7,7 @@ README.md                     cos'e' il progetto, installazione, tool, test
 STATO.md                      stato attuale in breve: cosa funziona, esiti dei test, regole di lavoro, cosa e' aperto
 STATO_STORICO.md              diario completo: esiti per blocco, misure, trappole API di SolidWorks, incidenti
 LIMITI.md                     elenco di lavoro dei limiti noti per gruppo (A disegni, B modellazione, C assiemi, D dati, E simulazione, F sicurezza)
-PIANO_D_E.md                  piano dei gruppi D ed E e della ripresa di B4/C5/C3: API candidate, test, numeri attesi (non ancora provato dal vivo)
+PIANO_D_E.md                  piano di lavoro completo a fasi fino al server finito + schede tecniche di D, E, B4/C5/C3 (non ancora provato dal vivo)
 ATLANTE.md                    questo file
 LICENSE                       MIT (copyright dell'autore del progetto originale)
 ```

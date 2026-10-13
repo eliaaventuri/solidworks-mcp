@@ -654,12 +654,17 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if any(f is None for f in feats):
                 return 0.0
             v_on = self._volume_m3(doc)
-            for f in feats:
-                f.SetSuppression2(0, 1, None)
-            v_off = self._volume_m3(doc)
-            for f in feats:
-                f.SetSuppression2(1, 1, None)
-            self._volume_m3(doc)
+            try:
+                for f in feats:
+                    f.SetSuppression2(0, 1, None)
+                v_off = self._volume_m3(doc)
+            finally:                                # le feature tornano attive anche se la misura fallisce
+                for f in feats:
+                    try:
+                        f.SetSuppression2(1, 1, None)
+                    except Exception:
+                        pass
+                self._volume_m3(doc)
             return v_off - v_on
         except Exception:
             return 0.0

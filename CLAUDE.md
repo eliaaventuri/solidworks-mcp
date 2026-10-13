@@ -6,7 +6,7 @@ Lo sviluppo vero avviene sul PC di Elia (Windows 11 ARM64, SolidWorks 2026 SP4.1
 ## Da leggere all'inizio di ogni sessione
 1. `STATO.md`: stato attuale, cose aperte, **prossimo passo** (partire da li').
 2. `LIMITI.md`: elenco di lavoro per gruppo (`[ ]` da fare, `[x]` fatto e misurato, `[~]` parziale con spiegazione).
-3. `PIANO_D_E.md`: piano dei gruppi D/E e della ripresa di B4/C5/C3.
+3. `PIANO_D_E.md`: piano di lavoro completo a fasi (0-7) fino al server finito, con le schede tecniche di D, E, B4/C5/C3.
 4. `ATLANTE.md`: dove sta cosa. `STATO_STORICO.md`: misure, cronologia e soprattutto le **trappole API gia' scoperte**
    (cercarle li' e nei docstring di `solidworks_mcp/automation/*.py` prima di indagare un'API).
 

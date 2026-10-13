@@ -58,13 +58,34 @@ class ModelingBase:
         self._prepare_prefs()
         return doc, None
 
+    _DIALOG_PREFS = ((10, False),      # swInputDimValOnCreate: chiede il valore a ogni quota (finestra che blocca la chiamata COM)
+                     (96, False),      # swSketchPromptToCloseSketch
+                     (100, False),     # swSketchOverdefiningDimsPromptToSetState
+                     (101, True))      # swSketchOverdefiningDimsSetDrivenByDefault
+
     def _prepare_prefs(self):
-        """Niente finestre di dialogo che bloccherebbero l'istanza nascosta."""
+        """Niente finestre di dialogo durante il tool. Le preferenze sono GLOBALI (finiscono nel registro): il valore originale
+        si salva qui la prima volta e `_restore_prefs` lo rimette alla fine di ogni chiamata (server.call_tool), cosi' il lavoro
+        a mano di Elia non cambia, ne' sulla sua istanza ne' tramite il registro scritto dall'istanza dedicata alla chiusura."""
         app = self._sw_app
-        for pref, val in ((10, False),      # swInputDimValOnCreate: chiede il valore a ogni quota
-                          (96, False),      # swSketchPromptToCloseSketch
-                          (100, False),     # swSketchOverdefiningDimsPromptToSetState
-                          (101, True)):     # swSketchOverdefiningDimsSetDrivenByDefault
+        if app is None:
+            return
+        saved = self.__dict__.setdefault("_saved_prefs", {})
+        for pref, val in self._DIALOG_PREFS:
+            try:
+                if pref not in saved:
+                    saved[pref] = bool(app.GetUserPreferenceToggle(pref))
+                app.SetUserPreferenceToggle(pref, val)
+            except Exception:
+                pass
+
+    def _restore_prefs(self):
+        """Rimette le preferenze cambiate da `_prepare_prefs` (chiamato alla fine di ogni tool e prima di chiudere l'istanza)."""
+        saved = self.__dict__.pop("_saved_prefs", None)
+        app = self._sw_app
+        if not saved or app is None:
+            return
+        for pref, val in saved.items():
             try:
                 app.SetUserPreferenceToggle(pref, val)
             except Exception:

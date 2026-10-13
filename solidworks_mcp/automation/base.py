@@ -196,6 +196,9 @@ class SolidWorksAutomation:
         pid = self._dedicated_pid
         if not pid:
             return self._result(False, "No dedicated instance")
+        restore = getattr(self, "_restore_prefs", None)
+        if restore is not None:
+            restore()                                 # alla chiusura SolidWorks scrive le preferenze nel registro
         try:
             if self._sw_app is not None:
                 self._sw_app.ExitApp()

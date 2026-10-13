@@ -448,17 +448,22 @@ class SimulationOperations:
             is_asm = False
         if is_asm and "__last__" in self._sim_frames:      # i piani standard hanno la stessa orientazione in ogni documento
             return plane, self._sim_frames["__last__"]
+        self._exit_sketch(doc)                      # uno schizzo aperto farebbe chiudere QUELLO alla prima InsertSketch
+        before = set(self._feature_names(doc, "ProfileFeature"))
         doc.ClearSelection2(True)
         plane.Select2(False, 0)
         doc.SketchManager.InsertSketch(True)
-        info = self._sketch_plane_info(doc)
-        doc.SketchManager.InsertSketch(True)
-        sk = self._last_of_type(doc, "ProfileFeature")
-        if sk:
+        try:
+            info = self._sketch_plane_info(doc)
+        finally:
+            doc.SketchManager.InsertSketch(True)
+            # si elimina SOLO lo schizzo temporaneo appena creato (prima si cancellava l'ultimo schizzo dell'albero,
+            # che poteva essere dell'utente se quello temporaneo non era stato creato)
+            for sk in [n for n in self._feature_names(doc, "ProfileFeature") if n not in before]:
+                doc.ClearSelection2(True)
+                self._select_feature(doc, sk)
+                doc.Extension.DeleteSelection2(0)
             doc.ClearSelection2(True)
-            self._select_feature(doc, sk)
-            doc.Extension.DeleteSelection2(0)
-        doc.ClearSelection2(True)
         fr = (info["sketch_x_axis"], info["sketch_y_axis"], info["sketch_normal"])
         self._sim_frames[key] = fr
         self._sim_frames["__last__"] = fr

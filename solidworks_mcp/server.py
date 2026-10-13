@@ -378,17 +378,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = sw_automation._result(False, refusal, SwErrors.swFileSaveError, {"refused": "file_exists"})
             return [TextContent(type="text", text=format_result(result))]
         
-        if name in SPECIAL_HANDLERS:
-            result = SPECIAL_HANDLERS[name](arguments or {})
-        else:
-            for table in DISPATCH_TABLES:
-                if name in table:
-                    method, allowed = table[name]
-                    kwargs = {k: v for k, v in (arguments or {}).items() if k in allowed}
-                    result = getattr(sw_automation, method)(**kwargs)
-                    break
+        try:
+            if sw_automation._sw_app is not None:
+                sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
+            if name in SPECIAL_HANDLERS:
+                result = SPECIAL_HANDLERS[name](arguments or {})
             else:
-                result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+                for table in DISPATCH_TABLES:
+                    if name in table:
+                        method, allowed = table[name]
+                        kwargs = {k: v for k, v in (arguments or {}).items() if k in allowed}
+                        result = getattr(sw_automation, method)(**kwargs)
+                        break
+                else:
+                    result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+        finally:
+            sw_automation._restore_prefs()          # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
         
         logger.info(f"Result: success={result['success']}")
         return [TextContent(type="text", text=format_result(result))]
@@ -818,8 +823,29 @@ async def main():
     logger.info(f"Starting SolidWorks MCP Server v{__version__}...")
     logger.info(f"Log file: {LOG_FILE}")
     
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+    finally:
+        # client disconnesso: l'istanza dedicata e nascosta non deve restare accesa (chiude SOLO il suo PID)
+        if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
+            try:
+                if _dedicated_has_unsaved():
+                    logger.warning(f"istanza dedicata (PID {sw_automation._dedicated_pid}) lasciata aperta: "
+                                   "ci sono documenti con modifiche non salvate")
+                else:
+                    sw_automation.shutdown_dedicated()
+            except Exception as e:
+                logger.warning(f"chiusura dell'istanza dedicata: {e}")
+
+
+def _dedicated_has_unsaved() -> bool:
+    """True se un documento aperto nell'istanza dedicata ha modifiche non salvate (o se non si riesce a saperlo)."""
+    try:
+        docs = sw_automation._com(sw_automation._sw_app, "GetDocuments") or ()
+        return any(bool(sw_automation._com(d, "GetSaveFlag")) for d in docs)
+    except Exception:
+        return True
 
 
 def run():

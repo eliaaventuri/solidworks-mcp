@@ -65,6 +65,17 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
   punto origine, scritte delle tavole e formati verticali nella lingua di SolidWorks, `ui_language` in connect_solidworks. Test offline
   80/80. DA FARE: regressione completa con SolidWorks in inglese (i test traducono i nomi italiani; tabella in `tests/live_common.py`).
 
+## Gruppo H — Robustezza del server (piano, fase 5)
+- [ ] H1 Timeout generale dei tool (oggi solo run_simulation): nessun tool blocca il server per sempre
+- [ ] H2 Ripresa dopo un crash dell'istanza dedicata (`SW_MCP_AUTORESTART`)
+- [~] H3 Chiusura dell'istanza dedicata all'uscita del server, solo senza documenti non salvati -- fatto nel codice 2026-10-13, da verificare
+- [~] H4 Preferenze anti-finestre ripristinate dopo ogni tool -- fatto nel codice 2026-10-13 (test offline), da verificare dal vivo
+- [ ] H5 `SW_MCP_TOOLSETS`: esporre solo i gruppi di tool che servono (oggi ~27.000 token di descrizioni)
+- [ ] H6 Descrizioni dei tool in una lingua sola, con unita' ed esempi
+- [ ] H7 `execute_python` disattivato di default (decide Elia)
+- [ ] H8 Pulizia degli import non usati e CI che fallisce su ogni avviso di pyflakes
+- [ ] H9 Log in `%LOCALAPPDATA%` con rotazione
+
 ## Gruppo F — Sicurezza e pulizia (decide Elia)
 - [x] F1 `.env` dell'autore con una chiave API OpenRouter esposta: togliere dal repository (resta in .gitignore)
 - [x] F2 `execute_python` esegue codice arbitrario: lasciarlo con avviso nella descrizione del tool
