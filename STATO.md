@@ -83,10 +83,10 @@ i nomi italiani (`tests/live_common.py`, tabella `_IT_EN`). Un rosso dovuto a un
 Regressione completa `tests\run_all.py`, exit 0, tutto verde (riepilogo `test_output/regressione_20261016_1020.md`):
 modeling 175/175, modeling_extra 240/240, drawings 65/65, drawing_quality 139/139, assembly 113/113,
 assembly_extra 213/213, data 159/159, simulation 120/120; offline 83/83. Stessi numeri del 2026-10-11.
-Restano da fare a mano: le tavole a occhio (`test_output/qual_*.png`), la quota in Opzioni > Generale e la chiusura
-dell'istanza nascosta all'uscita di Claude Desktop.
+Controlli a mano confermati da Elia (2026-10-16): tavole a occhio, quota in Opzioni > Generale, chiusura dell'istanza
+nascosta all'uscita di Claude Desktop.
 
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fase 0: regressione verde (fatta); restano i controlli a mano.
-Poi fase 1 (inglese).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fase 0 chiusa. Fase 1 (inglese) in corso: regressione
+completa con SolidWorks in inglese, esiti da aggiungere qui.
 Poi fase 1 (inglese), fase 5 (robustezza), fase 2 (B4/C5/C3), fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).
