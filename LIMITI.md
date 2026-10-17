@@ -1,4 +1,4 @@
-﻿# LIMITI - elenco di lavoro (aperto il 2026-10-10)
+# LIMITI - elenco di lavoro (aperto il 2026-10-10)
 
 Ogni limite noto, da risolvere uno per uno. Stato: `[ ]` da fare, `[x]` risolto e testato, `[~]` risolto in parte / alternativa (spiegare).
 Chi lavora su un gruppo aggiorna questo file man mano. Esiti dettagliati e regressioni di ogni gruppo: `STATO_STORICO.md`.
@@ -58,7 +58,7 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [ ] E2 Controllo locale della mesh
 - [x] E3 Posizione del fattore di sicurezza minimo -> FATTO 2026-10-18: `get_simulation_results` da' `factor_of_safety.min_at_mm`, corpo critico e FOS per corpo (snervamento / VM nodale massimo del corpo, `GetStressForEntities2` sul corpo). Trave: FOS 5,8978 nel nodo del VM max [4,10,5], scarto dall'API 6e-8; assieme AISI 1020 + Lega 6061: minimo 1,93399 nel corpo di alluminio a [104,10,-5] (55,1485/28,5154), acciaio 5,86; scarto 2e-8. `test_simulation_extra_live.py E3` 42/42.
 - [ ] E4 Carichi remoti e carico da cuscinetto
-- [ ] E5 Studi non statici: frequenze proprie, buckling, termico stazionario
+- [x] E5 Studi non statici -> FATTO 2026-10-18: `create_static_study(analysis=frequency|buckling|thermal, modes)`, `add_temperature`, risultati per tipo. Trave 200x20x10 AISI 1020: f1 203,73 Hz (Eulero 203,20: +0,26 %), f2 404,49 (406,40: -0,47 %), partecipazione di massa del modo 1 in Z 0,61; buckling 1000 N: fattore 20,620 (20,562: +0,28 %); termico 100/0 gradi C: gradiente 500,00 K/m, flusso 23500,0 W/m2 = k dT/L, Q 4,7000 W. `test_simulation_extra_live.py E5` 36/36 (trappola: flusso con unit 0, l'unita' 2 non e' W/m2).
 
 ## Gruppo G — Lingua di SolidWorks
 - [x] G1 Server indipendente dalla lingua (italiano / inglese) -- FATTO nel codice (2026-10-12, `utils/sw_lang.py`): piani standard e

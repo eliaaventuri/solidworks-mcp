@@ -296,14 +296,17 @@ class SimulationOperations:
             kind = _STUDY_NAMES[t]
             data: Dict[str, Any] = {"name": name, "type": kind}
             try:
+                # le opzioni si leggono da un oggetto tenuto in una variabile (come nelle sonde)
                 if t == 1:
+                    fo = st.FrequencyStudyOptions
                     if modes is not None:
-                        st.FrequencyStudyOptions.NoOfFrequencies = int(modes)
-                    data["modes"] = int(st.FrequencyStudyOptions.NoOfFrequencies)
+                        fo.NoOfFrequencies = int(modes)
+                    data["modes"] = int(fo.NoOfFrequencies)
                 elif t == 2:
+                    bo = st.BucklingStudyOptions
                     if modes is not None:
-                        st.BucklingStudyOptions.BucklingModes = int(modes)
-                    data["modes"] = int(st.BucklingStudyOptions.BucklingModes)
+                        bo.BucklingModes = int(modes)
+                    data["modes"] = int(bo.BucklingModes)
                 elif t == 3:
                     st.ThermalStudyOptions.SolutionType = 1        # stazionario (0 = transitorio)
                     data["solution"] = "steady" if int(st.ThermalStudyOptions.SolutionType) == 1 else "transient"
