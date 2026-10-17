@@ -1,4 +1,4 @@
-# LIMITI - elenco di lavoro (aperto il 2026-10-10)
+﻿# LIMITI - elenco di lavoro (aperto il 2026-10-10)
 
 Ogni limite noto, da risolvere uno per uno. Stato: `[ ]` da fare, `[x]` risolto e testato, `[~]` risolto in parte / alternativa (spiegare).
 Chi lavora su un gruppo aggiorna questo file man mano. Esiti dettagliati e regressioni di ogni gruppo: `STATO_STORICO.md`.
@@ -56,7 +56,7 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 ## Gruppo E — Simulazione
 - [ ] E1 Contatti locali (coppie di facce: incollato, libero, senza compenetrazione)
 - [ ] E2 Controllo locale della mesh
-- [ ] E3 Posizione del fattore di sicurezza minimo (calcolata dai risultati nodali)
+- [x] E3 Posizione del fattore di sicurezza minimo -> FATTO 2026-10-18: `get_simulation_results` da' `factor_of_safety.min_at_mm`, corpo critico e FOS per corpo (snervamento / VM nodale massimo del corpo, `GetStressForEntities2` sul corpo). Trave: FOS 5,8978 nel nodo del VM max [4,10,5], scarto dall'API 6e-8; assieme AISI 1020 + Lega 6061: minimo 1,93399 nel corpo di alluminio a [104,10,-5] (55,1485/28,5154), acciaio 5,86; scarto 2e-8. `test_simulation_extra_live.py E3` 42/42.
 - [ ] E4 Carichi remoti e carico da cuscinetto
 - [ ] E5 Studi non statici: frequenze proprie, buckling, termico stazionario
 

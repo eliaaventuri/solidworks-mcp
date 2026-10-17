@@ -23,6 +23,26 @@ Trappole scoperte (SW 2026 SP4.1, late binding, istanza dedicata e NASCOSTA: tut
  - `GetMinMaxFactorOfSafety2` -> (FOS min, FOS max) senza posizione.
  - Grafico: `Results.ActivatePlot(nome)` poi `Extension.SaveAs(png)` con vista iso: la mappa a colori e' nel PNG (anche nascosto).
  - Mesh: `Study.CreateMesh(unita(0=mm), dimensione, tolleranza)`; `Mesh.MesherType` 0 standard, 2 basata sulla curvatura; `Mesh.Quality` 0 bozza / 1 alta.
+Gruppo E (altri studi, posizione del FOS, momenti, carichi e contatti locali, controllo mesh):
+ - `CreateNewStudy2(nome, tipo)`: 0 statico, 1 frequenze, 2 buckling, 3 termico. Opzioni: `FrequencyStudyOptions.NoOfFrequencies`,
+   `BucklingStudyOptions.BucklingModes`, `ThermalStudyOptions.SolutionType` (1 stazionario, 0 transitorio). Per gli studi non statici
+   NON chiamare le funzioni solo statiche dei risultati: frequenze `GetResonantFrequencies` (gruppi di 4: modo, rad/s, Hz, s) e
+   `GetMassParticipation` (modo, X, Y, Z); buckling `GetBucklingLoadFactors` (gruppi di 2); termico `GetMinMaxThermal(comp, step, nullo,
+   unita, err)` con comp 0 temperatura (unita 2 = gradi C), 4 gradiente, 8 flusso, 5/6/7 flusso x/y/z (unita 0: con unita 2 il flusso e'
+   in cal/s/cm2, non W/m2).
+ - Temperatura: `AddTemperature(facce, err)`, poi `TemperatureBeginEdit(); Unit = 2 (Celsius); TemperatureValue; TemperatureEndEdit`.
+ - Il FOS dell'API non ha posizione: si ricava dal VM nodale per corpo (`GetStressForEntities2` con il CORPO SolidWorks come entita'
+   = coppie (nodo, valore) su tutti i nodi del corpo) e lo snervamento del materiale di simulazione.
+ - Reazioni: momento attorno a un punto = somma di (p - q) x F sui nodi + momenti nodali MX..MZ (nodi in metri).
+ - Carico remoto: `AddRemoteLoad(0 diretto, facce, 0 mm, x, y, z, err)`, poi `RemoteLoadBeginEdit; ConnectionType (0 rigido, 1 distribuito);
+   SetForceOrTranslationValues / SetMomentOrRotationValues(True, ux, vx, uy, vy, uz, vz); RemoteLoadEndEdit` (rc 0 = ok).
+ - Carico da cuscinetto: `AddBearingLoad(sistema di coordinate, VARIANT array [faccia], err)`: la faccia nuda fa MORIRE SolidWorks (RPC
+   0x800706BE). Serve un sistema di coordinate con l'origine SULL'asse del cilindro e Z = asse (errore 6 altrimenti); lo si crea da uno
+   schizzo 3D ausiliario (punto + due linee) selezionato con Mark 1 (origine), 2 (asse X), 8 (asse Z).
+ - Contatti locali: `ContactManager.CreateContactSet(tipo, facce1, facce2, err)` con tipi DIVERSI dal globale: 0 senza compenetrazione,
+   1 incollato, 2 accoppiamento forzato, 3 libero, 4 parete virtuale. Le facce dei due componenti coincidono: la seconda serie si cerca
+   fra i componenti diversi dalla prima. Controllo mesh: `Mesh.ApplyMeshControl(facce, err)`, poi `MeshControlBeginEdit; Units = 0;
+   ElementSize; Ratio; MeshControlEndEdit`; dopo si rifa la mesh.
 """
 
 import os
@@ -47,6 +67,11 @@ _RESTRAINTS = {"fixed": 0, "fisso": 0, "immovable": 1, "immobile": 1, "symmetry"
 _COMPONENTS = {"vonmises": 9, "von_mises": 9, "sx": 0, "sy": 1, "sz": 2, "txy": 3, "txz": 4, "tyz": 5,
                "p1": 6, "p2": 7, "p3": 8, "intensity": 10}
 _DISP = {"ux": 0, "uy": 1, "uz": 2, "ures": 3, "resultant": 3}
+_STUDY_TYPES = {"static": 0, "statico": 0, "statica": 0, "frequency": 1, "frequencies": 1, "frequenze": 1, "frequenza": 1,
+                "modal": 1, "buckling": 2, "instabilita": 2, "thermal": 3, "termico": 3, "termica": 3}
+_STUDY_NAMES = {0: "static", 1: "frequency", 2: "buckling", 3: "thermal"}
+_CONTACTS_LOCAL = {"no_penetration": 0, "senza_compenetrazione": 0, "bonded": 1, "incollato": 1, "shrink_fit": 2,
+                   "accoppiamento_forzato": 2, "free": 3, "libero": 3, "virtual_wall": 4, "parete_virtuale": 4}
 _ERR_RUN = {1: "usare mesh di qualita' alta", 13: "modulo elastico non definito", 14: "valore EX non valido",
             15: "coefficiente di Poisson non valido", 19: "materiale non definito", 20: "materiale mancante su componenti",
             21: "nessun corpo solido", 22: "autorizzazione/licenza Simulation fallita", 23: "mesh non trovata",
@@ -246,9 +271,13 @@ class SimulationOperations:
             logger.error(f"simulation_status: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    def create_static_study(self, name: str = "Statico 1", analysis: str = "static") -> Dict:
-        """Crea uno studio statico lineare sul documento attivo (pezzo o assieme) e lo rende attivo."""
+    def create_static_study(self, name: str = "Statico 1", analysis: str = "static", modes: int = None) -> Dict:
+        """Crea uno studio sul documento attivo (pezzo o assieme) e lo rende attivo. analysis: static (default) | frequency |
+        buckling | thermal (stazionario). `modes` = numero di modi (solo frequency/buckling; default di SW: 5 e 1)."""
         try:
+            t = _STUDY_TYPES.get(str(analysis).lower())
+            if t is None:
+                return self._result(False, f"Tipo di studio sconosciuto '{analysis}': {sorted(_STUDY_TYPES)}", SwErrors.swInvalidInput)
             cw, err = self._sim_cw()
             if err:
                 return err
@@ -259,17 +288,35 @@ class SimulationOperations:
                 return self._result(False, "Salva prima il documento (serve per cartella risultati).", SwErrors.swInvalidInput)
             sm = cw.ActiveDoc.StudyManager
             e = _bi()
-            st = sm.CreateNewStudy2(name, 0, e)
+            st = sm.CreateNewStudy2(name, t, e)
             if st is None or int(e.value) != 0:
                 msgs = {1: "nessun corpo solido", 2: "nome gia' usato o non valido", 3: "tipo non definito"}
                 return self._result(False, f"Creazione studio fallita: errore {e.value} ({msgs.get(int(e.value), '?')})",
                                     SwErrors.swUnknownError)
+            kind = _STUDY_NAMES[t]
+            data: Dict[str, Any] = {"name": name, "type": kind}
+            try:
+                if t == 1:
+                    if modes is not None:
+                        st.FrequencyStudyOptions.NoOfFrequencies = int(modes)
+                    data["modes"] = int(st.FrequencyStudyOptions.NoOfFrequencies)
+                elif t == 2:
+                    if modes is not None:
+                        st.BucklingStudyOptions.BucklingModes = int(modes)
+                    data["modes"] = int(st.BucklingStudyOptions.BucklingModes)
+                elif t == 3:
+                    st.ThermalStudyOptions.SolutionType = 1        # stazionario (0 = transitorio)
+                    data["solution"] = "steady" if int(st.ThermalStudyOptions.SolutionType) == 1 else "transient"
+            except Exception as ex:
+                data["options_error"] = str(ex)
             n = int(sm.StudyCount)
             for i in range(n):
                 if sm.GetStudy(i).Name == name:
                     sm.ActiveStudy = i
-            return self._result(True, f"Studio statico '{name}' creato", SwErrors.swSuccess,
-                                {"name": name, "type": "static", "count": n})
+            data["count"] = n
+            label = {"static": "statico", "frequency": "di frequenze", "buckling": "di buckling", "thermal": "termico stazionario"}[kind]
+            extra = f" ({data['modes']} modi)" if "modes" in data else ""
+            return self._result(True, f"Studio {label} '{name}' creato{extra}", SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"create_static_study: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
@@ -393,12 +440,19 @@ class SimulationOperations:
             faces.append(ent)
         return faces, None
 
-    def _sim_find_asm_face(self, doc, p, tol_m):
-        """Faccia piu' vicina al punto p (m, coordinate d'assieme) fra i corpi di tutti i componenti."""
-        best, bd = None, 1e9
+    def _sim_find_asm_face(self, doc, p, tol_m, exclude_components=None, want_comp=False):
+        """Faccia piu' vicina al punto p (m, coordinate d'assieme) fra i corpi di tutti i componenti (esclusi quelli i cui nomi
+        sono in `exclude_components`). Restituisce (faccia, distanza); con want_comp=True (faccia, distanza, nome del componente)."""
+        best, bd, bcomp = None, 1e9, None
         keep = []
         comps = doc.GetComponents(False) or []
         for comp in comps:
+            if exclude_components:
+                try:
+                    if comp.Name2 in exclude_components:
+                        continue
+                except Exception:
+                    pass
             try:
                 bodies = comp.GetBodies2(0)
             except Exception:
@@ -426,8 +480,15 @@ class SimulationOperations:
                         continue
                     if d < bd:
                         best, bd = f, d
+                        try:
+                            bcomp = comp.Name2
+                        except Exception:
+                            bcomp = None
         self._sim_keep_asm = keep + list(comps)
-        if best is not None and bd <= tol_m:
+        ok = best is not None and bd <= tol_m
+        if want_comp:
+            return (best if ok else None), bd, bcomp
+        if ok:
             return best, bd
         return None, bd
 
@@ -609,8 +670,239 @@ class SimulationOperations:
             logger.error(f"add_gravity: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
+    def add_temperature(self, faces: list, value: float, study: str = None) -> Dict:
+        """Temperatura (gradi C) su facce per coordinate (mm). Solo studi termici."""
+        try:
+            st, doc, sm, err = self._sim_study(study)
+            if err:
+                return err
+            if int(st.AnalysisType) != 3:
+                return self._result(False, "add_temperature vale solo per studi termici (create_static_study analysis='thermal')",
+                                    SwErrors.swInvalidInput)
+            ents, e = self._sim_faces(doc, faces)
+            if e:
+                return self._result(False, e, SwErrors.swSelectionError)
+            ec = _bi()
+            t = st.LoadsAndRestraintsManager.AddTemperature(_va(ents), ec)
+            if t is None:
+                return self._result(False, f"AddTemperature fallito (errore {ec.value})", SwErrors.swFeatureError)
+            t.TemperatureBeginEdit()
+            t.Unit = 2                      # Celsius
+            t.TemperatureValue = float(value)
+            rc = t.TemperatureEndEdit
+            val = float(t.TemperatureValue)
+            return self._result(True, f"Temperatura {val} gradi C su {len(ents)} facce: {t.Name}", SwErrors.swSuccess,
+                                {"name": t.Name, "value_C": val, "end_edit": rc, "faces": len(ents)})
+        except Exception as e:
+            logger.error(f"add_temperature: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
+
+    def add_remote_load(self, faces: list, point: list, force: list = None, moment: list = None, connection: str = "rigid",
+                        study: str = None) -> Dict:
+        """Carico remoto: forza (N) e/o momento (N*m) applicati nel punto `point` (mm, coordinate modello) e trasmessi alle facce con
+        connessione rigida o distribuita. La forza e' nel riferimento globale del modello (verificato); il momento da verificare."""
+        try:
+            if not point or len(point) != 3:
+                return self._result(False, "point = [x,y,z] in mm", SwErrors.swInvalidInput)
+            for nm, v in (("force", force), ("moment", moment)):
+                if v is not None and len(v) != 3:
+                    return self._result(False, f"{nm} = [x,y,z]", SwErrors.swInvalidInput)
+            if force is None and moment is None:
+                return self._result(False, "Serve almeno uno fra force [fx,fy,fz] N e moment [mx,my,mz] N*m", SwErrors.swInvalidInput)
+            ct = {"rigid": 0, "rigido": 0, "distributed": 1, "distribuito": 1}.get(str(connection).lower())
+            if ct is None:
+                return self._result(False, "connection: rigid | distributed", SwErrors.swInvalidInput)
+            st, doc, sm, err = self._sim_study(study)
+            if err:
+                return err
+            ents, e = self._sim_faces(doc, faces)
+            if e:
+                return self._result(False, e, SwErrors.swSelectionError)
+            ec = _bi()
+            lr = st.LoadsAndRestraintsManager
+            rl = lr.AddRemoteLoad(0, _va(ents), 0, float(point[0]), float(point[1]), float(point[2]), ec)
+            if rl is None:
+                return self._result(False, f"AddRemoteLoad fallito (errore {ec.value})", SwErrors.swFeatureError)
+            rl.RemoteLoadBeginEdit()
+            rl.ConnectionType = ct
+            if force is not None:
+                fx, fy, fz = (float(c) for c in force)
+                rl.SetForceOrTranslationValues(True, fx != 0, fx, fy != 0, fy, fz != 0, fz)
+            if moment is not None:
+                mx, my, mz = (float(c) for c in moment)
+                rl.SetMomentOrRotationValues(True, mx != 0, mx, my != 0, my, mz != 0, mz)
+            rc = int(rl.RemoteLoadEndEdit)
+            if rc != 0:
+                msgs = {1: "seleziona faccia/spigolo/vertice", 2: "sistema di coordinate", 3: "tipo di carico", 4: "tipo di studio",
+                        5: "array non valido", 6: "array vuoto", 7: "entita' gia' aggiunta", 8: "unita'"}
+                return self._result(False, f"RemoteLoadEndEdit fallito: errore {rc} ({msgs.get(rc, '?')})", SwErrors.swFeatureError,
+                                    {"name": rl.Name, "end_edit": rc})
+            return self._result(True, f"Carico remoto {rl.Name} in {list(point)} mm: forza {force} N, momento {moment} N*m "
+                                      f"(forza nel riferimento globale; momento da verificare)", SwErrors.swSuccess,
+                                {"name": rl.Name, "point_mm": [float(c) for c in point], "force_N": force, "moment_Nm": moment,
+                                 "connection": "rigid" if ct == 0 else "distributed", "end_edit": rc, "faces": len(ents)})
+        except Exception as e:
+            logger.error(f"add_remote_load: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
+
+    def add_bearing_load(self, face: list, value: float, direction: list, distribution: str = "sinusoidal",
+                         study: str = None) -> Dict:
+        """Carico da cuscinetto (N) su una faccia CILINDRICA di un pezzo (punto `face` [x,y,z] mm sulla faccia), nella direzione
+        `direction` (la componente lungo l'asse viene tolta). Crea uno schizzo 3D ausiliario e un sistema di coordinate (origine
+        sull'asse del cilindro) che servono al carico e non vanno cancellati. distribution: sinusoidal | parabolic."""
+        try:
+            dist = {"sinusoidal": 0, "sinusoidale": 0, "parabolic": 1, "parabolica": 1}.get(str(distribution).lower())
+            if dist is None:
+                return self._result(False, "distribution: sinusoidal | parabolic", SwErrors.swInvalidInput)
+            if not direction or len(direction) != 3:
+                return self._result(False, "direction = [dx,dy,dz]", SwErrors.swInvalidInput)
+            if face and isinstance(face[0], (list, tuple)):
+                face = face[0]
+            if not face or len(face) != 3:
+                return self._result(False, "face = [x,y,z] in mm (UN punto sulla faccia cilindrica)", SwErrors.swInvalidInput)
+            st, doc, sm, err = self._sim_study(study)
+            if err:
+                return err
+            if int(doc.GetType) == 2:
+                return self._result(False, "add_bearing_load: per ora solo nei pezzi", SwErrors.swInvalidInput)
+            ents, e = self._sim_faces(doc, [face])
+            if e:
+                return self._result(False, e, SwErrors.swSelectionError)
+            fc = ents[0]
+            surf = fc.GetSurface
+            if not surf.IsCylinder:
+                return self._result(False, "La faccia non e' cilindrica", SwErrors.swInvalidInput)
+            cp = [float(c) for c in surf.CylinderParams]
+            o, ax = cp[0:3], cp[3:6]
+            na = sum(c * c for c in ax) ** 0.5
+            ax = [c / na for c in ax]
+            d = [float(c) for c in direction]
+            dot = sum(d[i] * ax[i] for i in range(3))
+            xd = [d[i] - dot * ax[i] for i in range(3)]
+            nx = sum(c * c for c in xd) ** 0.5
+            if nx < 1e-9:
+                return self._result(False, "direction e' parallela all'asse del cilindro: componente radiale nulla",
+                                    SwErrors.swInvalidInput)
+            xd = [c / nx for c in xd]
+            self._exit_sketch(doc)
+            before = set(self._feature_names(doc, "3DProfileFeature"))
+            doc.ClearSelection2(True)
+            skm = doc.SketchManager
+            skm.Insert3DSketch(True)
+            pt = skm.CreatePoint(*o)
+            lz = skm.CreateLine(*o, *[o[i] + ax[i] * 0.01 for i in range(3)])
+            lx = skm.CreateLine(*o, *[o[i] + xd[i] * 0.01 for i in range(3)])
+            skm.Insert3DSketch(True)
+            helper = [n for n in self._feature_names(doc, "3DProfileFeature") if n not in before]
+            doc.ClearSelection2(True)
+            smg = doc.SelectionManager
+            for obj, mk, app in ((pt, 1, False), (lx, 2, True), (lz, 8, True)):
+                sd = smg.CreateSelectData
+                sd.Mark = mk
+                obj.Select4(app, sd)
+            csf = doc.FeatureManager.InsertCoordinateSystem(False, False, False)
+            doc.ClearSelection2(True)
+            if csf is None:
+                return self._result(False, "Sistema di coordinate non creato (schizzo ausiliario: %s)" % helper, SwErrors.swFeatureError,
+                                    {"helper_sketch": helper})
+            ec = _bi()
+            bl = st.LoadsAndRestraintsManager.AddBearingLoad(csf, _va([fc]), ec)
+            if bl is None:
+                msgs = {1: "array non valido", 2: "nessun oggetto per la faccia", 3: "sistema di coordinate vuoto",
+                        4: "seleziona una faccia", 5: "seleziona il sistema di coordinate",
+                        6: "asse Z del sistema di coordinate non coincidente con l'asse del cilindro", 7: "mesh non valida",
+                        8: "studio non valido", 9: "corpo escluso"}
+                return self._result(False, f"AddBearingLoad fallito (errore {ec.value}: {msgs.get(int(ec.value), '?')}); "
+                                          f"creati comunque {csf.Name} e lo schizzo {helper}", SwErrors.swFeatureError,
+                                    {"coordinate_system": csf.Name, "helper_sketch": helper})
+            bl.BearingLoadBeginEdit()
+            bl.BearingLoadUnit = 0
+            bl.XDirectionValue = float(value)
+            bl.DistributionType = dist
+            rc = bl.BearingLoadEndEdit
+            return self._result(True, f"Carico da cuscinetto {value} N ({distribution}): {bl.Name}", SwErrors.swSuccess,
+                                {"name": bl.Name, "coordinate_system": csf.Name, "helper_sketch": helper,
+                                 "axis": [round(c, 6) for c in ax], "direction_used": [round(c, 6) for c in xd],
+                                 "end_edit": rc, "note": "lo schizzo 3D e il sistema di coordinate servono al carico: non cancellarli"})
+        except Exception as e:
+            logger.error(f"add_bearing_load: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
+
+    def add_simulation_contact(self, faces1: list, faces2: list, contact: str = "bonded", study: str = None) -> Dict:
+        """Contatto locale fra facce di componenti diversi di un assieme (sostituisce il globale su quelle facce).
+        contact: no_penetration | bonded | shrink_fit | free | virtual_wall. faces1/faces2 = punti sulle facce (che coincidono):
+        faces1 = facce piu' vicine, faces2 = facce piu' vicine fra i componenti DIVERSI da quelli di faces1."""
+        try:
+            t = _CONTACTS_LOCAL.get(str(contact).lower())
+            if t is None:
+                return self._result(False, f"contact: {sorted(set(_CONTACTS_LOCAL))}", SwErrors.swInvalidInput)
+            if not faces1 or not faces2:
+                return self._result(False, "Servono faces1 e faces2 ([[x,y,z],...] in mm)", SwErrors.swInvalidInput)
+            st, doc, sm, err = self._sim_study(study)
+            if err:
+                return err
+            if int(doc.GetType) != 2:
+                return self._result(False, "I contatti locali valgono solo per gli assiemi", SwErrors.swInvalidInput)
+            keep = []
+            ents1, comps1 = [], set()
+            for p in faces1:
+                ent, d, cn = self._sim_find_asm_face(doc, [float(c) / 1000.0 for c in p], 1e-4, want_comp=True)
+                keep.append(self._sim_keep_asm)
+                if ent is None:
+                    return self._result(False, f"Nessuna faccia entro 0,1 mm dal punto {list(p)} (faces1)", SwErrors.swSelectionError)
+                ents1.append(ent)
+                comps1.add(cn)
+            ents2, comps2 = [], set()
+            for p in faces2:
+                ent, d, cn = self._sim_find_asm_face(doc, [float(c) / 1000.0 for c in p], 1e-4, exclude_components=comps1,
+                                                     want_comp=True)
+                keep.append(self._sim_keep_asm)
+                if ent is None:
+                    return self._result(False, f"Nessuna faccia entro 0,1 mm dal punto {list(p)} fra i componenti diversi da "
+                                               f"{sorted(c for c in comps1 if c)} (faces2)", SwErrors.swSelectionError)
+                ents2.append(ent)
+                comps2.add(cn)
+            self._sim_keep_contact = keep
+            ec = _bi()
+            cs = st.ContactManager.CreateContactSet(t, _va(ents1), _va(ents2), ec)
+            if cs is None:
+                return self._result(False, f"CreateContactSet fallito (errore {ec.value})", SwErrors.swFeatureError)
+            return self._result(True, f"Contatto locale '{contact}': {cs.ContactName}", SwErrors.swSuccess,
+                                {"name": cs.ContactName, "contact": contact, "type_code": t, "sources": int(cs.SourceEntityCount),
+                                 "targets": int(cs.TargetEntityCount), "components1": sorted(c for c in comps1 if c),
+                                 "components2": sorted(c for c in comps2 if c)})
+        except Exception as e:
+            logger.error(f"add_simulation_contact: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
+
+    def add_mesh_control(self, faces: list, element_size: float, ratio: float = 1.5, study: str = None) -> Dict:
+        """Controllo locale della mesh sulle facce (mm): elementi piu' piccoli vicino a fori e raccordi; poi rifare la mesh."""
+        try:
+            st, doc, sm, err = self._sim_study(study)
+            if err:
+                return err
+            ents, e = self._sim_faces(doc, faces)
+            if e:
+                return self._result(False, e, SwErrors.swSelectionError)
+            ec = _bi()
+            mc = st.Mesh.ApplyMeshControl(_va(ents), ec)
+            if mc is None:
+                return self._result(False, f"ApplyMeshControl fallito (errore {ec.value})", SwErrors.swFeatureError)
+            mc.MeshControlBeginEdit()
+            mc.Units = 0
+            mc.ElementSize = float(element_size)
+            mc.Ratio = float(ratio)
+            rc = mc.MeshControlEndEdit
+            return self._result(True, f"Controllo mesh {mc.Name}: {float(mc.ElementSize)} mm, rapporto {float(mc.Ratio)} su "
+                                      f"{len(ents)} facce (rifai create_simulation_mesh)", SwErrors.swSuccess,
+                                {"name": mc.Name, "element_size_mm": float(mc.ElementSize), "ratio": float(mc.Ratio),
+                                 "end_edit": rc, "faces": len(ents), "note": "rifai create_simulation_mesh perche' il controllo abbia effetto"})
+        except Exception as e:
+            logger.error(f"add_mesh_control: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
+
     def list_simulation_loads(self, study: str = None) -> Dict:
-        """Vincoli e carichi dello studio."""
+        """Vincoli e carichi dello studio, piu' contatti locali e controlli mesh."""
         try:
             st, doc, sm, err = self._sim_study(study)
             if err:
@@ -621,12 +913,24 @@ class SimulationOperations:
             for i in range(int(lr.Count)):
                 x = lr.GetLoadsAndRestraints(i, _bi())
                 rows.append({"name": x.Name, "type": kinds.get(int(x.Type), int(x.Type)), "entities": int(x.EntityCount)})
-            return self._result(True, f"{len(rows)} tra carichi e vincoli", SwErrors.swSuccess, {"items": rows})
+            try:
+                cm = st.ContactManager
+                for i in range(int(cm.ContactSetCount)):
+                    rows.append({"name": cm.GetContactSetAt(i).ContactName, "type": "contatto"})
+            except Exception as ex:
+                logger.debug(f"contatti locali non elencati: {ex}")
+            try:
+                for i in range(int(st.Mesh.MeshControlCount)):
+                    rows.append({"name": st.Mesh.GetMeshControlAt(i).Name, "type": "controllo mesh"})
+            except Exception as ex:
+                logger.debug(f"controlli mesh non elencati: {ex}")
+            return self._result(True, f"{len(rows)} tra carichi, vincoli, contatti locali e controlli mesh", SwErrors.swSuccess,
+                                {"items": rows})
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     def delete_simulation_load(self, name: str, study: str = None) -> Dict:
-        """Elimina un carico o vincolo per nome."""
+        """Elimina un carico, vincolo, contatto locale o controllo mesh per nome."""
         try:
             st, doc, sm, err = self._sim_study(study)
             if err:
@@ -635,6 +939,24 @@ class SimulationOperations:
             n0 = int(lr.Count)
             lr.DeleteLoadsAndRestraints(name)
             n1 = int(lr.Count)
+            if n1 >= n0:
+                try:
+                    cm = st.ContactManager
+                    c0 = int(cm.ContactSetCount)
+                    cm.DeleteContactSet(name)
+                    if int(cm.ContactSetCount) < c0:
+                        return self._result(True, f"Contatto locale '{name}' eliminato", SwErrors.swSuccess,
+                                            {"remaining": int(cm.ContactSetCount), "kind": "contatto"})
+                except Exception as ex:
+                    logger.debug(f"DeleteContactSet: {ex}")
+                try:
+                    m0 = int(st.Mesh.MeshControlCount)
+                    st.Mesh.DeleteMeshControl(name)
+                    if int(st.Mesh.MeshControlCount) < m0:
+                        return self._result(True, f"Controllo mesh '{name}' eliminato", SwErrors.swSuccess,
+                                            {"remaining": int(st.Mesh.MeshControlCount), "kind": "controllo mesh"})
+                except Exception as ex:
+                    logger.debug(f"DeleteMeshControl: {ex}")
             return self._result(n1 < n0, f"'{name}' {'eliminato' if n1 < n0 else 'non trovato'}",
                                 SwErrors.swSuccess if n1 < n0 else SwErrors.swInvalidInput, {"remaining": n1})
         except Exception as e:
@@ -781,10 +1103,148 @@ class SimulationOperations:
     def _sim_mm(p):
         return [round(c * 1000, 4) for c in p]
 
-    def get_simulation_results(self, study: str = None, step: int = 1) -> Dict:
-        """Risultati dello studio statico: von Mises max/min (MPa) con posizione (mm; nodale come la mappa e elementale),
-        spostamento risultante max (mm) con posizione, spostamenti per componente, fattore di sicurezza minimo/massimo,
-        forze di reazione totali (somma sui nodi vincolati, N), nodi/elementi della mesh."""
+    def _sim_results_frequency(self, st, res) -> Dict:
+        data: Dict[str, Any] = {"mesh": self._sim_mesh_info(st)}
+        f = list(res.GetResonantFrequencies(_bi()) or [])
+        mp = list(res.GetMassParticipation(_bi()) or [])
+        part = {int(mp[i]): (mp[i + 1], mp[i + 2], mp[i + 3]) for i in range(0, len(mp) - 3, 4)}
+        modes = []
+        for i in range(0, len(f) - 3, 4):
+            k = int(f[i])
+            row = {"mode": k, "frequency_Hz": f[i + 2], "angular_rad_s": f[i + 1], "period_s": f[i + 3]}
+            if k in part:
+                row["mass_participation"] = {"x": part[k][0], "y": part[k][1], "z": part[k][2]}
+            modes.append(row)
+        data["modes"] = modes
+        data["plots"] = list(res.GetPlotNames)
+        if not modes:
+            return self._result(False, "Nessuna frequenza restituita (analisi eseguita?)", SwErrors.swInvalidInput, data)
+        return self._result(True, f"{len(modes)} modi, f1 = {modes[0]['frequency_Hz']:.3f} Hz", SwErrors.swSuccess, data)
+
+    def _sim_results_buckling(self, st, res) -> Dict:
+        data: Dict[str, Any] = {"mesh": self._sim_mesh_info(st)}
+        b = list(res.GetBucklingLoadFactors(_bi()) or [])
+        rows = [{"mode": int(b[i]), "load_factor": b[i + 1]} for i in range(0, len(b) - 1, 2)]
+        data["buckling_load_factors"] = rows
+        data["note"] = "carico critico = fattore x carichi applicati"
+        data["plots"] = list(res.GetPlotNames)
+        if not rows:
+            return self._result(False, "Nessun fattore di carico restituito (analisi eseguita?)", SwErrors.swInvalidInput, data)
+        return self._result(True, f"{len(rows)} modi, fattore di carico del 1o modo {rows[0]['load_factor']:.4f}",
+                            SwErrors.swSuccess, data)
+
+    def _sim_results_thermal(self, st, res, step) -> Dict:
+        nodes = self._sim_nodes(st)
+        data: Dict[str, Any] = {"mesh": self._sim_mesh_info(st)}
+
+        def mm(comp, unit):
+            return res.GetMinMaxThermal(comp, step, _nullv(), unit, _bi())      # (id_min, min, id_max, max)
+
+        a = mm(0, 2)
+        data["temperature_C"] = {"min": a[1], "max": a[3], "min_at_mm": self._sim_mm(nodes[int(a[0])]),
+                                 "max_at_mm": self._sim_mm(nodes[int(a[2])])}
+        a = mm(4, 0)
+        data["temperature_gradient_K_m"] = {"min": a[1], "max": a[3]}
+        a = mm(8, 0)
+        data["heat_flux_W_m2"] = {"min": a[1], "max": a[3], "max_at_mm": self._sim_mm(nodes[int(a[2])])}
+        comp = {}
+        for nm, c in (("x", 5), ("y", 6), ("z", 7)):
+            a = mm(c, 0)
+            comp[nm] = {"min": a[1], "max": a[3]}
+        data["heat_flux_components_W_m2"] = comp
+        data["plots"] = list(res.GetPlotNames)
+        t = data["temperature_C"]
+        return self._result(True, f"Temperatura {t['min']:.3f}..{t['max']:.3f} gradi C, flusso max "
+                                  f"{data['heat_flux_W_m2']['max']:.4g} W/m2", SwErrors.swSuccess, data)
+
+    def _sim_sw_bodies(self, doc):
+        """[(nome del componente | None, corpo SolidWorks)] in ordine (pezzo: GetBodies2; assieme: corpi dei componenti)."""
+        out, keep = [], []
+        if int(doc.GetType) == 2:
+            for comp in doc.GetComponents(False) or []:
+                keep.append(comp)
+                for b in (comp.GetBodies2(0) or []):
+                    out.append((comp.Name2, b))
+        else:
+            for b in (doc.GetBodies2(0, True) or []):
+                out.append((None, b))
+        self._sim_keep_swb = keep + [b for _, b in out]
+        return out
+
+    def _sim_match_bodies(self, sim_bodies, sw_bodies):
+        """Abbina i corpi di simulazione [(nome componente, corpo)] ai corpi SolidWorks [(nome componente, corpo)]:
+        per nome del componente e poi per ordine dei corpi; se i nomi non corrispondono, per ordine globale se i conteggi sono uguali."""
+        def norm(n):
+            return (n or "").split("/")[-1].lower()
+        by_name: Dict[str, list] = {}
+        for cn, b in sw_bodies:
+            by_name.setdefault(norm(cn), []).append(b)
+        pairs, used = [], {}
+        for cn, sb in sim_bodies:
+            key = norm(cn)
+            lst = by_name.get(key)
+            if lst is None and len(by_name) == 1 and None in [c for c, _ in sw_bodies]:
+                lst = next(iter(by_name.values()))      # pezzo: un solo gruppo, per ordine
+            k = used.get(key, 0)
+            if lst is None or k >= len(lst):
+                pairs = None
+                break
+            used[key] = k + 1
+            pairs.append((cn, sb, lst[k]))
+        if pairs is None and len(sim_bodies) == len(sw_bodies):
+            pairs = [(cn, sb, sw[1]) for (cn, sb), sw in zip(sim_bodies, sw_bodies)]
+        return pairs
+
+    def _sim_fos_location(self, st, doc, res, step, api_min, nodes, vm_global) -> Dict:
+        """Posizione del FOS minimo (criterio von Mises: FOS = snervamento / VM nodale massimo del corpo)."""
+        sim_bodies = self._sim_bodies(st)
+        pairs = None
+        try:
+            pairs = self._sim_match_bodies(sim_bodies, self._sim_sw_bodies(doc))
+        except Exception as ex:
+            logger.debug(f"abbinamento corpi: {ex}")
+        per_body = []
+        if pairs:
+            for cn, sb, swb in pairs:
+                a = res.GetStressForEntities2(True, 9, step, _nullv(), _va([swb]), 3, _bi())
+                best_v, best_n = -1.0, None
+                for i in range(0, len(a) - 1, 2):
+                    if float(a[i + 1]) > best_v:
+                        best_v, best_n = float(a[i + 1]), int(a[i])
+                per_body.append((cn, sb, best_v, best_n))
+        else:
+            # abbinamento non riuscito: con un solo materiale il minimo e' nel nodo del VM massimo globale
+            mats = {self._sim_mat_props(sb.GetSolidBodyMaterial).get("name") for _, sb in sim_bodies}
+            if not sim_bodies or len(mats) != 1:
+                return {"location_error": "abbinamento corpo SolidWorks <-> corpo di simulazione non riuscito (materiali diversi)"}
+            cn, sb = sim_bodies[0]
+            per_body.append((cn, sb, float(vm_global["max"]), int(vm_global["max_node"])))
+        rows = []
+        for cn, sb, vmax, node in per_body:
+            mat = self._sim_mat_props(sb.GetSolidBodyMaterial)
+            y = mat.get("yield_MPa")
+            if not y or vmax <= 0 or node is None:
+                continue
+            rows.append({"component": cn, "body": sb.SolidBodyName, "material": mat.get("name"), "yield_MPa": y,
+                         "von_mises_max_MPa": vmax, "fos": y / vmax, "node": node})
+        if not rows:
+            return {"location_error": "nessun corpo con snervamento e tensione valida"}
+        worst = min(rows, key=lambda r: r["fos"])
+        out = {"min_at_mm": self._sim_mm(nodes[worst["node"]]), "min_node": worst["node"],
+               "min_body": {k: worst[k] for k in ("component", "body", "material", "yield_MPa", "von_mises_max_MPa")},
+               "per_body": [{k: r[k] for k in ("component", "body", "material", "yield_MPa", "von_mises_max_MPa", "fos")}
+                            for r in rows],
+               "computed_min": worst["fos"], "note": "criterio von Mises: FOS = snervamento / VM nodale"}
+        if api_min:
+            out["check_rel"] = abs(worst["fos"] - api_min) / abs(api_min)
+        return out
+
+    def get_simulation_results(self, study: str = None, step: int = 1, moment_point: list = None) -> Dict:
+        """Risultati dello studio, secondo il tipo. Statico: von Mises max/min (MPa) con posizione (mm; nodale come la mappa e
+        elementale), spostamento risultante max (mm) con posizione, spostamenti per componente, fattore di sicurezza minimo/massimo
+        con posizione e corpo, forze e momenti di reazione totali (somma sui nodi vincolati, N e N*m; momento attorno a
+        `moment_point` [x,y,z] mm, default origine), nodi/elementi della mesh. Frequenze: frequenze proprie e partecipazione di
+        massa. Buckling: fattori di carico. Termico: temperatura, gradiente, flusso."""
         try:
             st, doc, sm, err = self._sim_study(study)
             if err:
@@ -792,6 +1252,18 @@ class SimulationOperations:
             res = st.Results
             if int(res.GetMaximumAvailableSteps) < 1:
                 return self._result(False, "Nessun risultato: esegui run_simulation", SwErrors.swInvalidInput)
+            atype = int(st.AnalysisType)
+            if atype == 1:
+                return self._sim_results_frequency(st, res)
+            if atype == 2:
+                return self._sim_results_buckling(st, res)
+            if atype == 3:
+                return self._sim_results_thermal(st, res, step)
+            if atype != 0:
+                return self._result(False, f"Tipo di studio {atype} non supportato da get_simulation_results", SwErrors.swInvalidInput)
+            if moment_point is not None and len(moment_point) != 3:
+                return self._result(False, "moment_point = [x,y,z] in mm", SwErrors.swInvalidInput)
+            q = [float(c) / 1000.0 for c in (moment_point or [0, 0, 0])]
             nodes = self._sim_nodes(st)
             els = st.Mesh.GetElements
             cen = {int(els[i]): (els[i + 11], els[i + 12], els[i + 13]) for i in range(0, len(els), 16)}
@@ -813,7 +1285,12 @@ class SimulationOperations:
             data["displacement_components_mm"] = comp
             try:
                 a = res.GetMinMaxFactorOfSafety2(True, _nullv(), 0, 0, step, _bi())
-                data["factor_of_safety"] = {"min": a[0], "max": a[1], "note": "criterio von Mises max; senza posizione (API)"}
+                data["factor_of_safety"] = {"min": a[0], "max": a[1], "note": "criterio von Mises max; l'API non da' la posizione"}
+                try:
+                    data["factor_of_safety"].update(self._sim_fos_location(st, doc, res, step, a[0], nodes,
+                                                                           data["von_mises_nodal_MPa"]))
+                except Exception as ex:
+                    data["factor_of_safety"]["location_error"] = str(ex)
             except Exception as ex:
                 data["factor_of_safety"] = {"error": str(ex)}
             r = res.GetReactionForcesAndMoments(step, _nullv(), 0, _bi())
@@ -821,6 +1298,19 @@ class SimulationOperations:
             tot = [sum(r[i * 9 + k] for i in range(n)) for k in (1, 2, 3)]
             data["reaction_force_N"] = {"x": round(tot[0], 4), "y": round(tot[1], 4), "z": round(tot[2], 4),
                                         "resultant": round(sum(c * c for c in tot) ** 0.5, 4)}
+            mom = [0.0, 0.0, 0.0]
+            for i in range(n):
+                p = nodes.get(int(r[i * 9]))
+                if p is None:
+                    continue
+                d = [p[0] - q[0], p[1] - q[1], p[2] - q[2]]
+                f = (r[i * 9 + 1], r[i * 9 + 2], r[i * 9 + 3])
+                mom[0] += d[1] * f[2] - d[2] * f[1] + r[i * 9 + 5]
+                mom[1] += d[2] * f[0] - d[0] * f[2] + r[i * 9 + 6]
+                mom[2] += d[0] * f[1] - d[1] * f[0] + r[i * 9 + 7]
+            data["reaction_moment_Nm"] = {"x": round(mom[0], 4), "y": round(mom[1], 4), "z": round(mom[2], 4),
+                                          "resultant": round(sum(c * c for c in mom) ** 0.5, 4)}
+            data["reaction_moment_point_mm"] = [round(c * 1000, 4) for c in q]
             data["plots"] = list(res.GetPlotNames)
             vm = data["von_mises_nodal_MPa"]["max"]
             return self._result(True, f"VM max {vm:.3f} MPa, spostamento max {data['displacement_mm']['max']:.5f} mm, "

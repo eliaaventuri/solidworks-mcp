@@ -27,7 +27,7 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, EXPECTED_TOOLS
 PI = math.pi
 TOL = 0.005          # 0,5 %
 
@@ -173,7 +173,7 @@ async def scenario(c, tl):
 async def sicurezza_tool_list(c, tl):
     print("\n== 0. Elenco tool e annotazioni")
     names = [t.name for t in tl]
-    record("197 tool (196 + apply_configuration_table del gruppo D), nessun duplicato", len(names) == 197 and len(set(names)) == 197,
+    record(f"{EXPECTED_TOOLS} tool (con execute_python), nessun duplicato", len(names) == EXPECTED_TOOLS and len(set(names)) == EXPECTED_TOOLS,
            f"{len(names)} tool")
     by = {t.name: t for t in tl}
     destr = ["close_document", "save_document", "save_drawing", "export_drawing", "export_model", "export_model_image",

@@ -1,5 +1,5 @@
 """
-Server MCP di SolidWorks: definizione dei tool base, smistamento di tutti i 196 tool e avvio (stdio).
+Server MCP di SolidWorks: definizione dei tool base, smistamento di tutti i 201 tool (202 con execute_python) e avvio (stdio).
 I tool delle altre aree sono definiti in *_tools.py; la guardia di sovrascrittura e le annotazioni in safety.py.
 """
 

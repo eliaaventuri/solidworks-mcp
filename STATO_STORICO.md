@@ -550,3 +550,38 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
 - D3: `.eprt`/`.easm` sono ZIP (`eModel` HSF V20.90, `preview.jpg`, `materials.xml` con un `<Entity>` per CORPO DISTINTO: assieme con
   3 istanze di 2 pezzi -> 2). `EModelView.EModelViewApp` (in-process) resta non inizializzato anche dopo `Init(False)`: `OpenFile` E_FAIL e
   poi crash di Python; `eDrawings.exe <file>` mostra sempre il titolo "eDrawings". Verifica quindi strutturale.
+
+## Fase 4: gruppo E, sonde dal vivo (2026-10-18, `scripts_tmp/eprobe.py E5 E3 E1 E4 E4B E2`)
+Trappole e nomi verificati (SW 2026 SP4.1, istanza dedicata nascosta, late binding):
+- **E5** `CreateNewStudy2(nome, tipo, err)`: 0 statico, 1 frequenze, 2 buckling, 3 termico. `st.FrequencyStudyOptions.NoOfFrequencies` (default 5),
+  `st.BucklingStudyOptions.BucklingModes` (default 1), `st.ThermalStudyOptions.SolutionType` (1 stazionario, 0 transitorio; default 1).
+  `Results.GetResonantFrequencies(err)` = gruppi di 4 (modo, rad/s, Hz, periodo); `GetMassParticipation(err)` = (modo, X, Y, Z);
+  `GetBucklingLoadFactors(err)` = (modo, fattore). Termico: `AddTemperature(VARIANT array facce, err)` poi `TemperatureBeginEdit()`, `Unit = 2`
+  (gradi C), `TemperatureValue`, `TemperatureEndEdit` (proprieta'). `GetMinMaxThermal(comp, step, NULL, unit, err)`: comp 0 T, 1-3 gradiente xyz,
+  4 gradiente modulo, 5-7 flusso xyz, 8 flusso modulo. **Unita' 2 sul flusso NON e' W/m2** (0,5617 = cal/s/cm2 al posto di 23500 W/m2): per
+  gradiente e flusso usare unit 0 (SI). Grafici delle frequenze: 'Ampiezza1..n' (piu' 'Qualità1').
+  Misure (trave 200x20x10 AISI 1020, mesh 4 mm, 7522 nodi): f1 203,733 Hz (atteso 203,2: +0,26 %), f2 404,49 (406,4: -0,47 %), f3 1261,9, f4 2426,1;
+  partecipazione di massa modo 1: Z 0,612; buckling con 1000 N: 20,620 (atteso 20,562: +0,28 %), modo 2 81,83; termico 100/0 gradi C:
+  T 100,000 / 0,000, gradiente 500,00 K/m, flusso 23500,0 W/m2 (k = 47 dalla libreria: Q = 23500 x 2e-4 m2 = 4,70 W).
+- **E3** `GetStressForEntities2(True, 9, step, NULL, VARIANT array [corpo SW], 3, err)` con il CORPO (non le facce) da' tutti i nodi del corpo
+  (3439 su 6876): il VM massimo per corpo coincide con quello globale nel corpo giusto. Assieme AISI 1020 + Lega 6061 incollati: FOS API
+  1,93399 = 55,1485 / 28,5154 (alluminio, nodo in [104,10,-5]); acciaio 351,57 / 59,957 = 5,86. NB: `GetMinMaxStress` NON ha un argomento per
+  scegliere il corpo (l'ipotesi del piano era sbagliata).
+- **E1** `ContactManager.CreateContactSet(tipo, VARIANT array sorgenti, VARIANT array destinazioni, err)`: i tipi sono quelli di
+  `swsContactSetTypeStaticNonLinear_e` anche per lo statico lineare: **0 senza compenetrazione, 1 incollato**, 2 accoppiamento forzato, 3 libero,
+  4 parete virtuale (il globale `SetGlobalContact` usa invece 0 incollato, 1 libero, 2 senza compenetrazione). Con il tipo 0 credendolo
+  "incollato" il blocco scivola via (97960 mm). `cs.SuppressUnSuppress()` solleva un'eccezione e dopo l'istanza si e' bloccata alla mesh: non usarlo.
+  Misure (due blocchi 100x20x10 di testa, mesh 4): globale libero + locale incollato -> 0,796407 mm (monolite 0,7964); compressione 100 N:
+  incollato 0,00049900, senza compenetrazione 0,00049896 (F L/(E A) = 0,0005); trazione con senza compenetrazione: 25002 mm (si stacca).
+- **E4** `AddRemoteLoad(0 diretto, VARIANT array facce, 0 mm, x, y, z, err)`, poi `RemoteLoadBeginEdit()`, `ConnectionType = 0` rigido,
+  `SetForceOrTranslationValues(True, bx, fx, by, fy, bz, fz)`, `RemoteLoadEndEdit`: forze nel riferimento del modello. Trave, 100 N -Z in (250,0,0):
+  reazione (0,0,100) N, momento delle reazioni nodali attorno all'origine (0,-25,0) N*m (i momenti nodali MX..MZ sono 0 nei solidi), freccia 1,0945 mm
+  (Eulero 1,10). Cuscinetto: `AddBearingLoad(CS, VARIANT array [faccia], err)`; **con la faccia nuda (o VT_DISPATCH) SolidWorks muore**
+  (RPC 0x800706BE); con `GetSpecificFeature2` del CS "tipi incompatibili". Errore 6 = asse Z del CS non COINCIDENTE con l'asse del cilindro
+  (parallelo non basta): CS costruito da uno schizzo 3D (punto sull'asse da `CylinderParams`, linea lungo l'asse marcata 8, linea lungo il carico
+  marcata 2, punto marcato 1, `InsertCoordinateSystem`). `BearingLoadUnit = 0`, `XDirectionValue = 1000`, `DistributionType = 0` sinusoidale.
+  Piastra 40x100x5 foro D10, 1000 N +Z: reazione -1000,000 N; sz medio sul foro per settori di 30 gradi: 0 gradi -25,7, +-30 -24,4, +-60 -5,7 MPa.
+- **E2** `Mesh.ApplyMeshControl(VARIANT array facce, err)` -> `MeshControlBeginEdit()`, `Units = 0` (mm), `ElementSize`, `Ratio`, `MeshControlEndEdit`.
+  Piastra 40x100x5 foro D4, 2000 N, mesh standard 2 mm: nodi entro 2 mm dal foro 549 -> 4157, lontani (|z| > 30) 11697 -> 11756, nodi sulla
+  faccia del foro 102 -> 1026, Kt 2,487 -> 2,725 (Peterson 2,721).
+- Sonde: una chiamata `execute_python` per passo (se una si blocca, l'output delle altre resta); `SW_MCP_TOOL_TIMEOUT=120` per non aspettare 300 s.

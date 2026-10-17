@@ -26,7 +26,7 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup
+from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup, EXPECTED_TOOLS
 PI = math.pi
 TOL = 2e-3             # mm
 RESULTS = []
@@ -842,7 +842,7 @@ def tool_checks(tl):
     print("\n== 0. Tool e schemi")
     names = [x.name for x in tl]
     by = {x.name: x for x in tl}
-    record("197 tool (196 + apply_configuration_table del gruppo D), nessun duplicato", len(names) == 197 and len(set(names)) == 197, f"{len(names)} tool")
+    record(f"{EXPECTED_TOOLS} tool (con execute_python), nessun duplicato", len(names) == EXPECTED_TOOLS and len(set(names)) == EXPECTED_TOOLS, f"{len(names)} tool")
     m = by["mirror_components"]
     record("mirror_components: destructiveHint, nota [DESTRUCTIVE], parametri opposite_hand/name_suffix/folder/overwrite/align_exact",
            bool(m.annotations and m.annotations.destructiveHint) and "DESTRUCTIVE" in (m.description or "")
