@@ -69,15 +69,22 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
   entrambe le lingue. Correzioni e trappole in `STATO_STORICO.md` (fase 1).
 
 ## Gruppo H — Robustezza del server (piano, fase 5)
-- [ ] H1 Timeout generale dei tool (oggi solo run_simulation): nessun tool blocca il server per sempre
-- [ ] H2 Ripresa dopo un crash dell'istanza dedicata (`SW_MCP_AUTORESTART`)
-- [~] H3 Chiusura dell'istanza dedicata all'uscita del server, solo senza documenti non salvati -- fatto nel codice 2026-10-13, da verificare
-- [~] H4 Preferenze anti-finestre ripristinate dopo ogni tool -- fatto nel codice 2026-10-13 (test offline), da verificare dal vivo
-- [ ] H5 `SW_MCP_TOOLSETS`: esporre solo i gruppi di tool che servono (oggi ~27.000 token di descrizioni)
-- [ ] H6 Descrizioni dei tool in una lingua sola, con unita' ed esempi
-- [ ] H7 `execute_python` disattivato di default (decide Elia)
-- [ ] H8 Pulizia degli import non usati e CI che fallisce su ogni avviso di pyflakes
-- [ ] H9 Log in `%LOCALAPPDATA%` con rotazione
+- [x] H1 Timeout generale dei tool (2026-10-17): thread COM unico, `tool_timeout` 300 s (`SW_MCP_TOOL_TIMEOUT`); istanza dedicata chiusa allo
+  scadere, quella dell'utente mai toccata. `test_timeout_live` A/B: errore a 15,1 s e 15,2 s con limite 15 s, tool seguente rifiutato in 0,0 s,
+  thread COM liberato dalla chiusura, 0 orfani; regressione completa verde col thread COM.
+- [x] H2 Ripresa dopo un crash dell'istanza dedicata (2026-10-17): `SW_MCP_AUTORESTART=1`. `test_timeout_live` C: PID ucciso a meta', il tool seguente
+  rilancia l'istanza in 15 s (PID nuovo) e avverte dei documenti persi, schizzo creato sulla nuova istanza; 18/18. Corretto anche connect ripetuto.
+- [x] H3 Chiusura dell'istanza dedicata all'uscita del server, solo senza documenti non salvati -- verificata a mano da Elia in fase 0 (2026-10-16);
+  dal 2026-10-17 la chiusura passa dal thread COM.
+- [x] H4 Preferenze anti-finestre ripristinate dopo ogni tool -- verificato a mano da Elia in fase 0 (Opzioni > Generale invariata, 2026-10-16).
+- [x] H5 `SW_MCP_TOOLSETS` (2026-10-17): gruppi base (sempre attivo), modeling, drawings, assembly, data, simulation; test offline: tool esposti =
+  gruppi scelti, gli altri rispondono con l'errore che nomina il gruppo.
+- [x] H6 Descrizioni dei tool in inglese con unita' ed esempi (2026-10-17): 213 descrizioni aggiunte; `test_descriptions` offline (0 parametri senza
+  descrizione, 0 parole italiane, 0 numeri senza unita'); caratteri 102.413 -> 112.862.
+- [x] H7 `execute_python` disattivato di default (2026-10-17, confermato da Elia): attivo solo con `SW_MCP_ALLOW_PYTHON=1`; test offline 195/196 tool.
+- [x] H8 Import non usati e variabili inutilizzate tolti, pyflakes 0 avvisi su pacchetto e test; il CI fallisce su qualunque avviso (2026-10-17).
+- [x] H9 Log in `%LOCALAPPDATA%\solidworks-mcp\` con rotazione 5 x 5 MB, `log_file` assoluto possibile (2026-10-17).
+- [ ] H10 Risorse e prompt MCP (facoltativo, rinviato alla fase 6)
 
 ## Gruppo F — Sicurezza e pulizia (decide Elia)
 - [x] F1 `.env` dell'autore con una chiave API OpenRouter esposta: togliere dal repository (resta in .gitignore)
