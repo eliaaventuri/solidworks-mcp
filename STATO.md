@@ -1,6 +1,6 @@
 # STATO — SolidWorks MCP
 
-Ultimo aggiornamento: 2026-10-12. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
+Ultimo aggiornamento: 2026-10-17. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
 Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D_E.md`. Mappa dei file: `ATLANTE.md`.
 
 ## Ambiente di sviluppo
@@ -70,7 +70,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
     (poteva essere uno schizzo dell'utente): ora si cancella solo quello appena creato, dopo aver chiuso uno schizzo eventualmente aperto;
   - `modeling.py` (`_seed_effect`, controllo delle ripetizioni): le feature soppresse per la misura tornano attive anche in caso di errore.
 
-## Lingua inglese (G1, 2026-10-12, non ancora provato dal vivo)
+## Lingua inglese (G1, 2026-10-12; provato dal vivo il 2026-10-17, vedi Fase 1)
 Il server non usa piu' nomi italiani fissi (dettagli in `LIMITI.md`, G1, e in `solidworks_mcp/utils/sw_lang.py`); `connect_solidworks`
 riporta `ui_language`. Le scritte che il server mette sulle tavole (cartiglio dei formati verticali, "VISTA A", nota degli smussi) sono in
 italiano con SolidWorks italiano e in inglese altrimenti; i formati verticali inglesi si generano come `formats/a3 - iso portrait en.slddrt`.
@@ -86,7 +86,16 @@ assembly_extra 213/213, data 159/159, simulation 120/120; offline 83/83. Stessi 
 Controlli a mano confermati da Elia (2026-10-16): tavole a occhio, quota in Opzioni > Generale, chiusura dell'istanza
 nascosta all'uscita di Claude Desktop.
 
+## Fase 1 (2026-10-16/17, PC, inglese) — CHIUSA
+SolidWorks messo in inglese via API (`scripts_tmp/lingua.py en|it|leggi`, toggle 83 e 262, originali False) e poi rimesso in italiano
+(verificato: `italian`, 83 e 262 False). Regressione in inglese verde: modeling 175/175, modeling_extra 240/240, drawings 65/65,
+drawing_quality 139/139, assembly 113/113, assembly_extra 213/213, data 159/159, simulation 120/120, offline 83/83.
+Rossi trovati e corretti: nota "smussi non quotati" sovrapposta a una quota (server: ora misurata con `GetExtent`), e nei test nomi
+italiani (formato verticale `... en.slddrt`, SIZE/WEIGHT, colonne della distinta, materiali Steel/Plastics/ABS/Bronze, CirPattern, titolo
+dell'assieme). Conferma in italiano dopo le correzioni (`regressione_20261017_1242.md`): drawings 65/65, drawing_quality 139/139,
+assembly 113/113, data 159/159. G1 `[x]`. Dettagli in `STATO_STORICO.md`.
+Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italiano.
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fase 0 chiusa. Fase 1 (inglese) in corso: regressione
-completa con SolidWorks in inglese, esiti da aggiungere qui.
-Poi fase 1 (inglese), fase 5 (robustezza), fase 2 (B4/C5/C3), fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0 e 1 chiuse. Prossima: fase 5 (robustezza; parti offline delegabili),
+poi fase 2 (B4/C5/C3), fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).

@@ -145,10 +145,10 @@ async def scenario(c: Client, tools):
 
     # ------------------------------------------------------------------ 2. materiali
     print("\n== 2. Materiali")
-    d = await T(c, "list_materials", "categorie", check=lambda d: d["total"] > 100 and "Acciaio" in d["categories"] and "Plastiche" in d["categories"])
+    d = await T(c, "list_materials", "categorie", check=lambda d: d["total"] > 100 and L("Acciaio") in d["categories"] and L("Plastiche") in d["categories"])
     d = await T(c, "list_materials", "Plastiche / ABS", category="Plastiche", query="ABS",
-                check=lambda d: any(m["name"] == "ABS generico" for m in d["materials"]))
-    dens_abs = next((m["density_kg_m3"] for m in d.get("materials", []) if m["name"] == "ABS generico"), None)
+                check=lambda d: any(m["name"] == L("ABS generico") for m in d["materials"]))
+    dens_abs = next((m["density_kg_m3"] for m in d.get("materials", []) if m["name"] == L("ABS generico")), None)
     d = await T(c, "list_materials", "query PLA (se presente)", query="PLA")
     record("list_materials: PLA nella libreria?", True, f"{d.get('matching')} corrispondenze (informativo: PLA {'presente' if d.get('matching') else 'assente'})")
     d = await T(c, "list_materials", "AISI 304", query="AISI 304", check=lambda d: d["materials"][0]["name"] == "AISI 304")

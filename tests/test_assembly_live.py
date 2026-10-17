@@ -334,7 +334,10 @@ async def main_assembly(c):
     nm = exploded[0]["name"] if exploded else None
     d = await T(c, "add_bom", "distinta sulla vista esplosa", view=nm, bom_type="parts_only", check=lambda d: d["rows"] == 5)
     d = await T(c, "list_bom", "righe e quantita' corrette")
-    rows = {r["Num. parte"]: int(r["Quantità"]) for r in d.get("rows", [])} if d else {}
+    hdr = [str(h) for h in (d.get("header") or [])] if d else []      # intestazioni del modello di distinta: cambiano con la lingua
+    c_part = next((h for h in hdr if "num. parte" in h.lower() or "part n" in h.lower()), None)
+    c_qty = next((h for h in hdr if "quantit" in h.lower() or "qty" in h.lower()), None)
+    rows = {r[c_part]: int(r[c_qty]) for r in d.get("rows", [])} if d and c_part and c_qty else {}
     record("distinta: staffa 1, boccola 1, perno 1, vite 6 (4 righe)", rows == {"asm_staffa": 1, "asm_boccola": 1, "asm_perno": 1, "asm_vite": 6},
            str(rows))
     d = await T(c, "add_balloons", "palloncini sulla vista esplosa", view=nm)
@@ -383,7 +386,7 @@ async def scratch_assembly(c):
     ok, _, d = await c.call("get_document_info")
     record("open_component: il documento attivo e' il pezzo", ok and "asm_vite" in json.dumps(d), "")
     ok, _, lo = await c.call("list_open_documents")
-    asm_title = next((x.get("name") or x.get("title") for x in (lo.get("documents") or lo.get("data", {}).get("documents", [])) if "ssieme" in json.dumps(x)), "Assieme")
+    asm_title = next((x.get("name") or x.get("title") for x in (lo.get("documents") or lo.get("data", {}).get("documents", [])) if x.get("type") == "Assembly"), "Assieme")      # dal tipo: il titolo cambia con la lingua
     await T(c, "activate_document", "torna all'assieme", name=asm_title)
     # mate eliminato
     await T(c, "add_mate", "mate di servizio (parallelo piani frontali)", mate_type="parallel", entity1=f"Piano frontale@{loose[0]}",

@@ -540,14 +540,27 @@ class DrawingAnnotMixin:
         for a in self._dq_annotations(doc):
             if a["kind"] == "note" and str(a.get("text", "")).startswith(all_drawing_texts("chamfer_note")):
                 return False
-        W, H, _ = self._sheet_dims(doc)
-        w_est = self._dq_text_w(text, 0.0035) + 0.004
-        spot = self._an_free_spot(doc, w_est + 0.006, 0.012, (0.04 + w_est / 2, 0.045))
-        if spot is None:
-            return False
+        # ostacoli PRIMA di inserire la nota; poi la nota si misura con GetExtent (il carattere delle note del formato puo' essere
+        # piu' grande dei 3,5 mm della stima: in inglese "UNDIMENSIONED CHAMFERS" toccava la quota vicina)
+        occ = self._an_obstacles(doc)
         note = doc.InsertNote(text)
         if note is None:
             return False
-        note.GetAnnotation.SetPosition2(spot[0] - w_est / 2, spot[1] - 0.003, 0)
+        ann = note.GetAnnotation
+        try:
+            ex = [float(t) for t in note.GetExtent]
+            w, h = ex[3] - ex[0], ex[4] - ex[1]
+        except Exception:
+            ex, w, h = None, self._dq_text_w(text, 0.0035) + 0.004, 0.006
+        spot = self._an_free_spot(doc, w + 0.006, h + 0.006, (0.04 + w / 2, 0.045), obstacles=occ)
+        if spot is None:
+            ann.Select3(False, None)
+            doc.EditDelete()
+            return False
+        if ex is not None:
+            pos = [float(t) for t in ann.GetPosition]
+            ann.SetPosition2(pos[0] + spot[0] - (ex[0] + ex[3]) / 2, pos[1] + spot[1] - (ex[1] + ex[4]) / 2, 0)
+        else:
+            ann.SetPosition2(spot[0] - w / 2, spot[1] - 0.003, 0)
         doc.ClearSelection2(True)
         return True

@@ -60,10 +60,13 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [ ] E5 Studi non statici: frequenze proprie, buckling, termico stazionario
 
 ## Gruppo G — Lingua di SolidWorks
-- [~] G1 Server indipendente dalla lingua (italiano / inglese) -- FATTO nel codice (2026-10-12, `utils/sw_lang.py`): piani standard e
+- [x] G1 Server indipendente dalla lingua (italiano / inglese) -- FATTO nel codice (2026-10-12, `utils/sw_lang.py`): piani standard e
   origine per posizione/tipo, cartelle lang della lingua attuale, grafici Stress1/Sollecitazione1, ERRORE:/ERROR: del cartiglio,
   punto origine, scritte delle tavole e formati verticali nella lingua di SolidWorks, `ui_language` in connect_solidworks. Test offline
-  80/80. DA FARE: regressione completa con SolidWorks in inglese (i test traducono i nomi italiani; tabella in `tests/live_common.py`).
+  80/80. MISURATO 2026-10-16/17 con SolidWorks in inglese (lingua cambiata via API, toggle 83 e 262): modeling 175/175, modeling_extra
+  240/240, drawings 65/65, drawing_quality 139/139, assembly 113/113, assembly_extra 213/213, data 159/159, simulation 120/120, offline 83/83;
+  di nuovo in italiano drawings 65/65, drawing_quality 139/139, assembly 113/113, data 159/159. Peso del cartiglio d'assieme 563,51 g in
+  entrambe le lingue. Correzioni e trappole in `STATO_STORICO.md` (fase 1).
 
 ## Gruppo H — Robustezza del server (piano, fase 5)
 - [ ] H1 Timeout generale dei tool (oggi solo run_simulation): nessun tool blocca il server per sempre

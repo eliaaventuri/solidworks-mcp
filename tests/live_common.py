@@ -32,6 +32,9 @@ _IT_EN = [
     (r"\bSchizzo(\d+)\b", r"Sketch\1"), (r"\bPiano(\d+)\b", r"Plane\1"), (r"\bAssi(\d+)\b", r"Axis\1"),
     (r"\bDistanzaLimite(\d+)\b", r"LimitDistance\1"), (r"\bDistanza(\d+)\b", r"Distance\1"), (r"\bOrigine\b", "Origin"),
     (r"\bLega 6061\b", "6061 Alloy"), (r"^alluminio$", "alumin"),
+    (r"^Acciaio$", "Steel"), (r"^Plastiche$", "Plastics"), (r"\bABS generico\b", "ABS"),
+    (r"^Bronzo$", "Bronze"),
+    (r"\bRipetizioneCircolare(\d+)\b", r"CirPattern\1"), (r"\bRipetizioneLineare(\d+)\b", r"LPattern\1"),   # set_material cerca per sottostringa: primo bronzo della libreria in entrambe le lingue   # libreria inglese (dal .sldmat)
 ]
 
 

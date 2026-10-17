@@ -456,3 +456,22 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
 
 ### Avanzamento gruppo B (2026-10-11)
 - B1-B6 chiusi (2026-10-11): B1, B2, B3, B5, B6 `[x]`, B4 `[~]` (UNI assente dal database; posizione angolare del foro sulle facce cilindriche non controllabile). Test: `tests/test_modeling_extra_live.py` 240/240. Regressioni in sequenza: drawings 65/65, modeling 175/175, assembly 113/113, data 159/159, drawing_quality 139/139, simulation 120/120. Dettagli in STATO.md, sezione "Limiti gruppo B".
+
+## Fase 1: SolidWorks in inglese (G1, 2026-10-16/17)
+- Lingua cambiata via API, senza toccare l'interfaccia: `SetUserPreferenceToggle(83, ...)` (swUseEnglishLanguage) e `(262, ...)`
+  (swUseEnglishLanguageFeatureNames); valori originali entrambi False. Vale al riavvio: si imposta su un'istanza dedicata, la si chiude
+  con ExitApp (salva le preferenze), la successiva parte in inglese (`GetCurrentLanguage` = english). Script `scripts_tmp/lingua.py en|it|leggi`.
+- Regressione in inglese: modeling 175/175, modeling_extra 240/240, drawings 65/65, assembly_extra 213/213, simulation 120/120 al primo colpo;
+  drawing_quality 139/139, data 159/159, assembly 113/113 dopo le correzioni sotto. Offline 83/83.
+- Trappole trovate (tutte nei test tranne la prima):
+  - nota "SMUSSI NON QUOTATI": la larghezza era STIMATA (3,5 mm x carattere); il carattere delle note del formato e' piu' grande
+    (in inglese ~89 mm reali contro ~69 stimati) -> toccava la quota vicina. Ora la nota si inserisce, si misura con `GetExtent` e poi si
+    cerca lo spazio libero (`_dq_chamfer_note`, ostacoli letti PRIMA dell'inserimento);
+  - intestazioni della distinta (BOM) nella lingua del modello di tabella: cercare le colonne per contenuto ("num. parte"/"part n", "quantit"/"qty");
+  - libreria materiali inglese: Acciaio -> Steel, Plastiche -> Plastics, "ABS generico" -> "ABS", "Lega 6061" -> "6061 Alloy";
+    `set_material` cerca per sottostringa: "Bronzo" in italiano prende "Alluminio Bronzo", in inglese serve "Bronze" (-> "Aluminum Bronze", stessa densita');
+  - feature: RipetizioneCircolare1 -> CirPattern1, RipetizioneLineare1 -> LPattern1; il titolo del documento d'assieme cambia: cercarlo con `type == "Assembly"`;
+  - formato verticale inglese = `a3 - iso portrait en.slddrt`; cartiglio SIZE/WEIGHT al posto di FORMATO/PESO.
+- Attenzione: il PC va in sospensione durante le regressioni lunghe (2026-10-16 16:47, il test riprendeva per pochi secondi ogni ~2,5 h).
+  Tenere sveglio il PC; un sotto-agente che lancia run_all.py in background lo uccide quando chiude: lanciarlo dalla sessione principale.
+- `insert_model_dimensions` sulla tavola verticale della staffa: 3 min 17 s il 2026-10-16, 5 min 25 s il 2026-10-17 (stesso codice).

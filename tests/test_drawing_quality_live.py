@@ -616,7 +616,7 @@ async def sheet_verticale(c):
         drw.unlink()
     d = await T(c, "create_drawing", "A3 verticale", model_path=str(OUT / "staffa.SLDPRT"), paper_size="A3", orientation="portrait",
                 save_as=str(drw), add_views=False, save_model=False,
-                check=lambda d: d.get("sheet_format") == "a3 - iso portrait.slddrt" and abs(d["width_mm"] - 297) < 0.5
+                check=lambda d: d.get("sheet_format") == ("a3 - iso portrait.slddrt" if LANG["ui"] in ("", "italian") else "a3 - iso portrait en.slddrt") and abs(d["width_mm"] - 297) < 0.5
                 and abs(d["height_mm"] - 420) < 0.5)
     tn = d.get("title_number") or {}
     record("N. DISEGNO lungo: carattere ridotto, sta nella cella (A8)", tn.get("fits") is True and 0 < tn.get("height_mm", 9) < 6.0,
@@ -642,7 +642,8 @@ async def sheet_verticale(c):
     txt = dxf.read_text(encoding="latin-1", errors="ignore") if dxf.exists() else ""
     record("formato verticale: nessun 'ERRORE:' nel cartiglio (DXF)", okx and "ERROR" not in txt and drawing_text("scale", LANG["ui"]) in txt and drawing_text("title", LANG["ui"]) in txt,
            f"{len(txt)} byte")
-    record("formato verticale: cartiglio con ISO 'FORMATO' e 'PESO' e nome file nel DXF", "FORMATO" in txt and "PESO" in txt and "verticale_nome" in txt)
+    record("formato verticale: cartiglio con ISO 'FORMATO' e 'PESO' e nome file nel DXF", drawing_text("size", LANG["ui"]) in txt
+           and drawing_text("weight", LANG["ui"]).split()[0] in txt and "verticale_nome" in txt)
     await c.call("save_drawing", filepath=str(drw))
     await c.call("close_document", discard=True)
 

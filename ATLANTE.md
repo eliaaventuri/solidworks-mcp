@@ -54,7 +54,7 @@ solidworks_mcp/
     assembly_analysis.py      linee di esplosione, interferenze, giochi, massa, conteggi, configurazioni
     data_export.py            materiali (.sldmat), massa e inerzie, proprieta', equazioni, configurazioni, export/import, immagini, misure
     simulation.py             SOLIDWORKS Simulation (CosmosWorks): studi statici, vincoli, carichi, mesh, esecuzione con timeout, risultati, PNG
-formats/                      formati foglio ISO verticali A0-A3 (.slddrt), versionati
+formats/                      formati foglio ISO verticali A0-A3 (.slddrt, "... en" per SolidWorks inglese), versionati
 ```
 
 ## Test
