@@ -394,7 +394,7 @@ async def assembly_scenario(c: Client, delta_th, E_th):
     await T(c, "set_simulation_contact", "contatto globale incollato", contact="bonded")
     await T(c, "add_restraint", "fisso su x=0 (blocco 1)", kind="fixed", faces=[[0, 0, 0]])
     await T(c, "add_force", "100 N lungo -Z su x=200 (blocco 2)", faces=[[200, 0, 0]], value=FORCE, mode="direction", direction=[0, 0, -1])
-    d = await T(c, "create_simulation_mesh", "mesh 4 mm assieme", element_size=4.0, mesher="standard", check=lambda d: d["nodes"] > 500)
+    await T(c, "create_simulation_mesh", "mesh 4 mm assieme", element_size=4.0, mesher="standard", check=lambda d: d["nodes"] > 500)
     await T(c, "run_simulation", "assieme", timeout=300)
     r = await T(c, "get_simulation_results", "assieme")
     if r:

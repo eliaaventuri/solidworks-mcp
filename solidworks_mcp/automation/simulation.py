@@ -33,7 +33,6 @@ import traceback
 from typing import Dict, Any, List, Optional
 
 import pythoncom
-import win32com.client
 from win32com.client import VARIANT
 
 from ..constants import SwErrors

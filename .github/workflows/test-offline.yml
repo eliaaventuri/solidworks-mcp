@@ -16,6 +16,5 @@ jobs:
           python-version: "3.12"
       - run: pip install "mcp>=1.0.0,<2" pyflakes
       - run: python tests/test_offline.py
-      - name: pyflakes (solo nomi non definiti)
-        run: |
-          python -m pyflakes solidworks_mcp tests | grep -E "undefined name" && exit 1 || exit 0
+      - name: pyflakes (qualunque avviso fa fallire)
+        run: python -m pyflakes solidworks_mcp tests

@@ -13,174 +13,197 @@ Convenzioni:
 from mcp.types import Tool
 
 S, N, B, A, O = "string", "number", "boolean", "array", "object"
-_UNIT = (S, "Unita delle misure (default mm)")
-_COMP = (S, "Nome istanza del componente (es. 'perno-1')")
-_COMPS = (A, "Nomi istanza dei componenti (es. ['vite-1'])")
-_ENT = (None, "Entita': 'Piano frontale@perno-1' | 'Assi1@staffa-1' | {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | "
-              "{\"component\":'perno-1',\"plane\":'Piano destro'}. Piani standard e origine in qualunque lingua: "
-              "'Piano frontale' = 'Front Plane' = 'front' (anche 'top'/'right', 'origin')")
-_POS = (A, "[x,y,z] posizione dell'ORIGINE del componente")
-_ROT = (A, "[rx,ry,rz] rotazione in gradi (X poi Y poi Z, assi dell'assieme)")
+_UNIT = (S, "Length unit (default 'mm')")
+_COMP = (S, "Component instance name (e.g. 'perno-1', as in list_components)")
+_COMPS = (A, "Component instance names (e.g. ['vite-1'])")
+_ENT = (None, "Entity: 'Piano frontale@perno-1' | 'Assi1@staffa-1' | {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | "
+              "{\"component\":\"perno-1\",\"plane\":\"Piano destro\"}; points in assembly coordinates (mm). Standard plane/origin "
+              "names work in any language ('Front Plane', 'front', 'top', 'right', 'origin')")
+_POS = (A, "[x,y,z] position of the component ORIGIN, in mm")
+_ROT = (A, "[rx,ry,rz] rotation in degrees (X then Y then Z, assembly axes)")
 
 _TOOLS = {
     # ---------------------------------------------------------------- componenti
     "insert_component": ("insert_component",
-        "Inserisce un componente (pezzo o sotto-assieme) da file con l'origine in (x,y,z) e rotazione opzionale. L'assieme attivo "
-        "deve essere un assieme. fixed=true lo fissa.",
-        {"file_path": (S, "Path del .SLDPRT/.SLDASM"), "x": (N, ""), "y": (N, ""), "z": (N, ""), "rotation": _ROT,
-         "configuration": (S, "Configurazione del componente"), "fixed": (B, "Componente fisso"), "unit": _UNIT}, ["file_path"]),
-    "insert_components": ("insert_components",
-        "Inserisce piu' istanze dello stesso file: `positions` [[x,y,z],..] oppure `start`+`step` con `count` istanze.",
-        {"file_path": (S, ""), "count": (N, "Numero istanze"), "positions": (A, "[[x,y,z],...]"), "start": _POS,
-         "step": (A, "[dx,dy,dz] fra un'istanza e la successiva"), "rotation": _ROT, "fixed": (B, ""), "unit": _UNIT},
+        "Insert a part or sub-assembly from file with its origin at (x,y,z) and optional rotation. The active document must be an "
+        "assembly. fixed=true fixes it. Example: {\"file_path\":\"perno.SLDPRT\",\"x\":0,\"y\":0,\"z\":50,\"rotation\":[0,90,0]}",
+        {"file_path": (S, "Path of the .SLDPRT/.SLDASM file"), "x": (N, "Origin X in mm"),
+         "y": (N, "Origin Y in mm"), "z": (N, "Origin Z in mm"), "rotation": _ROT,
+         "configuration": (S, "Component configuration name"), "fixed": (B, "true = insert as fixed component"), "unit": _UNIT},
         ["file_path"]),
-    "set_component_fixed": ("set_component_fixed", "Fissa (fixed=true) o rende mobile (fixed=false) un componente.",
-        {"component": _COMP, "fixed": (B, "")}, ["component"]),
+    "insert_components": ("insert_components",
+        "Insert several instances of one file: `positions` [[x,y,z],..], or `start` + `step` with `count` instances.",
+        {"file_path": (S, "Path of the .SLDPRT/.SLDASM file"), "count": (N, "Number of instances (count, with start+step; default 2)"),
+         "positions": (A, "[[x,y,z],...] origin of each instance, in mm"), "start": _POS,
+         "step": (A, "[dx,dy,dz] offset between consecutive instances, in mm"), "rotation": _ROT,
+         "fixed": (B, "true = insert as fixed components"), "unit": _UNIT},
+        ["file_path"]),
+    "set_component_fixed": ("set_component_fixed", "Fix (fixed=true) or free (fixed=false) a component.",
+        {"component": _COMP, "fixed": (B, "true = fixed, false = movable")}, ["component"]),
     "list_components": ("list_components",
-        "Elenco componenti: nome istanza, file, configurazione, posizione (mm) e trasformazione (rotazione, matrice), "
-        "fisso/mobile, soppresso, nascosto, stato dei vincoli.",
-        {"top_level_only": (B, "Solo primo livello (default true)"), "include_details": (B, "")}, []),
-    "replace_component": ("replace_component", "Sostituisce un componente con un altro file (replace_all = tutte le istanze).",
-        {"component": _COMP, "new_file": (S, "Path del nuovo file"), "configuration": (S, ""),
-         "replace_all": (B, ""), "reattach_mates": (B, "Riaggancia gli accoppiamenti (default true)")}, ["component", "new_file"]),
-    "suppress_component": ("suppress_component", "Sopprime (suppressed=true) o riattiva un componente.",
-        {"component": _COMP, "suppressed": (B, "")}, ["component"]),
-    "delete_component": ("delete_component", "Elimina un componente dall'assieme (con i suoi accoppiamenti).",
+        "List components: instance name, file, configuration, position (mm) and transform (rotation, matrix), fixed/movable, "
+        "suppressed, hidden, mate status.",
+        {"top_level_only": (B, "true = first level only (default true)"),
+         "include_details": (B, "true = include transform and mates (default true)")}, []),
+    "replace_component": ("replace_component", "Replace a component with another file (replace_all = all instances).",
+        {"component": _COMP, "new_file": (S, "Path of the replacement file"), "configuration": (S, "Configuration of the new file"),
+         "replace_all": (B, "true = replace all instances of the file"),
+         "reattach_mates": (B, "true = re-attach mates (default true)")}, ["component", "new_file"]),
+    "suppress_component": ("suppress_component", "Suppress (suppressed=true) or restore a component.",
+        {"component": _COMP, "suppressed": (B, "true = suppress, false = restore")}, ["component"]),
+    "delete_component": ("delete_component", "Delete a component from the assembly (with its mates).",
         {"component": _COMP}, ["component"]),
-    "set_component_visibility": ("set_component_visibility", "Nasconde (visible=false) o mostra un componente.",
-        {"component": _COMP, "visible": (B, "")}, ["component"]),
+    "set_component_visibility": ("set_component_visibility", "Hide (visible=false) or show a component.",
+        {"component": _COMP, "visible": (B, "true = show, false = hide")}, ["component"]),
     "open_component": ("open_component",
-        "Apre il documento di un componente e lo rende attivo (usa activate_document per tornare all'assieme).",
+        "Open a component's document and make it active (activate_document returns to the assembly).",
         {"component": _COMP}, ["component"]),
-    "activate_document": ("activate_document", "Rende attivo un documento aperto (titolo, es. 'Assieme1').",
-        {"name": (S, "Titolo del documento")}, ["name"]),
+    "activate_document": ("activate_document", "Make an open document active (by title, e.g. 'Assieme1').",
+        {"name": (S, "Document title")}, ["name"]),
     "component_circular_pattern": ("component_circular_pattern",
-        "Ripetizione circolare di componenti attorno a un asse ('Assi1@staffa-1' o faccia cilindrica {\"face\":[x,y,z]}).",
-        {"components": _COMPS, "axis": _ENT, "count": (N, "Istanze totali (seme incluso)"),
-         "angle": (N, "Angolo totale (default 360)"), "equal_spacing": (B, ""), "reverse": (B, ""), "unit": _UNIT},
+        "Circular pattern of components around an axis ('Assi1@staffa-1' or a cylindrical face {\"face\":[x,y,z]}).",
+        {"components": _COMPS, "axis": _ENT, "count": (N, "Total instances (count, seed included)"),
+         "angle": (N, "Total angle in degrees (default 360)"),
+         "equal_spacing": (B, "true = spread instances evenly over `angle` (default true)"),
+         "reverse": (B, "true = reverse direction"), "unit": _UNIT},
         ["components", "axis"]),
     "component_linear_pattern": ("component_linear_pattern",
-        "Ripetizione lineare di componenti in 1 o 2 direzioni (spigolo {\"edge\":[x,y,z]}, asse o faccia piana).",
-        {"components": _COMPS, "direction1": _ENT, "count1": (N, ""), "spacing1": (N, "Passo"), "direction2": _ENT,
-         "count2": (N, ""), "spacing2": (N, ""), "reverse1": (B, ""), "reverse2": (B, ""), "unit": _UNIT},
+        "Linear pattern of components in 1 or 2 directions (edge {\"edge\":[x,y,z]}, axis or planar face). "
+        "Example: {\"components\":[\"vite-1\"],\"direction1\":{\"edge\":[0,0,0]},\"count1\":3,\"spacing1\":25}",
+        {"components": _COMPS, "direction1": _ENT, "count1": (N, "Instances in direction 1 (count)"),
+         "spacing1": (N, "Spacing in direction 1, in mm"), "direction2": _ENT,
+         "count2": (N, "Instances in direction 2 (count)"),
+         "spacing2": (N, "Spacing in direction 2, in mm"), "reverse1": (B, "true = reverse direction 1"),
+         "reverse2": (B, "true = reverse direction 2"), "unit": _UNIT},
         ["components", "direction1"]),
     "component_derived_pattern": ("component_derived_pattern",
-        "Ripetizione guidata da una ripetizione di feature di un pezzo dell'assieme (es. viti sulla ripetizione di fori della flangia).",
-        {"components": _COMPS, "pattern_feature": (S, "Nome della ripetizione nel pezzo, es. 'RipetizioneCircolare1'"),
+        "Pattern driven by a feature pattern of a part in the assembly (e.g. screws on the flange hole pattern).",
+        {"components": _COMPS, "pattern_feature": (S, "Pattern feature name in the part, e.g. 'RipetizioneCircolare1'"),
          "pattern_component": _COMP}, ["components", "pattern_feature", "pattern_component"]),
     "mirror_components": ("mirror_components",
-        "Specchia componenti rispetto a un piano. Default: crea ISTANZE speculari dello stesso file; orientation (0..3, misurato: 0 = "
-        "180 gradi attorno a X, 1 = 180 gradi attorno a Z, 2 = nessuna rotazione, 3 = 180 gradi attorno a Y) sceglie come e' ruotata "
-        "l'istanza. opposite_hand=true crea invece, per ogni componente, un NUOVO PEZZO speculare (geometria riflessa, 'versione "
-        "opposta') salvato come <nome><name_suffix>.SLDPRT in `folder` (default: cartella del pezzo originale); riporta volume e "
-        "baricentro (nel pezzo e nell'assieme). Un file esistente non viene sovrascritto senza overwrite=true.",
-        {"components": _COMPS, "plane": (None, "'Piano destro' dell'assieme | 'Piano frontale@staffa-1' | {\"face\":[x,y,z]}"),
-         "orientation": (N, "Orientamento dell'istanza: 0, 1, 2, 3 (solo senza opposite_hand)"),
-         "opposite_hand": (B, "true = crea nuovi pezzi speculari (versione opposta) invece di istanze"),
-         "name_suffix": (S, "Suffisso del nome del nuovo file (default '_mirror')"),
-         "folder": (S, "Cartella dei nuovi file (default: quella del pezzo originale)"),
-         "overwrite": (B, "true = consente di sovrascrivere un file esistente"),
-         "align_exact": (B, "opposite_hand: mette il nuovo pezzo esattamente nell'immagine speculare dell'originale (default true; "
-                            "SolidWorks sceglie l'orientamento da una preferenza che varia fra sessioni)"), "unit": _UNIT}, ["components", "plane"]),
+        "Mirror components about a plane. Default: mirrored INSTANCES of the same file; orientation (0..3, measured: 0 = 180 deg about "
+        "X, 1 = 180 deg about Z, 2 = no rotation, 3 = 180 deg about Y) sets how the instance is rotated. opposite_hand=true instead "
+        "creates a NEW mirrored PART per component (reflected geometry, 'opposite version') saved as <name><name_suffix>.SLDPRT in "
+        "`folder` (default: folder of the source part); returns volume and centroid. Existing files are kept unless overwrite=true. Example: {\"components\":[\"staffa-1\"],\"plane\":\"Piano destro\",\"opposite_hand\":true}",
+        {"components": _COMPS,
+         "plane": (None, "Mirror plane: 'Piano destro' | 'Piano frontale@staffa-1' | {\"face\":[x,y,z]}"),
+         "orientation": (N, "Instance orientation index 0-3 (ignored with opposite_hand)"),
+         "opposite_hand": (B, "true = create new mirrored parts instead of instances"),
+         "name_suffix": (S, "Suffix of the new file name (default '_mirror')"),
+         "folder": (S, "Folder of the new files (default: folder of the source part)"),
+         "overwrite": (B, "true = allow overwriting an existing file"),
+         "align_exact": (B, "opposite_hand: place the new part exactly at the mirror image of the original (default true)"), "unit": _UNIT},
+        ["components", "plane"]),
     "move_component": ("move_component",
-        "Sposta/ruota un componente MOBILE rispettando gli accoppiamenti: relativo (dx,dy,dz, rotate_by) o assoluto (position, rotation). "
-        "Il movimento e' ridotto ai SOLI gradi di liberta' lasciati dagli accoppiamenti (misurati sul componente): es. un perno con il "
-        "solo concentrico trasla e ruota solo lungo/attorno al proprio asse; il resto e' scartato e riportato in `ignored`/`applied`. "
-        "Per gli accoppiamenti a limite usa edit_mate(value).",
-        {"component": _COMP, "dx": (N, ""), "dy": (N, ""), "dz": (N, ""), "position": _POS, "rotation": _ROT,
-         "rotate_by": (A, "[rx,ry,rz] gradi relativi"), "respect_mates": (B, "Default true"), "unit": _UNIT}, ["component"]),
+        "Move/rotate a MOVABLE component honoring mates: relative (dx,dy,dz, rotate_by) or absolute (position, rotation). Motion is "
+        "reduced to the ONLY degrees of freedom left by the mates (measured): e.g. a pin with only a concentric mate "
+        "slides and spins about its own axis; the rest is discarded (see `ignored`/`applied`). For limit mates use "
+        "edit_mate(value).",
+        {"component": _COMP, "dx": (N, "Relative X shift in mm"), "dy": (N, "Relative Y shift in mm"),
+         "dz": (N, "Relative Z shift in mm"), "position": _POS, "rotation": _ROT,
+         "rotate_by": (A, "[rx,ry,rz] relative rotation in degrees"),
+         "respect_mates": (B, "true = honor mates (default true)"), "unit": _UNIT}, ["component"]),
     # ---------------------------------------------------------------- accoppiamenti
     "add_mate": ("add_mate",
-        "Accoppiamento fra due entita' di componenti: coincident | parallel | perpendicular | tangent | concentric | distance | "
-        "angle | lock | symmetric (entity3 = piano di simmetria) | width (entity1+entity2 facce larghezza, tab_entities = linguetta) | "
-        "gear (gear_ratio=[a,b]) | screw (pitch). Distanza in mm (distance), angolo in gradi (angle); limite con min_value/max_value; "
-        "align: closest | aligned | anti_aligned; flip inverte. Fra due assi di riferimento il concentrico diventa coincidente. "
-        "Entita' anche del tipo 'Piano destro' (piano dell'ASSIEME, es. piano di simmetria). Larghezza (width) e vite (screw) si creano "
-        "con i dati dell'accoppiamento (AddMate5 le rifiuta/ignora). Limiti distanza/angolo: poi si muovono con edit_mate(value). "
-        "ATTENZIONE: blocco (lock), ingranaggio (gear) e vite (screw) sono creati e letti correttamente ma SolidWorks non li fa rispettare "
-        "dal solutore via API (SetTransformAndSolve2/DragOperator): vedi LIMITI.md C5.",
+        "Mate between two component entities: coincident | parallel | perpendicular | tangent | concentric | distance | angle | lock | "
+        "symmetric (entity3 = symmetry plane) | width (entity1+entity2 width faces, tab_entities = tab) | gear (gear_ratio=[a,b]) | "
+        "screw (pitch). Distance in mm (distance), angle in degrees (angle); limit with min_value/max_value; align: closest | aligned | "
+        "anti_aligned; flip reverses. Between two reference axes concentric becomes coincident. Entities may also be assembly planes "
+        "such as 'Piano destro'. Width and screw mates are created from mate data (AddMate5 rejects them). Move limits with edit_mate(value). WARNING: lock, gear and screw are created and read back correctly, but the "
+        "SolidWorks solver does not enforce them via API (SetTransformAndSolve2/DragOperator): see LIMITI.md C5. "
+        "Example: {\"mate_type\":\"concentric\",\"entity1\":\"Assi1@perno-1\",\"entity2\":\"Assi1@staffa-1\"}",
         {"mate_type": (S, "coincident|parallel|perpendicular|tangent|concentric|distance|angle|lock|symmetric|width|gear|screw"),
          "entity1": _ENT, "entity2": _ENT, "entity3": _ENT, "align": (S, "closest | aligned | anti_aligned"),
-         "flip": (B, ""), "distance": (N, "mm"), "angle": (N, "gradi"), "min_value": (N, "Limite minimo (distanza mm / angolo gradi)"),
-         "max_value": (N, "Limite massimo"), "gear_ratio": (A, "[numeratore, denominatore]"), "pitch": (N, "Passo vite (mm/giro)"),
-         "width_mode": (S, "centered | free | dimension | percent"), "tab_entities": (A, "Entita' linguetta (width)"),
-         "lock_rotation": (B, "Blocca la rotazione (concentrico)"), "unit": _UNIT}, ["mate_type", "entity1", "entity2"]),
-    "list_mates": ("list_mates", "Elenco accoppiamenti: nome, tipo, allineamento, componenti, valore, soppresso, in errore.", {}, []),
+         "flip": (B, "true = flip mate alignment"), "distance": (N, "Distance in mm"),
+         "angle": (N, "Angle in degrees"),
+         "min_value": (N, "Minimum limit (distance in mm / angle in degrees)"),
+         "max_value": (N, "Maximum limit (distance in mm / angle in degrees)"),
+         "gear_ratio": (A, "[numerator, denominator] gear ratio (ratio)"), "pitch": (N, "Screw pitch in mm per revolution"),
+         "width_mode": (S, "centered | free | dimension | percent"), "tab_entities": (A, "Tab entities (width mate)"),
+         "lock_rotation": (B, "true = lock rotation (concentric mate)"), "unit": _UNIT}, ["mate_type", "entity1", "entity2"]),
+    "list_mates": ("list_mates", "List mates: name, type, alignment, components, value, suppressed, error.", {}, []),
     "delete_mate": ("delete_mate",
-        "Elimina un accoppiamento per nome. Misura i gradi di liberta' di tutti i componenti mobili prima e dopo (anche per effetto di "
-        "catene: un perno accoppiato a una boccola segue la boccola) e riporta quelli diventati sottovincolati (`freed_components`, "
-        "`freed_not_in_mate`); le posizioni non cambiano.",
-        {"name": (S, "Nome (come in list_mates)"), "check_dof": (B, "Confronta i gradi di liberta' prima/dopo (default true)")},
-        ["name"]),
+        "Delete a mate by name. Measures degrees of freedom of all movable components before and after (including chains) and reports those left under-defined (`freed_components`, `freed_not_in_mate`); "
+        "positions do not change.",
+        {"name": (S, "Mate name (as in list_mates)"),
+         "check_dof": (B, "true = compare degrees of freedom before/after (default true)")}, ["name"]),
     "edit_mate": ("edit_mate",
-        "Modifica un accoppiamento: valore (mm / gradi), limiti min/max (accoppiamenti a limite), inversione, soppressione. Nei "
-        "limite-distanza/angolo il valore e' la posizione corrente: fuori dall'intervallo viene rifiutato e si riportano i limiti.",
-        {"name": (S, ""), "value": (N, ""), "flip": (B, ""), "suppress": (B, ""), "max_value": (N, ""), "min_value": (N, ""),
-         "unit": _UNIT}, ["name"]),
+        "Edit a mate: value (mm / degrees), min/max limits (limit mates), flip, suppression. For limit distance/angle mates the value "
+        "is the current position: out of range it is rejected and the limits are reported.",
+        {"name": (S, "Mate name (as in list_mates)"), "value": (N, "New mate value in mm / degrees"),
+         "flip": (B, "true = flip alignment"), "suppress": (B, "true = suppress, false = restore"),
+         "max_value": (N, "Maximum limit in mm / degrees"),
+         "min_value": (N, "Minimum limit in mm / degrees"), "unit": _UNIT}, ["name"]),
     "get_assembly_status": ("get_assembly_status",
-        "Stato dei vincoli: completamente vincolato o no, componenti sotto/sovravincolati, gradi di liberta', accoppiamenti in errore.",
-        {"probe_dof": (B, "Misura i moti liberi dei componenti non vincolati (default true; li sposta di poco e li ripristina)")}, []),
+        "Constraint status: fully defined or not, under/over-defined components, degrees of freedom, mates in error.",
+        {"probe_dof": (B, "true = measure free motion of under-defined components (default true; nudges and restores them)")},
+        []),
     # ---------------------------------------------------------------- vista esplosa
     "create_exploded_view": ("create_exploded_view",
-        "Crea una vista esplosa con passi [{components:['perno-1'], direction:'x'|'-y'|[1,1,0]|entita', distance:40, reverse}] "
-        "(direzione libera = vettore qualsiasi, scomposto in passi X/Y/Z; direzione di un'entita' = spigolo/asse/faccia cilindrica, es. "
-        "{\"edge\":[x,y,z]}) oppure passi RADIALI [{components:[..], radial_axis:{\"face\":[x,y,z],\"component\":\"staffa-1\"}, "
-        "distance:30, angle:30, diverge:false}] (si allontanano dall'asse e ruotano di `angle` gradi). La rotazione nei passi di "
-        "traslazione (rotate_angle) non viene memorizzata da SolidWorks (rotation_applied=false). Riporta le pose esplose. "
-        "keep_exploded=false richiude l'esploso.",
-        {"steps": (A, "Elenco passi"), "unit": _UNIT, "keep_exploded": (B, "")}, ["steps"]),
+        "Create an exploded view from steps [{components:['perno-1'], direction:'x'|'-y'|[1,1,0]|entity, distance:40, reverse}] (free "
+        "direction = any vector, split into X/Y/Z steps; entity direction = edge/axis/cylindrical face, e.g. {\"edge\":[x,y,z]}) or "
+        "RADIAL steps [{components:[..], radial_axis:{\"face\":[x,y,z],\"component\":\"staffa-1\"}, distance:30, angle:30, "
+        "diverge:false}] (move away from the axis, rotate by `angle` degrees). Rotation in translation steps (rotate_angle) is not "
+        "stored by SolidWorks (rotation_applied=false). Returns the exploded poses; keep_exploded=false collapses afterwards. "
+        "Example: {\"steps\":[{\"components\":[\"perno-1\"],\"direction\":\"z\",\"distance\":40}]}",
+        {"steps": (A, "List of explode step objects (see tool description)"), "unit": _UNIT,
+         "keep_exploded": (B, "true = keep exploded (default true)")}, ["steps"]),
     "add_explode_step": ("add_explode_step",
-        "Aggiunge un passo alla vista esplosa: traslazione (direction x|y|z|-x.. | vettore libero [vx,vy,vz] | entita') o radiale "
-        "(radial_axis + distance + angle). Riporta le pose esplose.",
-        {"components": _COMPS, "direction": (None, "x|y|z|-x|-y|-z, vettore libero [vx,vy,vz] o entita' (spigolo/asse/faccia cilindrica)"),
-         "distance": (N, ""), "reverse": (B, ""), "rotate_angle": (N, "Non memorizzata da SolidWorks nei passi di traslazione"),
-         "rotate_axis": (S, ""), "radial_axis": (None, "Faccia cilindrica/asse per il passo RADIALE"),
-         "angle": (N, "Rotazione (gradi) del passo radiale"), "diverge": (B, "Radiale divergente dall'asse"), "unit": _UNIT},
+        "Add a step to the exploded view: translation (direction x|y|z|-x.. | free vector [vx,vy,vz] | entity) or radial "
+        "(radial_axis + distance + angle). Returns the exploded poses. ",
+        {"components": _COMPS,
+         "direction": (None, "x|y|z|-x|-y|-z, free vector [vx,vy,vz] or entity (edge/axis/cylindrical face)"),
+         "distance": (N, "Explode distance in mm (default 30)"), "reverse": (B, "true = reverse direction"),
+         "rotate_angle": (N, "Rotation in degrees (not stored by SolidWorks in translation steps)"),
+         "rotate_axis": (S, "Rotation axis (x|y|z) for rotate_angle"),
+         "radial_axis": (None, "Cylindrical face/axis of the RADIAL step"),
+         "angle": (N, "Rotation of the radial step, in degrees"),
+         "diverge": (B, "true = radial step moves away from the axis"), "unit": _UNIT},
         ["components"]),
     "auto_explode": ("auto_explode",
-        "Esplosione automatica. mode='native' = AutoExplode di SolidWorks (un passo 'Catena', direzione scelta da SolidWorks; non sempre "
-        "produce passi); mode='mates' = euristica dagli accoppiamenti (ordine di smontaggio dalla profondita' di accoppiamento dal "
-        "componente base, direzione lungo l'asse concentrico, verso dal lato della testa, distanze dai bounding box con distanza minima "
-        "`gap` fra i componenti; riporta `bbox_overlaps` dello stato esploso reale); 'auto' = nativa poi 'mates'; 'axis' (default) = un "
-        "passo per componente lungo `axis`, distanziati di `gap`.",
-        {"axis": (S, "x|y|z (solo mode=axis)"), "gap": (N, "mode=axis: distanza fra componenti successivi; mode=mates: distanza minima fra box (mm)"),
+        "Automatic explode. mode='native' = SolidWorks AutoExplode (one 'Chain' step; may produce no steps); mode='mates' = heuristic from mates (disassembly order from mate depth from the base component, direction along the "
+        "concentric axis, distances from bounding boxes with minimum `gap`; reports `bbox_overlaps` of the exploded state); 'auto' = native, then 'mates'; 'axis' (default) = one step per component along "
+        "`axis`, spaced by `gap`.",
+        {"axis": (S, "x|y|z (mode=axis only)"),
+         "gap": (N, "mode=axis: spacing between consecutive components; mode=mates: minimum box distance (mm)"),
          "base_component": _COMP, "mode": (S, "axis | native | mates | auto"), "unit": _UNIT}, []),
-    "show_exploded": ("show_exploded", "Esplode (true) o comprime (false) l'assieme.",
-        {"exploded": (B, ""), "view_name": (S, "")}, []),
+    "show_exploded": ("show_exploded", "Explode (true) or collapse (false) the assembly.",
+        {"exploded": (B, "true = explode, false = collapse (default true)"),
+         "view_name": (S, "Exploded view name (default: the first one)")}, []),
     "list_exploded_views": ("list_exploded_views",
-        "Viste esplose e passi della configurazione attiva (tipo, distanza, componenti); se l'assieme e' esploso anche le pose esplose.",
-        {}, []),
+        "Exploded views and steps of the active configuration (type, distance, components) and, if exploded, the poses.", {}, []),
     "add_explode_lines": ("add_explode_lines",
-        "Linee di esplosione (route lines) nella vista esplosa: collega con una retta le facce cilindriche coassiali di componenti "
-        "diversi (perno-boccola-foro, vite-foro). groups = liste di componenti da collegare, oppure vuoto = automatico (tutti gli assi "
-        "condivisi da almeno 2 componenti). Poi salva l'assieme: le viste esplose dei disegni mostrano le linee.",
-        {"groups": ("array", "Es. [[\"perno-1\",\"boccola-1\",\"staffa-1\"],[\"vite-1\",\"staffa-1\"]]; vuoto = automatico"),
-         "direction": ("string", "x | y | z | auto (default: la direzione con piu linee)"),
-         "view_name": ("string", "Vista esplosa (default la prima)"),
-         "tolerance": ("number", "Scarto laterale massimo fra assi, mm (default 0.5)")}, []),
-    "delete_explode_step": ("delete_explode_step", "Elimina un passo di esplosione per nome.",
-        {"step": (S, "Nome passo (come in list_exploded_views)")}, ["step"]),
+        "Explode (route) lines: connects coaxial cylindrical faces of different components (pin-bushing-hole, screw-hole) with a "
+        "straight line. groups = lists of components to connect, or empty = automatic (every axis shared by 2+ components). "
+        "Save the assembly afterwards so exploded drawing views show the lines.",
+        {"groups": ("array", "E.g. [[\"perno-1\",\"boccola-1\",\"staffa-1\"],[\"vite-1\",\"staffa-1\"]]; empty = automatic"),
+         "direction": ("string", "x | y | z | auto (default: the direction with the most lines)"),
+         "view_name": ("string", "Exploded view name (default: the first one)"),
+         "tolerance": ("number", "Max lateral axis offset, in mm (default 0.5)")}, []),
+    "delete_explode_step": ("delete_explode_step", "Delete an explode step by name.",
+        {"step": (S, "Step name (as in list_exploded_views)")}, ["step"]),
     # ---------------------------------------------------------------- analisi
     "check_interference": ("check_interference",
-        "Rileva le interferenze fra componenti (nella posizione reale, non esplosa): coppie e volume (mm3). `components` limita alle "
-        "coppie che li coinvolgono.",
-        {"components": _COMPS, "include_coincident": (B, "Conta come interferenza anche le facce coincidenti"),
-         "treat_subassemblies_as_components": (B, "")}, []),
-    "check_clearance": ("check_clearance", "Gioco (distanza minima) fra due componenti o due entita'.",
+        "Detect interferences between components (real, non-exploded position): pairs and volume (mm3). `components` restricts the "
+        "result to pairs involving them.",
+        {"components": _COMPS, "include_coincident": (B, "true = count coincident faces too"),
+         "treat_subassemblies_as_components": (B, "true = treat sub-assemblies as components")}, []),
+    "check_clearance": ("check_clearance", "Clearance (minimum distance) between two components or two entities.",
         {"entity1": _ENT, "entity2": _ENT, "unit": _UNIT}, ["entity1", "entity2"]),
     "get_assembly_mass_properties": ("get_assembly_mass_properties",
-        "Massa, volume, area, baricentro dell'assieme + massa per file e verifica massa = somma dei componenti.",
+        "Mass, volume, area, centroid of the assembly, mass per file, and a check that mass = sum of components.",
         {"unit": _UNIT}, []),
-    "count_components": ("count_components", "Conteggio dei componenti per file (istanze, soppresse).",
-        {"top_level_only": (B, "")}, []),
+    "count_components": ("count_components", "Count components per file (instances, suppressed).",
+        {"top_level_only": (B, "true = first level only")}, []),
     # ---------------------------------------------------------------- configurazioni
-    "list_assembly_configurations": ("list_assembly_configurations", "Configurazioni dell'assieme e quella attiva.", {}, []),
-    "add_assembly_configuration": ("add_assembly_configuration", "Aggiunge una configurazione all'assieme.",
-        {"name": (S, ""), "comment": (S, ""), "activate": (B, "")}, ["name"]),
-    "activate_assembly_configuration": ("activate_assembly_configuration", "Attiva una configurazione dell'assieme.",
-        {"name": (S, "")}, ["name"]),
-    "set_component_configuration": ("set_component_configuration", "Cambia la configurazione usata da un componente.",
-        {"component": _COMP, "configuration": (S, "")}, ["component", "configuration"]),
+    "list_assembly_configurations": ("list_assembly_configurations", "Assembly configurations and the active one.", {}, []),
+    "add_assembly_configuration": ("add_assembly_configuration", "Add a configuration to the assembly.",
+        {"name": (S, "New configuration name"), "comment": (S, "Configuration comment"),
+         "activate": (B, "true = activate it after creation")}, ["name"]),
+    "activate_assembly_configuration": ("activate_assembly_configuration", "Activate an assembly configuration.",
+        {"name": (S, "Configuration name")}, ["name"]),
+    "set_component_configuration": ("set_component_configuration", "Change the configuration used by a component.",
+        {"component": _COMP, "configuration": (S, "Configuration name to use")}, ["component", "configuration"]),
 }
 
 

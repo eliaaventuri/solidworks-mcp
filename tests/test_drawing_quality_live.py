@@ -487,7 +487,7 @@ async def sheet_flangia(c):
     # sezione allineata (poligonale con tratto inclinato) e dettaglio con cerchio visibile sulla vista madre
     d = await T(c, "add_section_view", "sezione allineata A-A (poligonale)", parent_view=front, orientation="aligned",
                 points=[0, 60, 0, 0, 46, -33], label="A", check=lambda d: d.get("placed_in_free_space") is not False)
-    d2 = await T(c, "add_detail_view", "dettaglio B 2:1 con cerchio sulla madre", parent_view=front, center_x=40, center_y=0,
+    await T(c, "add_detail_view", "dettaglio B 2:1 con cerchio sulla madre", parent_view=front, center_x=40, center_y=0,
                  radius=10, label="B", scale="2:1", check=lambda d: d.get("placed_in_free_space") is not False)
     ok, text, lv = await c.call("list_drawing_views")
     names = [v["name"] for v in lv.get("views", [])]
@@ -588,9 +588,9 @@ async def sheet_viste_speciali(c):
     record("sezione invertita: la matrice di vista e' diversa da quella della sezione normale (A13)",
            bool(ra) and bool(rb) and any(abs(x - y) > 0.5 for x, y in zip(ra, rb)), f"{ra} / {rb}")
     # A11: ritaglio rettangolare e poligonale
-    r1 = await T(c, "add_crop_view", "ritaglio rettangolare (50 x 35) della vista dall'alto", parent_view=top, shape="rectangle",
+    await T(c, "add_crop_view", "ritaglio rettangolare (50 x 35) della vista dall'alto", parent_view=top, shape="rectangle",
                  center_x=15, center_y=0, width=50, height=35, check=lambda d: d.get("cropped") is True and d.get("shape") == "rectangle")
-    r2 = await T(c, "add_crop_view", "ritaglio poligonale (trapezio) della vista frontale", parent_view=front, shape="polygon",
+    await T(c, "add_crop_view", "ritaglio poligonale (trapezio) della vista frontale", parent_view=front, shape="polygon",
                  points=[-60, 10, 20, 10, 60, -10, -60, -10], check=lambda d: d.get("cropped") is True and d.get("shape") == "polygon")
     # A12: vista interrotta con linee curve (ISO) su una copia della vista frontale
     v3 = await T(c, "add_model_view", "copia della vista frontale per l'interruzione", orientation="front", scale="1:2",
@@ -654,7 +654,7 @@ async def sheet_layout(c):
     record("layout senza isometrica: nessuna vista pittorica e layout valido", d.get("layout_fits") is True
            and all(not v["orientation"] in ("isometric",) for v in d.get("views", [])), f"{d.get('scale')} {paper}")
     # l'isometrica si aggiunge dopo, nel posto libero piu' vicino (non nell'angolo presupposto)
-    v = await T(c, "add_model_view", "isometrica aggiunta dopo, dove c'e' posto", orientation="isometric", scale="1:2",
+    await T(c, "add_model_view", "isometrica aggiunta dopo, dove c'e' posto", orientation="isometric", scale="1:2",
                 check=lambda d: d.get("new_sheet") is None)
     ok, text, lay = await c.call("get_drawing_layout")
     if ok:

@@ -178,7 +178,6 @@ async def scenario(c: Client):
     ok, text, d = await c.call("add_section_view", parent_view=fname, orientation="horizontal",
                                offset=0, label="A")
     record("add_section_view (posizione automatica)", ok and d.get("type_name") == "section", d.get("name", text[:100]))
-    sec_name = d.get("name")
 
     ok, text, d = await c.call("add_detail_view", parent_view=fname, center_x=-30, center_y=0,
                                radius=12, label="B")
@@ -189,7 +188,6 @@ async def scenario(c: Client):
                                           f"saltate isometriche {d.get('skipped_pictorial')}")
     ok, text, d = await c.call("auto_dimension", view=fname)
     record("auto_dimension", ok and d.get("total", 0) > 0, f"quote vista frontale {d.get('total')}, duplicati rimossi {d.get('duplicates_removed')}")
-    n_dims = d.get("total", 0)
     ok, text, d = await c.call("auto_dimension", view=iso["name"])
     record("auto_dimension rifiutata su isometrica", (not ok) and "isometric" in text, text[:70])
     ok, text, d = await c.call("add_center_marks", view=fname, mode="auto")
@@ -356,8 +354,6 @@ async def scenario(c: Client):
 def add_components(part_path, pin_path):
     """Direct COM on the dedicated instance (found through the ROT by PID)."""
     sys.path.insert(0, str(ROOT))
-    import win32com.client as w
-    import pythoncom
     from solidworks_mcp.automation.base import SolidWorksAutomation as A
     mine = A._find_instance_by_pid(MY_PID)   # ONLY the dedicated instance, by exact PID
     if mine is None or mine.ActiveDoc is None or int(mine.ActiveDoc.GetType) != 2:

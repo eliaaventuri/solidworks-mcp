@@ -15,6 +15,7 @@ Uso:  python tests/test_offline.py          (oppure .venv\\Scripts\\python.exe t
 """
 
 import os
+import re
 import sys
 import types
 import asyncio
@@ -31,8 +32,8 @@ sys.path.insert(0, str(ROOT))
 def _stub_com():
     """Moduli COM finti se pywin32 non c'e' (Linux/macOS): bastano per importare il pacchetto."""
     try:
-        import pythoncom  # noqa: F401
-        import win32com.client  # noqa: F401
+        __import__("pythoncom")
+        __import__("win32com.client")
         return False
     except ImportError:
         pass
@@ -139,7 +140,7 @@ def _test_registry_full(expected):
     unknown = sorted(n for n in list(safety.DESTRUCTIVE_TOOLS) + list(safety.OVERWRITE_GUARDS) if n not in names)
     record("safety.py nomina solo tool esistenti", not unknown, str(unknown))
     bad = [t.name for t in tools if t.name in safety.DESTRUCTIVE_TOOLS and
-           not (t.annotations and t.annotations.destructiveHint and "[DISTRUTTIVO" in (t.description or ""))]
+           not (t.annotations and t.annotations.destructiveHint and "[DESTRUCTIVE" in (t.description or ""))]
     record("tool distruttivi annotati (destructiveHint + nota)", not bad, str(bad))
     no_ow = [t.name for t in tools if t.name in safety.OVERWRITE_GUARDS and "overwrite" not in (t.inputSchema or {}).get("properties", {})]
     record("tool che scrivono file espongono overwrite", not no_ow, str(no_ow))
@@ -775,6 +776,39 @@ def test_worker_timeout():
         srv.sw_automation = real
 
 
+# ============================================================================ 5.6 descrizioni dei tool
+_IT_WORDS = re.compile(r"\b(della|delle|degli|dello|sulla|sulle|nella|nelle|oppure|vengono|viene|sono|predefinit[aoie]|quindi|"
+                       r"perche'?|altrimenti|ogni|anche|solo se|senza|tutti|tutte|quando|questo|questa)\b", re.I)
+_UNIT_HINT = re.compile(r"\b(mm|cm|m|inch|in|ft|deg|degrees?|rad|N|N\*?m|Nm|MPa|Pa|kg|g|s|seconds?|Hz|W|K|C|px|pixels?|dpi|"
+                        r"unit|units|count|number|index|ratio|factor|percent|%|scale|1-based|0-based|fraction)\b|%", re.I)
+
+
+def test_descriptions():
+    os.environ["SW_MCP_ALLOW_PYTHON"] = "1"
+    try:
+        tools = asyncio.run(srv.list_tools())
+    finally:
+        os.environ.pop("SW_MCP_ALLOW_PYTHON", None)
+    nodesc, italian, nounit, tool_it = [], [], [], []
+    for t in tools:
+        desc = (t.description or "").split("[DESTRUCTIVE")[0]
+        if _IT_WORDS.search(desc):
+            tool_it.append(t.name)
+        for p, v in (t.inputSchema or {}).get("properties", {}).items():
+            d = v.get("description", "")
+            if not d.strip():
+                nodesc.append(f"{t.name}.{p}")
+                continue
+            if _IT_WORDS.search(d):
+                italian.append(f"{t.name}.{p}")
+            if v.get("type") in ("number", "integer") and not _UNIT_HINT.search(d):
+                nounit.append(f"{t.name}.{p}")
+    record("ogni parametro ha una descrizione", not nodesc, f"{len(nodesc)}: {nodesc[:6]}")
+    record("descrizioni dei tool in inglese", not tool_it, f"{len(tool_it)}: {tool_it[:6]}")
+    record("descrizioni dei parametri in inglese", not italian, f"{len(italian)}: {italian[:6]}")
+    record("parametri numerici con unita' di misura (o count/index/ratio)", not nounit, f"{len(nounit)}: {nounit[:6]}")
+
+
 # ============================================================================ 5.2 ripresa dell'istanza dedicata
 def test_autorestart():
     saved_env = {k: os.environ.get(k) for k in ("SW_MCP_INSTANCE", "SW_MCP_AUTORESTART")}
@@ -831,7 +865,7 @@ def main():
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units),
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
-                         ("ripresa", test_autorestart)):
+                         ("ripresa", test_autorestart), ("descrizioni", test_descriptions)):
             try:
                 fn()
             except Exception as e:

@@ -104,6 +104,7 @@ Nuovi tool in `simulation_tools.py`/`SIMULATION_DISPATCH`; aggiornare il contegg
 **Fatto quando**: tutte le voci E `[x]` o `[~]` motivate, regressione verde.
 
 ## Fase 5 — Robustezza del server
+**CHIUSA il 2026-10-17** (esiti e misure in `STATO.md`): 1, 2, 5, 6, 7, 8, 9 fatti; 3 e 4 verificati in fase 0; 10 rinviato (facoltativo).
 Oggi le chiamate COM sono sincrone dentro il gestore MCP: se SolidWorks si blocca (finestra di dialogo, calcolo lungo), il server
 non risponde piu'. Lavori, con la parte che si puo' fare nel cloud (C) o solo sul PC (PC):
 1. **Timeout generale dei tool** (C + PC). Oggi solo `run_simulation` ha un watchdog. Generalizzarlo: per ogni tool un tempo

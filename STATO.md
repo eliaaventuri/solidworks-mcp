@@ -106,7 +106,7 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   offline 83/83, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113,
   assembly_extra 214/214, data 159/159, simulation 120/120. 0 processi SolidWorks rimasti.
 
-## Fase 5 (2026-10-17, parziale, offline) — IN CORSO
+## Fase 5 (2026-10-17) — CHIUSA
 - **5.7 `execute_python`**: disattivato di default; si attiva con `SW_MCP_ALLOW_PYTHON=1` (letto a ogni chiamata). Non esposto nell'elenco
   e rifiutato con messaggio che spiega come attivarlo. I test live lo attivano da soli (`tests/live_common.py`), quindi contano 196 tool.
   Offline: 195 tool di default. Confermato da Elia (2026-10-17): resta disattivato di default.
@@ -143,8 +143,20 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   Offline 99/99; dal vivo `test_timeout_live.py` **18/18** (C: PID ucciso, tool seguente riparte in 15 s con PID nuovo, schizzo creato
   sulla nuova istanza, 0 orfani); `run_all.py data` 159/159. Regressione completa non rifatta: il percorso di connessione dei test
   (primo `connect`) non e' cambiato. README: variabili d'ambiente nuove documentate.
-- **Non ancora fatti**: 5.6 descrizioni in inglese, CI pyflakes stretto, 5.10 risorse/prompt MCP (facoltativo).
+- **5.6 descrizioni (2026-10-17) FATTO**: tutte le descrizioni dei tool e dei parametri in inglese (5 sotto-agenti, un file
+  ciascuno; solo testi, struttura invariata: test di registro verde). Aggiunte le 213 descrizioni mancanti; ogni parametro numerico
+  dice l'unita'; esempi JSON nei tool complessi. Nota di `safety.py` ora "[DESTRUCTIVE: ...]" e descrizione di `overwrite` in inglese
+  (test live aggiornati). Nuovo controllo offline `test_descriptions` (descrizione presente, niente parole italiane, unita' nei
+  numeri): offline **103/103**. Caratteri dell'elenco dei tool: 102.413 -> 112.862 (+10 %, per le descrizioni aggiunte; con
+  `SW_MCP_TOOLSETS` si riduce). Controllo per file: `scripts_tmp/desc_check.py <file>`.
+  Dubbi dei sotto-agenti da verificare all'uso (fase 6): verso di `add_force mode=normal`, unita' delle coordinate di
+  `add_detail_view`/`add_crop_view` (mm del modello), `sweep.keep_normal`, `select_at_point.tolerance`.
+- **5.8 FATTO**: pyflakes a 0 avvisi su `solidworks_mcp` e `tests` (tolti anche gli import `win32com.client`/`pythoncom` doppioni:
+  li importa gia' `base.py`; nei test le chiamate restano, solo senza assegnazione inutile). Il CI ora fallisce su qualunque avviso.
+- Dopo 5.6/5.8 dal vivo: `run_all.py modeling_extra assembly_extra` 259/259 e 214/214 (controllano annotazioni e schemi), 0 orfani.
+- **FASE 5 CHIUSA** (criterio del piano: 1-4 provati dal vivo, 5-9 coperti dal test offline). Rinviato, facoltativo: 5.10 risorse e
+  prompt MCP (si puo' fare durante la fase 6, se le prove d'uso lo chiedono).
 
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Fase 5 parziale (vedi sopra): prossimo passo
-5.6 (descrizioni in inglese) e CI pyflakes. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2 e 5 chiuse. Prossima: fase 3 (gruppo D, a partire da
+D5 come da tabella del piano), poi fase 4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).

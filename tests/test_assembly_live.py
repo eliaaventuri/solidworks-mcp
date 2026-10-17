@@ -418,7 +418,7 @@ async def scratch_assembly(c):
 
 async def interference_case(c):
     print("\n== 4. Interferenza costruita apposta")
-    A = Asm(c)
+    Asm(c)
     path = F("asm_interf", "SLDASM")
     rm(path)
     await T(c, "create_new_assembly")

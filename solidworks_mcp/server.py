@@ -122,7 +122,7 @@ async def list_tools() -> list[Tool]:
                     "save": {"type": "boolean", "default": False, "description": "Save before closing"},
                     "discard": {"type": "boolean", "default": False,
                                 "description": "Close discarding unsaved changes (declared in the result)"},
-                    "document": {"type": "string", "description": "Title (e.g. 'Parte1', 'staffa.SLDPRT') or full path of the document to close (default: active)"}
+                    "document": {"type": "string", "description": "Title (e.g. 'Part1', 'bracket.SLDPRT') or full path of the document to close (default: active)"}
                 },
                 "required": []
             }
@@ -148,7 +148,7 @@ async def list_tools() -> list[Tool]:
                     "plane": {
                         "type": "string",
                         "default": "Front",
-                        "description": "Front | Top | Right (anche in minuscolo) oppure il nome di un piano di riferimento creato (es. 'Piano1'). Risponde con gli assi dello schizzo (modello = origine + u*x_axis + v*y_axis)"
+                        "description": "Front | Top | Right (case-insensitive) or the name of a created reference plane (e.g. 'Plane1'). The result returns the sketch axes (model = origin + u*x_axis + v*y_axis)"
                     }
                 },
                 "required": []
@@ -160,10 +160,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x": {"type": "number", "default": 0, "description": "X coordinate on the face"},
-                    "y": {"type": "number", "default": 0, "description": "Y coordinate on the face"},
-                    "z": {"type": "number", "default": 0, "description": "Z coordinate on the face"},
-                    "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
+                    "x": {"type": "number", "default": 0, "description": "X coordinate on the face in `unit`"},
+                    "y": {"type": "number", "default": 0, "description": "Y coordinate on the face in `unit`"},
+                    "z": {"type": "number", "default": 0, "description": "Z coordinate on the face in `unit`"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -174,11 +174,11 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x1": {"type": "number", "default": 0, "description": "Start X"},
-                    "y1": {"type": "number", "default": 0, "description": "Start Y"},
-                    "x2": {"type": "number", "default": 100, "description": "End X"},
-                    "y2": {"type": "number", "default": 0, "description": "End Y"},
-                    "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
+                    "x1": {"type": "number", "default": 0, "description": "Start X in `unit`"},
+                    "y1": {"type": "number", "default": 0, "description": "Start Y in `unit`"},
+                    "x2": {"type": "number", "default": 100, "description": "End X in `unit`"},
+                    "y2": {"type": "number", "default": 0, "description": "End Y in `unit`"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -189,10 +189,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x": {"type": "number", "default": 0, "description": "Center X"},
-                    "y": {"type": "number", "default": 0, "description": "Center Y"},
-                    "radius": {"type": "number", "default": 25, "description": "Radius"},
-                    "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
+                    "x": {"type": "number", "default": 0, "description": "Center X in `unit`"},
+                    "y": {"type": "number", "default": 0, "description": "Center Y in `unit`"},
+                    "radius": {"type": "number", "default": 25, "description": "Radius in `unit`"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -203,27 +203,27 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "x1": {"type": "number", "default": -50, "description": "First corner X"},
-                    "y1": {"type": "number", "default": -25, "description": "First corner Y"},
-                    "x2": {"type": "number", "default": 50, "description": "Second corner X"},
-                    "y2": {"type": "number", "default": 25, "description": "Second corner Y"},
-                    "unit": {"type": "string", "description": "Unit (mm, inch, m)"}
+                    "x1": {"type": "number", "default": -50, "description": "First corner X in `unit`"},
+                    "y1": {"type": "number", "default": -25, "description": "First corner Y in `unit`"},
+                    "x2": {"type": "number", "default": 50, "description": "Second corner X in `unit`"},
+                    "y2": {"type": "number", "default": 25, "description": "Second corner Y in `unit`"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
         ),
         Tool(
             name="draw_arc",
-            description="Draw an arc by center and angles.",
+            description="Draw an arc by center and angles. Example: {\"cx\":0,\"cy\":0,\"radius\":25,\"start_angle\":0,\"end_angle\":90}",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "cx": {"type": "number", "default": 0, "description": "Center X"},
-                    "cy": {"type": "number", "default": 0, "description": "Center Y"},
-                    "radius": {"type": "number", "default": 25, "description": "Radius"},
+                    "cx": {"type": "number", "default": 0, "description": "Center X in `unit`"},
+                    "cy": {"type": "number", "default": 0, "description": "Center Y in `unit`"},
+                    "radius": {"type": "number", "default": 25, "description": "Radius in `unit`"},
                     "start_angle": {"type": "number", "default": 0, "description": "Start angle (degrees)"},
                     "end_angle": {"type": "number", "default": 90, "description": "End angle (degrees)"},
-                    "unit": {"type": "string", "description": "Unit for radius"}
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -234,11 +234,11 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "cx": {"type": "number", "default": 0, "description": "Center X"},
-                    "cy": {"type": "number", "default": 0, "description": "Center Y"},
-                    "radius": {"type": "number", "default": 25, "description": "Radius"},
-                    "sides": {"type": "integer", "default": 6, "description": "Number of sides (3-100)"},
-                    "unit": {"type": "string", "description": "Unit"}
+                    "cx": {"type": "number", "default": 0, "description": "Center X in `unit`"},
+                    "cy": {"type": "number", "default": 0, "description": "Center Y in `unit`"},
+                    "radius": {"type": "number", "default": 25, "description": "Radius in `unit`"},
+                    "sides": {"type": "integer", "default": 6, "description": "Number of sides (count, 3-100)"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -251,9 +251,9 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "depth": {"type": "number", "default": 10, "description": "Extrusion depth"},
+                    "depth": {"type": "number", "default": 10, "description": "Extrusion depth in `unit`"},
                     "both_directions": {"type": "boolean", "default": False, "description": "Extrude in both directions"},
-                    "unit": {"type": "string", "description": "Unit"}
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
@@ -264,40 +264,40 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "depth": {"type": "number", "default": 10, "description": "Cut depth"},
+                    "depth": {"type": "number", "default": 10, "description": "Cut depth in `unit`"},
                     "through_all": {"type": "boolean", "default": False, "description": "Cut through all"},
                     "both_directions": {"type": "boolean", "default": False, "description": "Cut both directions"},
-                    "unit": {"type": "string", "description": "Unit"}
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
         ),
         Tool(
             name="fillet_edges",
-            description="Add fillet to selected edges.",
+            description="Add a fillet to selected edges. Example: {\"radius\":2,\"edge_points\":[[10,0,5]]}",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "radius": {"type": "number", "default": 2, "description": "Fillet radius"},
+                    "radius": {"type": "number", "default": 2, "description": "Fillet radius in `unit`"},
                     "edge_points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
-                                    "description": "Punti [x,y,z] SUGLI spigoli da raccordare (selezione autonoma). Senza: spigoli gia selezionati"},
-                    "unit": {"type": "string", "description": "Unit"}
+                                    "description": "[x,y,z] points ON the edges to fillet (self-selecting). Omitted: already selected edges"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }
         ),
         Tool(
             name="chamfer_edges",
-            description="Add chamfer to selected edges.",
+            description="Add a chamfer to selected edges. Example: {\"distance\":2,\"edge_points\":[[10,0,5]]}",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "distance": {"type": "number", "default": 2, "description": "Chamfer distance"},
+                    "distance": {"type": "number", "default": 2, "description": "Chamfer distance in `unit`"},
                     "angle": {"type": "number", "default": 45, "description": "Chamfer angle (degrees)"},
-                    "distance2": {"type": "number", "description": "Seconda distanza (smusso distanza-distanza)"},
+                    "distance2": {"type": "number", "description": "Second distance in `unit`, for a distance-distance chamfer"},
                     "edge_points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
-                                    "description": "Punti [x,y,z] SUGLI spigoli da smussare (selezione autonoma). Senza: spigoli gia selezionati"},
-                    "unit": {"type": "string", "description": "Unit"}
+                                    "description": "[x,y,z] points ON the edges to chamfer (self-selecting). Omitted: already selected edges"},
+                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
                 },
                 "required": []
             }

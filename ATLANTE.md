@@ -23,7 +23,7 @@ solidworks_mcp/
   assembly_tools.py           schemi dei 35 tool di assieme -> automation/assembly*.py
   data_tools.py               schemi dei 30 tool di dati ed export -> automation/data_export.py
   simulation_tools.py         schemi dei 18 tool di simulazione -> automation/simulation.py
-  safety.py                   tool distruttivi (destructiveHint + nota [DISTRUTTIVO]), parametro overwrite e rifiuto della sovrascrittura
+  safety.py                   tool distruttivi (destructiveHint + nota [DESTRUCTIVE]), parametro overwrite e rifiuto della sovrascrittura
   config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
   utils/sw_finder.py          trova SLDWORKS.exe e i template
@@ -73,7 +73,7 @@ tests/test_simulation_live.py      simulazione statica (trave, piastra con foro,
 tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
-`.github/workflows/test-offline.yml`: GitHub Actions esegue `test_offline.py` e pyflakes (nomi non definiti) a ogni push.
+`.github/workflows/test-offline.yml`: GitHub Actions esegue `test_offline.py` e pyflakes (qualunque avviso fa fallire) a ogni push.
 
 ## Non versionati (`.gitignore`)
 ```

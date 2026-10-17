@@ -9,112 +9,120 @@ entita' per coordinate: {"face":[x,y,z]} | {"edge":[x,y,z]} | {"vertex":[x,y,z]}
 from mcp.types import Tool
 
 S, N, B, A, O = "string", "number", "boolean", "array", "object"
-_UNIT = (S, "Unita delle misure (default mm)")
-_CFG = (S, "Nome configurazione (vuoto = quella attiva / il file)")
-_CFGS = (None, "Configurazione: nome | lista | 'all' (default l'attiva)")
-_ENT = (O, "Entita' per coordinate: {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | {\"vertex\":[x,y,z]}")
+_UNIT = (S, "Length unit for inputs and results: mm, cm, m or inch (default mm)")
+_CFG = (S, "Configuration name (empty = active configuration / the file)")
+_CFGS = (None, "Configuration: name | list of names | 'all' (default the active one)")
+_ENT = (O, "Entity by coordinates: {\"face\":[x,y,z]} | {\"edge\":[x,y,z]} | {\"vertex\":[x,y,z]} (a point ON the entity, model coordinates, mm)")
 
 _TOOLS = {
     # ---------------------------------------------------------------- materiali
     "list_materials": ("list_materials",
-        "Libreria materiali SolidWorks (file .sldmat, nomi nella lingua di SolidWorks: 'Lega 6061' in italiano, '6061 Alloy' in inglese). Senza argomenti: categorie con conteggio; con `category` "
-        "(es. 'Acciaio', 'Plastiche', 'Leghe di alluminio') o `query` (es. '304', 'ABS'): elenco con densita' kg/m3.",
-        {"category": (S, "Categoria (anche parziale)"), "query": (S, "Testo nel nome"),
-         "include_properties": (B, "Aggiunge modulo elastico, snervamento, ecc."), "limit": (N, "")}, []),
+        "SolidWorks material library (.sldmat files; names follow the SolidWorks UI language: 'Lega 6061' in Italian, '6061 Alloy' in English). No arguments: categories with counts; "
+        "with `category` (e.g. 'Steel', 'Plastics') or `query` (e.g. '304', 'ABS'): matching materials with density in kg/m3.",
+        {"category": (S, "Category name (partial match)"), "query": (S, "Text contained in the material name"),
+         "include_properties": (B, "Also return elastic modulus, yield strength, etc."),
+         "limit": (N, "Maximum number of materials returned (count, default 400)")}, []),
     "assign_material": ("assign_material",
-        "Assegna un materiale della libreria al pezzo (o a un corpo con `body`): 'AISI 304', 'Lega 6061' (SolidWorks in inglese: '6061 Alloy'). Imposta anche "
-        "la proprieta' Material del modello (\"SW-Material@file\") cosi' il cartiglio dei disegni lo mostra.",
-        {"material": (S, "Nome materiale (anche parziale se univoco)"), "category": (S, "Restringe la ricerca"),
-         "body": (S, "Nome del corpo (default tutto il pezzo)"), "configuration": _CFGS,
-         "link_title_block": (B, "Collega Material al cartiglio (default true)")}, ["material"]),
-    "get_material": ("get_material", "Materiale corrente del pezzo e dei corpi, densita' usata, proprieta' Material.",
-        {"body": (S, ""), "configuration": _CFG}, []),
+        "Assign a library material to the part (or to one body with `body`): 'AISI 304', 'Lega 6061' ('6061 Alloy' in English SolidWorks). Also sets the model's "
+        "Material property (\"SW-Material@file\") so the drawing title block shows it.",
+        {"material": (S, "Material name (partial match accepted if unique)"), "category": (S, "Narrows the search to this category"),
+         "body": (S, "Body name (default the whole part)"), "configuration": _CFGS,
+         "link_title_block": (B, "Link Material to the title block (default true)")}, ["material"]),
+    "get_material": ("get_material", "Current material of the part and of its bodies, the density used and the Material property.",
+        {"body": (S, "Body name (default the whole part)"), "configuration": _CFG}, []),
     "link_material_to_title_block": ("link_material_to_title_block",
-        "Imposta Material = \"SW-Material@file\" sul modello: il cartiglio del disegno mostra il materiale assegnato.", {}, []),
+        "Set Material = \"SW-Material@file\" on the model so the drawing title block shows the assigned material.", {}, []),
     # ---------------------------------------------------------------- massa
     "get_part_mass_properties": ("get_part_mass_properties",
-        "Proprieta' di massa complete di pezzo o corpo: massa, volume, area, densita' usata, baricentro, momenti e assi principali, "
-        "tensore d'inerzia nel baricentro e nell'origine (kg*m2 e kg*mm2), stato di sovrascrittura.",
-        {"body": (S, "Nome corpo (default tutto il pezzo)"), "configuration": _CFG, "unit": _UNIT}, []),
+        "Full mass properties of a part or body: mass, volume, surface area, density used, center of mass, principal moments and axes, "
+        "inertia tensor at the center of mass and at the origin (kg*m2 and kg*mm2), override status.",
+        {"body": (S, "Body name (default the whole part)"), "configuration": _CFG, "unit": _UNIT}, []),
     "set_mass_override": ("set_mass_override",
-        "Massa sovrascritta (kg) con baricentro opzionale. Senza `mass` rimuove la sovrascrittura.",
-        {"mass": (N, "kg"), "center_of_mass": (A, "[x,y,z] (default il baricentro calcolato)"), "unit": _UNIT,
+        "Override the mass (kg) with an optional center of mass. Without `mass` the override is removed.",
+        {"mass": (N, "Mass in kg"), "center_of_mass": (A, "[x,y,z] in `unit` (default mm; default the computed center of mass)"), "unit": _UNIT,
          "configuration": _CFG}, []),
     # ---------------------------------------------------------------- proprieta' personalizzate
     "list_custom_properties": ("list_custom_properties",
-        "Elenca le proprieta' personalizzate del documento attivo (file) o di una configurazione, con valore/espressione e valore risolto.",
+        "List the custom properties of the active document (file level) or of a configuration, with value/expression and resolved value.",
         {"configuration": _CFG}, []),
-    "get_custom_property": ("get_custom_property", "Legge una proprieta' (valore e risolto, es. SW-Mass).",
-        {"name": (S, ""), "configuration": _CFG}, ["name"]),
+    "get_custom_property": ("get_custom_property", "Read one custom property (value and resolved value, e.g. SW-Mass).",
+        {"name": (S, "Property name"), "configuration": _CFG}, ["name"]),
     "set_custom_property": ("set_custom_property",
-        "Scrive una proprieta' personalizzata (file o configurazione). Il valore puo' essere un'espressione: 'SW-Mass@pezzo.SLDPRT', "
-        "'SW-Material@pezzo.SLDPRT' (virgolette automatiche). type: text | number | double | date | yesno.",
-        {"name": (S, ""), "value": (S, ""), "configuration": _CFG, "type": (S, "text | number | double | date | yesno")},
+        "Write a custom property (file or configuration). The value may be an expression such as 'SW-Mass@part.SLDPRT' or "
+        "'SW-Material@part.SLDPRT' (quotes added automatically).",
+        {"name": (S, "Property name"), "value": (S, "Value or expression"), "configuration": _CFG,
+         "type": (S, "text | number | double | date | yesno")},
         ["name", "value"]),
-    "delete_custom_property": ("delete_custom_property", "Elimina una proprieta' personalizzata.",
-        {"name": (S, ""), "configuration": _CFG}, ["name"]),
+    "delete_custom_property": ("delete_custom_property", "Delete a custom property.",
+        {"name": (S, "Property name"), "configuration": _CFG}, ["name"]),
     # ---------------------------------------------------------------- variabili globali / equazioni
-    "list_equations": ("list_equations", "Equazioni e variabili globali (valori nelle unita' del documento).", {}, []),
+    "list_equations": ("list_equations", "List equations and global variables (values in the document units).", {}, []),
     "set_global_variable": ("set_global_variable",
-        "Crea o modifica una variabile globale (\"nome\" = valore; numero in mm o espressione). Ricostruisce e riporta errori e volume.",
-        {"name": (S, ""), "value": (None, "Numero o espressione (es. 50 oppure '\"altra\"*2')")}, ["name", "value"]),
-    "delete_global_variable": ("delete_global_variable", "Elimina una variabile globale.", {"name": (S, "")}, ["name"]),
+        "Create or change a global variable (\"name\" = value; a number in mm or an expression). Rebuilds and reports errors and volume.",
+        {"name": (S, "Variable name"), "value": (None, "Number (mm) or expression (e.g. 50 or '\"other\"*2')")}, ["name", "value"]),
+    "delete_global_variable": ("delete_global_variable", "Delete a global variable.", {"name": (S, "Variable name")}, ["name"]),
     "add_equation": ("add_equation",
-        "Aggiunge un'equazione, es. '\"D1@Schizzo1\" = \"lunghezza\" * 2' (quota guidata da variabile). Verifica: se produce errori viene rimossa.",
-        {"equation": (S, "")}, ["equation"]),
-    "update_equation": ("update_equation", "Modifica l'equazione di indice dato (vedi list_equations).",
-        {"index": (N, ""), "equation": (S, "")}, ["index", "equation"]),
-    "delete_equation": ("delete_equation", "Elimina l'equazione di indice dato.", {"index": (N, "")}, ["index"]),
-    "evaluate_equations": ("evaluate_equations", "Ricalcola le equazioni, ricostruisce e verifica (errori feature, volume, valori).", {}, []),
+        "Add an equation, e.g. '\"D1@Sketch1\" = \"length\" * 2' (dimension driven by a variable). Checked: removed again if it causes errors.",
+        {"equation": (S, "Full equation text, e.g. '\"D1@Sketch1\" = \"length\" * 2'")}, ["equation"]),
+    "update_equation": ("update_equation", "Replace the equation at the given index (see list_equations).",
+        {"index": (N, "0-based equation index from list_equations"), "equation": (S, "New full equation text")}, ["index", "equation"]),
+    "delete_equation": ("delete_equation", "Delete the equation at the given index.",
+        {"index": (N, "0-based equation index from list_equations")}, ["index"]),
+    "evaluate_equations": ("evaluate_equations", "Recalculate the equations, rebuild and check (feature errors, volume, values).", {}, []),
     # ---------------------------------------------------------------- configurazioni del pezzo
     "list_part_configurations": ("list_part_configurations",
-        "Configurazioni del pezzo/assieme e quella attiva; con include_volume attiva ciascuna e riporta il volume.",
-        {"include_volume": (B, "")}, []),
-    "add_part_configuration": ("add_part_configuration", "Aggiunge una configurazione (diventa attiva salvo activate=false).",
-        {"name": (S, ""), "comment": (S, ""), "activate": (B, "")}, ["name"]),
-    "activate_part_configuration": ("activate_part_configuration", "Attiva una configurazione di un pezzo/assieme e ricostruisce.",
-        {"name": (S, "")}, ["name"]),
-    "delete_part_configuration": ("delete_part_configuration", "Elimina una configurazione (non l'unica).",
-        {"name": (S, "")}, ["name"]),
+        "Configurations of the part/assembly and the active one; with include_volume it activates each and reports its volume.",
+        {"include_volume": (B, "Activate each configuration and report its volume (slower)")}, []),
+    "add_part_configuration": ("add_part_configuration", "Add a configuration (it becomes active unless activate=false).",
+        {"name": (S, "New configuration name"), "comment": (S, "Configuration comment"),
+         "activate": (B, "Activate the new configuration (default true)")}, ["name"]),
+    "activate_part_configuration": ("activate_part_configuration", "Activate a configuration of a part/assembly and rebuild.",
+        {"name": (S, "Configuration name")}, ["name"]),
+    "delete_part_configuration": ("delete_part_configuration", "Delete a configuration (not the only one).",
+        {"name": (S, "Configuration name")}, ["name"]),
     "set_configuration_dimension": ("set_configuration_dimension",
-        "Imposta una quota ('D1@Schizzo1') solo nelle configurazioni indicate (nome | lista | 'all'; default l'attiva).",
-        {"dimension": (S, ""), "value": (N, ""), "configuration": _CFGS, "unit": _UNIT}, ["dimension", "value"]),
+        "Set a dimension ('D1@Sketch1') in the given configurations only (name | list | 'all'; default the active one). Angles in degrees.",
+        {"dimension": (S, "Dimension full name, e.g. 'D1@Sketch1'"), "value": (N, "New value in `unit` (default mm; degrees for angular dimensions)"),
+         "configuration": _CFGS, "unit": _UNIT}, ["dimension", "value"]),
     "set_configuration_suppression": ("set_configuration_suppression",
-        "Sopprime/riattiva una feature solo nelle configurazioni indicate (nome | lista | 'all'; default l'attiva).",
-        {"feature": (S, ""), "suppressed": (B, "Default true"), "configuration": _CFGS}, ["feature"]),
+        "Suppress/unsuppress a feature in the given configurations only (name | list | 'all'; default the active one).",
+        {"feature": (S, "Feature name"), "suppressed": (B, "True to suppress, false to unsuppress (default true)"), "configuration": _CFGS}, ["feature"]),
     # ---------------------------------------------------------------- export / import
     "export_model": ("export_model",
-        "Esporta pezzo/assieme: stl | 3mf (stampa 3D) | step | iges | x_t | x_b | sat | pdf (PDF 3D) | eprt/easm (eDrawings); formato dall'estensione. "
-        "STL/3MF: quality coarse|fine|custom (+deviation mm, angle gradi), binary, units. STEP: step_ap 203|214|242. Verifica il file "
-        "(STL: triangoli e box vs modello; STEP: MANIFOLD_SOLID_BREP).",
-        {"filepath": (S, ""), "format": (S, "Se diverso dall'estensione"), "configuration": _CFG,
-         "quality": (S, "coarse | fine | custom"), "deviation": (N, "mm, per custom"), "angle": (N, "gradi, per custom"),
-         "binary": (B, "STL binario (default true)"), "step_ap": (N, "203 | 214 | 242"), "units": (S, "mm | cm | m | inch (STL)"),
-         "iges_representation": (S, "surfaces | brep | curves"), "one_file": (B, "Assieme STL in un solo file"),
-         "verify": (B, "Default true")}, ["filepath"]),
+        "Export the active part/assembly: stl | 3mf (3D printing) | step | iges | x_t | x_b | sat | pdf (3D PDF) | eprt/easm (eDrawings); format from the file extension. "
+        "STL/3MF: quality coarse|fine|custom (+deviation, angle), binary, units. STEP: step_ap 203|214|242. Verifies the file "
+        "(STL: triangles and box vs model; STEP: MANIFOLD_SOLID_BREP). Example: {\"filepath\":\"C:\\\\out\\\\part.stl\",\"quality\":\"custom\",\"deviation\":0.05,\"angle\":10}",
+        {"filepath": (S, "Output file path; its extension selects the format"), "format": (S, "Format override if different from the extension"), "configuration": _CFG,
+         "quality": (S, "coarse | fine | custom (STL/3MF)"), "deviation": (N, "Chord deviation in mm, for custom quality"), "angle": (N, "Angle tolerance in degrees, for custom quality"),
+         "binary": (B, "Binary STL (default true)"), "step_ap": (N, "STEP application protocol number: 203, 214 or 242"), "units": (S, "mm | cm | m | inch (STL)"),
+         "iges_representation": (S, "surfaces | brep | curves"), "one_file": (B, "Export an assembly as a single STL file"),
+         "verify": (B, "Verify the exported file (default true)")}, ["filepath"]),
     "inspect_export_file": ("inspect_export_file",
-        "Legge e verifica un file esportato: STL (triangoli, bounding box), 3MF, STEP (schema, MANIFOLD_SOLID_BREP), IGES, Parasolid, PDF 3D.",
-        {"filepath": (S, "")}, ["filepath"]),
+        "Read and verify an exported file: STL (triangles, bounding box), 3MF, STEP (schema, MANIFOLD_SOLID_BREP), IGES, Parasolid, 3D PDF.",
+        {"filepath": (S, "Path of the file to inspect")}, ["filepath"]),
     "import_model": ("import_model",
-        "Apre STEP/IGES/Parasolid/STL come pezzo e restituisce i corpi importati (volume, box). STL: import_as solid|surface|graphics, units.",
-        {"filepath": (S, ""), "import_as": (S, "solid | surface | graphics (STL)"), "units": (S, "mm | cm | m | inch (STL)")}, ["filepath"]),
+        "Open STEP/IGES/Parasolid/STL as a part and return the imported bodies (volume, box). STL: import_as solid|surface|graphics, units.",
+        {"filepath": (S, "Path of the file to import"), "import_as": (S, "solid | surface | graphics (STL)"), "units": (S, "mm | cm | m | inch (STL)")}, ["filepath"]),
     "export_model_image": ("export_model_image",
-        "Immagine PNG/JPG/BMP del pezzo/assieme. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
-        "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height px (PNG/BMP); hide_reference=true (default) "
-        "nasconde piani, assi, origini, punti e schizzi; white_background per lo sfondo bianco.",
-        {"filepath": (S, ""), "view": (S, ""), "style": (S, ""), "width": (N, "pixel"), "height": (N, "pixel"),
-         "hide_reference": (B, "Default true"), "white_background": (B, ""), "zoom_to_fit": (B, "")}, ["filepath"]),
+        "PNG/JPG/BMP image of the part/assembly. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
+        "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height in pixels (PNG/BMP); hide_reference=true (default) "
+        "hides planes, axes, origins, points and sketches; white_background for a white backdrop.",
+        {"filepath": (S, "Output image path (.png, .jpg or .bmp)"), "view": (S, "Named view (default isometric)"), "style": (S, "Display style (default shaded_edges)"),
+         "width": (N, "Image width in pixels"), "height": (N, "Image height in pixels"),
+         "hide_reference": (B, "Hide planes, axes, origins, points and sketches (default true)"), "white_background": (B, "White backdrop"),
+         "zoom_to_fit": (B, "Zoom to fit before capture (default true)")}, ["filepath"]),
     # ---------------------------------------------------------------- misure
     "measure_entities": ("measure_entities",
-        "Misura fra due entita' per coordinate (o su una): distanza, distanza normale, delta XYZ, angolo (gradi), parallele/perpendicolari; "
-        "raggio/diametro/area/lunghezza se applicabili.",
+        "Measure between two entities given by coordinates (or one alone): distance, normal distance, XYZ delta, angle (degrees), parallel/perpendicular; "
+        "radius/diameter/area/length where applicable.",
         {"entity1": _ENT, "entity2": _ENT, "unit": _UNIT}, ["entity1"]),
     "measure_face": ("measure_face",
-        "Tipo e misure della faccia che contiene il punto: area; cilindrica: raggio, diametro, asse; piana: normale; sfera/cono/toro.",
-        {"x": (N, ""), "y": (N, ""), "z": (N, ""), "unit": _UNIT}, ["x", "y", "z"]),
+        "Type and measures of the face containing the point: area; cylindrical: radius, diameter, axis; planar: normal; sphere/cone/torus.",
+        {"x": (N, "Point X coordinate in `unit` (default mm)"), "y": (N, "Point Y coordinate in `unit` (default mm)"),
+         "z": (N, "Point Z coordinate in `unit` (default mm)"), "unit": _UNIT}, ["x", "y", "z"]),
     "get_bounding_box": ("get_bounding_box",
-        "Bounding box allineato agli assi di pezzo (esatto), corpo o assieme: min, max, dimensioni, centro.",
-        {"body": (S, ""), "unit": _UNIT}, []),
+        "Axis-aligned bounding box of a part (exact), body or assembly: min, max, size, center.",
+        {"body": (S, "Body name (default the whole part)"), "unit": _UNIT}, []),
 }
 
 

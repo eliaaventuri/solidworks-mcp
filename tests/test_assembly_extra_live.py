@@ -483,7 +483,6 @@ async def c3_esplosione_libera(c):
     # radiale: distanza dall'asse X da 30 a 60 mm, rotazione di 30 gradi
     for nm in ("cx_screw-2", "cx_screw-3", "cx_screw-4"):
         p = poses.get(nm, {})
-        pos = p.get("position_mm", [9e9] * 3)
         rho0 = math.hypot(P0[nm][1], P0[nm][2])
         # la posizione dell'ORIGINE si sposta per la rotazione attorno al centro del box: si controlla il centro del box
         bx = p.get("box_mm", [0] * 6)
@@ -564,7 +563,7 @@ async def pos_of(c, name):
 
 async def c5_accoppiamenti_avanzati(c):
     print("\n== C5. Accoppiamenti avanzati")
-    A = Asm(c)
+    Asm(c)
     # ---------------------------------------------------------------- limite distanza
     await need(c, "create_new_assembly", "limite distanza")
     await c.call("insert_component", file_path=F("cx_base"), x=0, y=0, z=0, fixed=True)
@@ -845,8 +844,8 @@ def tool_checks(tl):
     by = {x.name: x for x in tl}
     record("196 tool, nessun duplicato (il gruppo C non aggiunge tool, solo parametri)", len(names) == 196 and len(set(names)) == 196, f"{len(names)} tool")
     m = by["mirror_components"]
-    record("mirror_components: destructiveHint, nota [DISTRUTTIVO], parametri opposite_hand/name_suffix/folder/overwrite/align_exact",
-           bool(m.annotations and m.annotations.destructiveHint) and "DISTRUTTIVO" in (m.description or "")
+    record("mirror_components: destructiveHint, nota [DESTRUCTIVE], parametri opposite_hand/name_suffix/folder/overwrite/align_exact",
+           bool(m.annotations and m.annotations.destructiveHint) and "DESTRUCTIVE" in (m.description or "")
            and {"opposite_hand", "name_suffix", "folder", "overwrite", "align_exact"} <= set(m.inputSchema["properties"]), "")
     record("delete_mate (distruttivo) espone check_dof; auto_explode espone mode; add_explode_step radial_axis/angle",
            "check_dof" in by["delete_mate"].inputSchema["properties"] and by["delete_mate"].annotations.destructiveHint

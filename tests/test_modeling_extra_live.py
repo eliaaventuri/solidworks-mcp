@@ -183,8 +183,8 @@ async def sicurezza_tool_list(c, tl):
              "execute_python"]
     miss = [n for n in destr if n not in by or not (by[n].annotations and by[n].annotations.destructiveHint)]
     record("tool distruttivi annotati destructiveHint=true", not miss, f"{len(destr)} tool; mancanti {miss}")
-    miss = [n for n in destr if n in by and "DISTRUTTIVO" not in (by[n].description or "")]
-    record("tool distruttivi: nota [DISTRUTTIVO] nella descrizione", not miss, f"mancanti {miss}")
+    miss = [n for n in destr if n in by and "DESTRUCTIVE" not in (by[n].description or "")]
+    record("tool distruttivi: nota [DESTRUCTIVE] nella descrizione", not miss, f"mancanti {miss}")
     props = by["close_document"].inputSchema["properties"]
     record("close_document espone save, discard, document", {"save", "discard", "document"} <= set(props), str(sorted(props)))
     over = [n for n in ("save_document", "save_drawing", "export_drawing", "export_model", "export_model_image",
@@ -699,7 +699,7 @@ async def b4_fori(c):
     n_face = [0.0, -math.sin(th), math.cos(th)]
     await new_wedge()
     v0 = await vol(c)
-    d = await need(c, "create_hole", "B4 foro passante M6 su piano inclinato (18.43 gradi), punto (30,30,30)", kind="simple", size="M6",
+    await need(c, "create_hole", "B4 foro passante M6 su piano inclinato (18.43 gradi), punto (30,30,30)", kind="simple", size="M6",
                    through=True, face_point=[30, 30, 30])
     removed = v0 - await vol(c)
     exp = PI * 3.3 ** 2 * 30 / math.cos(th)
@@ -732,7 +732,7 @@ async def b4_fori(c):
     await c.call("extrude_boss", depth=60)
     v0 = await vol(c)
     pc = 30 / math.sqrt(2)
-    d = await need(c, "create_hole", "B4 foro passante M6 su faccia cilindrica R30", kind="simple", size="M6", through=True,
+    await need(c, "create_hole", "B4 foro passante M6 su faccia cilindrica R30", kind="simple", size="M6", through=True,
                    face_point=[30, pc, pc])
     removed = v0 - await vol(c)
     a, R, n = 3.3, 30.0, 400
@@ -851,7 +851,7 @@ async def b5_tool_base(c):
         await new_part(c)
         await c.call("create_sketch", plane="Front")
         await builder()
-        d = await need(c, "extrude_sketch", f"{label}: estrusione", depth=depth)
+        await need(c, "extrude_sketch", f"{label}: estrusione", depth=depth)
         await veq(c, label, exp, tol)
         await discard_all(c)
 
@@ -878,7 +878,7 @@ async def b5_tool_base(c):
 
     for sides in (6, 5, 8):
         async def poly(s=sides):
-            d = await need(c, "draw_polygon", f"B5 draw_polygon {s} lati, raggio 10", cx=0, cy=0, radius=10, sides=s)
+            await need(c, "draw_polygon", f"B5 draw_polygon {s} lati, raggio 10", cx=0, cy=0, radius=10, sides=s)
         # poligono regolare con i vertici sulla circonferenza di raggio 10: area = s/2 r^2 sin(2pi/s)
         await profile_volume(f"B5 poligono {sides} lati (vertici sul cerchio r=10)", poly, sides / 2 * 100 * math.sin(2 * PI / sides) * 5)
     await new_part(c)

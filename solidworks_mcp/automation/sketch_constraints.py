@@ -21,8 +21,6 @@ import logging
 import traceback
 from typing import Optional, Dict, List, Tuple
 
-import win32com.client
-import pythoncom
 
 from ..constants import SwErrors
 from .modeling_base import null_variant, r8_array
