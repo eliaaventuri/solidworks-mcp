@@ -45,7 +45,7 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [ ] D2 STEP AP242 reale
 - [ ] D3 eDrawings `.eprt` verificato (apertura/lettura)
 - [ ] D4 Immagini oltre la risoluzione nativa (es. 4K) e resa migliore (RealView/ambient occlusion/prospettiva); rendering fotorealistico se Visualize è automatizzabile
-- [ ] D5 `hide_reference` anche dentro i componenti degli assiemi
+- [x] D5 `hide_reference` anche dentro i componenti degli assiemi (2026-10-17: toggle di documento swViewDisplayHideAllTypes = 198, salvato e ripristinato; `test_data_live` sez. 11: piano del componente 1596 pixel azzurri senza, 0 con, 1596 dopo)
 - [ ] D6 Assiemi: test di export STL/STEP, bounding box, immagini
 - [ ] D7 Proprietà di massa rispetto a un sistema di coordinate utente
 - [ ] D8 Materiali personalizzati fuori dalla cartella standard (librerie utente)

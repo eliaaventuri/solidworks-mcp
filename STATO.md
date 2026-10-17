@@ -157,6 +157,11 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
 - **FASE 5 CHIUSA** (criterio del piano: 1-4 provati dal vivo, 5-9 coperti dal test offline). Rinviato, facoltativo: 5.10 risorse e
   prompt MCP (si puo' fare durante la fase 6, se le prove d'uso lo chiedono).
 
+## Fase 3 (2026-10-17, gruppo D) — IN CORSO
+- **D5 `[x]`**: `export_model_image(hide_reference=true)` sugli assiemi nasconde anche i riferimenti dei componenti (toggle di documento
+  198, salvato e ripristinato). `test_data_live` 168/168 (sez. 11: 1596 / 0 / 1596 pixel azzurri). Trappola: nell'assieme la
+  visualizzazione dei piani e' spenta di default (dettagli in `STATO_STORICO.md`).
+
 ## Prossimo passo
 Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2 e 5 chiuse. Prossima: fase 3 (gruppo D, a partire da
 D5 come da tabella del piano), poi fase 4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).

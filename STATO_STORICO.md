@@ -496,3 +496,13 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
 - Trappole di lavoro: con l'uscita su file Python scrive a blocchi, un test live sembra fermo (log a 0 byte, CPU quasi nulla) mentre lavora:
   usare `python -u`. Un `> file` di PowerShell scrive in UTF-16 (leggerlo con `iconv -f UTF-16`). Un secondo test sullo stesso log
   fallisce con "file in uso": controllare prima i processi `tests/*.py` gia' attivi.
+
+## Fase 3: gruppo D (2026-10-17)
+### D5 riferimenti dei componenti nelle immagini d'assieme
+- I piani/assi dei componenti non stanno nell'albero dell'assieme (`FirstFeature` dell'assieme non li visita): per nasconderli si usa il
+  toggle di DOCUMENTO `swViewDisplayHideAllTypes` = 198 (`doc.Extension.Get/SetUserPreferenceToggle(198, 0, ...)`), poi `GraphicsRedraw2`.
+- TRAPPOLA: nel modello d'assieme `swDisplayPlanes` (5) del documento e' False (anche 4 assi e 6 origini): un piano visibile nel pezzo
+  NON compare nell'assieme finche' non lo si accende. Il primo test D5 dava 0 pixel azzurri anche senza nascondere (controllo inutile).
+- Costanti trovate in `swconst.tlb` (enum `swUserPreferenceToggle_e`): 4 assi, 5 piani, 6 origini, 13 sistemi di coordinate,
+  19/219 punti di riferimento, 196 schizzi, 197 annotazioni, 198 nascondi tutti i tipi.
+- Misura: piano del componente 1596 pixel azzurri senza `hide_reference`, 0 con, 1596 dopo (ripristino ok). Sonda: `scripts_tmp/d5probe.py`.

@@ -442,6 +442,26 @@ async def scenario(c: Client, tools):
 
     await c.call("save_document", filepath=part)
 
+    # ------------------------------------------------------------------ 11. D5: hide_reference nei componenti di un assieme
+    print("\n== 11. D5 riferimenti dei componenti")
+    await T(c, "create_new_assembly", "assieme con il blocco (Piano1 visibile nel pezzo)")
+    await T(c, "insert_component", "blocco nell'assieme", file_path=part)
+    # nel modello d'assieme la visualizzazione dei piani (swDisplayPlanes = 5) e' spenta: la si accende per vedere il Piano1 del componente
+    ok, text, _ = await c.call("execute_python", code="d = sw.ActiveDoc\nd.Extension.SetUserPreferenceToggle(5, 0, True)\n"
+                                                    "d.Extension.SetUserPreferenceToggle(198, 0, False)\nd.GraphicsRedraw2()")
+    record("D5: piani visualizzati nell'assieme (impostazione del test)", ok, text[:80])
+    imgs = {}
+    for name, hide in (("asm_ref_visibile", False), ("asm_nascosta", True), ("asm_dopo", False)):
+        p = F("dx_img_" + name, "png")
+        rm(p)
+        await T(c, "export_model_image", name, filepath=p, hide_reference=hide, white_background=True, width=900, height=600)
+        if Path(p).exists():
+            imgs[name] = blue_pixels(p)[0]
+    record("D5: senza hide_reference il piano del componente si vede (> 50 pixel azzurri)", imgs.get("asm_ref_visibile", 0) > 50, str(imgs))
+    record("D5: con hide_reference nessun riferimento dei componenti (0 pixel azzurri)", imgs.get("asm_nascosta", -1) == 0, str(imgs))
+    record("D5: dopo l'export il piano del componente e' di nuovo visibile (> 50)", imgs.get("asm_dopo", 0) > 50, str(imgs))
+    await c.call("close_document", discard=True)
+
 
 if __name__ == "__main__":
     done = asyncio.run(run())

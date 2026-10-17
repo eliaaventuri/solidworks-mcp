@@ -1427,6 +1427,17 @@ class DataExportOperations:
                 pass
             items = self._dx_collect_ref(doc) if hide_reference else []
             saved_prefs = {}
+            # D5: nell'assieme i riferimenti DEI COMPONENTI non stanno nel suo albero: toggle di documento "Nascondi tutti i tipi"
+            # (swViewDisplayHideAllTypes = 198), salvato e rimesso com'era
+            hide_all_old = None
+            if hide_reference and int(doc.GetType) == 2:
+                try:
+                    hide_all_old = bool(doc.Extension.GetUserPreferenceToggle(198, 0))
+                    doc.Extension.SetUserPreferenceToggle(198, 0, True)
+                    doc.GraphicsRedraw2()
+                except Exception as e:
+                    hide_all_old = None
+                    notes.append(f"riferimenti dei componenti non nascosti: {e}")
             try:
                 vid = VIEW_IDS.get(str(view).lower())
                 try:
@@ -1463,6 +1474,12 @@ class DataExportOperations:
             finally:
                 if items:
                     self._dx_blank(doc, items, show=True)
+                if hide_all_old is not None:
+                    try:
+                        doc.Extension.SetUserPreferenceToggle(198, 0, hide_all_old)
+                        doc.GraphicsRedraw2()
+                    except Exception:
+                        pass
                 for k, v in saved_prefs.items():
                     try:
                         app.SetUserPreferenceIntegerValue(k, v)

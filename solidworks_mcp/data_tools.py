@@ -109,7 +109,7 @@ _TOOLS = {
         "hides planes, axes, origins, points and sketches; white_background for a white backdrop.",
         {"filepath": (S, "Output image path (.png, .jpg or .bmp)"), "view": (S, "Named view (default isometric)"), "style": (S, "Display style (default shaded_edges)"),
          "width": (N, "Image width in pixels"), "height": (N, "Image height in pixels"),
-         "hide_reference": (B, "Hide planes, axes, origins, points and sketches (default true)"), "white_background": (B, "White backdrop"),
+         "hide_reference": (B, "Hide planes, axes, origins, points and sketches, also inside assembly components (default true)"), "white_background": (B, "White backdrop"),
          "zoom_to_fit": (B, "Zoom to fit before capture (default true)")}, ["filepath"]),
     # ---------------------------------------------------------------- misure
     "measure_entities": ("measure_entities",
