@@ -24,6 +24,19 @@ Esempi di richieste:
 - *"Assegna AISI 304 e dimmi massa e baricentro"*
 - *"Incastra la faccia sinistra, metti 100 N sulla destra e dammi la freccia massima"*
 
+## Esempi
+Sette prove d'uso reali (richiesta, sequenza dei tool con esiti, numeri misurati) sono in [`docs/esempi/`](docs/esempi/README.md):
+
+| Scenario | Cosa verifica |
+|---|---|
+| S1 flangia con fori, tavola A3, PDF | volume 153317,58 mm3 e massa 1,22654 kg (AISI 304) come da calcolo |
+| S2 staffa a L | volume 30356,593 mm3 contro 30356,6 atteso (raccordo, asole, smussi) |
+| S3 assieme perno-boccola | 2 gradi di liberta', distinta 3 righe, peso 208,61 g |
+| S4 mensola in simulazione | freccia 0,7964 mm contro 0,8000 teorici; 30,05 MPa a meta' trave; FOS 5,83 |
+| S5 configurazioni da CSV | volumi 30000 / 40000 / 50000 mm3 e tre STEP |
+| S6 SolidWorks in inglese | stessi numeri di S1 e S4 |
+| S7 chiusura con modifiche | `close_document` rifiuta senza `save` o `discard` |
+
 ## Sicurezza
 - I tool che cancellano o sovrascrivono sono marcati come distruttivi (il client chiede conferma).
 - Salvataggi ed esportazioni rifiutano di sovrascrivere un file esistente senza `overwrite=true`.
