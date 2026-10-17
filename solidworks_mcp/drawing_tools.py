@@ -225,7 +225,8 @@ _TOOLS = {
     "export_drawing": ("export_drawing", "Export the drawing as PDF, DWG, DXF, PNG or JPG.",
         {"filepath": (S, "Destination path"), "format": (S, "pdf | dwg | dxf | png | jpg (default: from the file extension)")},
         ["filepath"]),
-    "save_drawing": ("save_drawing", "Save the active drawing as a .SLDDRW file.",
+    "save_drawing": ("save_drawing", "Save the active drawing as a .SLDDRW file under `filepath` (required; to save in place "
+                     "pass the current path, or use save_document without filepath).",
         {"filepath": (S, "Destination path")}, ["filepath"]),
 }
 

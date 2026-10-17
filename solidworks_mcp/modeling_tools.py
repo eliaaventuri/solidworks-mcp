@@ -200,10 +200,13 @@ _TOOLS = {
         "UNI is not in the SolidWorks database. "
         "head by kind: counterbore socket | cheese | pan | button | hex | hex_cap | hex_machine; "
         "countersink socket | flat | raised | oval; tapped bottoming. "
-        "Example: {\"kind\":\"tapped\",\"size\":\"M6\",\"face_point\":[0,0,10],\"through\":true}.",
+        "Every point given (face_point AND each of positions) becomes a hole center: for several holes pass only `positions`. "
+        "Example: {\"kind\":\"tapped\",\"size\":\"M6\",\"face_point\":[0,0,10],\"through\":true}; 4 holes: "
+        "{\"kind\":\"simple\",\"size\":\"M8\",\"positions\":[[10,0,10],[-10,0,10],[0,10,10],[0,-10,10]],\"through\":true}.",
         {"kind": (S, "simple | tapped | countersink | counterbore"),
          "size": (S, "Metric 'M3'..'M20' (or 'M8x1.25'); ANSI inch '#10', '1/4-20'"),
-         "face_point": _PT3, "positions": (A, "Hole centers [[x,y,z],...] on the face (`unit`)"),
+         "face_point": (A, "Center [x,y,z] (`unit`) of ONE hole, on the face (it is drilled too: omit it when using positions)"),
+         "positions": (A, "Hole centers [[x,y,z],...] on the face (`unit`)"),
          "depth": (N, "Blind hole depth (`unit`, default 10)"),
          "through": (B, "Through hole"),
          "diameter": (N, "Override the hole diameter, (`unit`)"),
@@ -251,7 +254,7 @@ _TOOLS = {
          "rebuild": (B, "Rebuild after change (default true)")}, ["name", "value"]),
     "get_dimension_value": ("get_dimension_value", "Read a dimension by name.",
         {"name": (S, "Full dimension name, e.g. 'D1@Sketch1'"), "unit": _UNIT}, ["name"]),
-    "rebuild_model": ("rebuild_model", "Rebuild; reports features with errors and the volume.",
+    "rebuild_model": ("rebuild_model", "Rebuild the active PART (not assemblies); reports features with errors and the volume.",
         {"force": (B, "Force a full rebuild")}, []),
     "rollback_to_feature": ("rollback_to_feature", "Move the rollback bar.",
         {"name": (S, "Feature name"),

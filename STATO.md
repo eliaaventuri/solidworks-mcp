@@ -194,8 +194,24 @@ egr_f2.log`):
 - Corretto dal vivo: le opzioni dello studio (`NoOfFrequencies`, `BucklingModes`) vanno lette da un oggetto tenuto in una variabile.
 - Offline 147/147. I test live contano i tool da `tests/live_common.py` (`EXPECTED_TOOLS = 202`).
 
+## Fase 6 (2026-10-18) — scenari S1-S7 FATTI
+- Il server di questa chat non era in modalita' dedicata: prove fatte con `scripts_tmp/ponte.py` (sessione MCP con istanza dedicata) +
+  `scripts_tmp/chiama.py TOOL '{json}'` (una chiamata per comando); trascrizioni in `test_output/fase6_S1.jsonl` e `fase6_S6.jsonl`.
+  Aggiunto in `~/.claude.json` un server `solidworks` SOLO per questo progetto con `SW_MCP_INSTANCE=dedicated` e `SW_MCP_AUTORESTART=1`
+  (copia di sicurezza `~/.claude.json.bak_20261018`): vale dalla prossima sessione.
+- Esiti: S1 volume 153317,58 = calcolo, massa 1,22654 kg, PDF valido; S2 volume 30356,6 = calcolo; S3 2 gradi di liberta', distinta 3 righe,
+  3 palloncini; S4 freccia 0,7964 (0,80), 30,05 MPa a meta' (30), 60,35 all'incastro, FOS 5,83; S5 volumi 30000/40000/50000, 3 STEP validi;
+  S6 (inglese) stessi numeri, poi lingua rimessa in italiano (verificato: italian, 83 e 262 False); S7 rifiuto con spiegazione.
+- Errori del modello -> descrizioni corrette: `create_hole` (face_point E positions diventano tutti fori), `save_drawing` (filepath
+  obbligatorio), `rebuild_model` (solo pezzi). Aperti: quota Ø90 del cerchio dei fori non messa in tavola (si usa una nota); perno di S3
+  "nessuna soluzione" nello stato dei vincoli senza accoppiamenti in errore; un "salva con nome" dopo la simulazione bloccato una volta
+  oltre 300 s (non ripetuto in 4 prove, `scripts_tmp/eprobe.py SAVE`).
+- `docs/esempi/` e sezione Esempi del README: in scrittura da un sotto-agente al momento dello stop (controllare `git status`).
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0-5 chiuse. Prossime: 6 (prove d'uso reali, S1-S7) e 7 (rilascio),
-poi regressione completa in italiano.
+1. Controllare `docs/esempi/` e la sezione Esempi del README (git diff), poi commit.
+2. Regressione completa in italiano: `.venv\Scripts\python.exe tests\run_all.py > %TEMP%\regr_f7.log` in background, barra
+   `scripts_tmp\regr.ps1` (conteggi gia' aggiornati: simulation_extra 181) in una scheda del Terminale. Esiti qui e in CHANGELOG.
+3. Fase 7, passi di Elia: tag `v6.0.0`, push, installazione su un PC pulito seguendo il README.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
 di Elia. Per le prove d'uso serve un server con l'istanza dedicata (vedi la sezione Fase 6 quando c'e').
