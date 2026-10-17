@@ -11,7 +11,10 @@ C3 - tipi di passo
     i componenti si allontanano dall'asse in direzione radiale e ruotano di `angle` (verificato);
   * rotazione nei passi di traslazione: AddExplodeStep2(.., ExplAng, RotAxisIndex, ..) NON memorizza l'angolo in SolidWorks 2026
     (RotationAngle resta 0 con qualunque combinazione); il passo restituisce `rotation_applied` = False e il motivo. La rotazione
-    funziona nei passi radiali (`angle`).
+    funziona nei passi radiali (`angle`). Neanche scrivere IExplodeStep.RotationAngle dopo la creazione funziona (resta 0, 2026-10-17).
+    Rotazione SENZA spostamento: un passo radiale con distanza 0 e `angle` dopo la traslazione ruota il componente di `angle` attorno
+    alla direzione radiale (dall'asse scelto al componente), misurato 45,0000 gradi con distanza radiale invariata; l'asse quindi non
+    e' libero, e un componente coassiale all'asse radiale da' errore (codice 1, direzione radiale indefinita).
   Dopo aver aggiunto i passi si commuta ShowExploded2(False/True): senza questo Transform2 restituisce le pose vecchie.
 
 C4 - esplosione automatica
@@ -211,7 +214,8 @@ class AssemblyExplodeMixin:
                 row["rotation_applied"] = abs(got - rot) < 1e-9
                 if not row["rotation_applied"]:
                     row["rotation_note"] = ("SolidWorks non memorizza la rotazione nei passi di traslazione (RotationAngle=0): "
-                                            "usa un passo radiale con `angle`")
+                                            "aggiungi un passo radiale con distanza 0 e `angle` (ruota attorno alla direzione "
+                                            "radiale dall'asse scelto al componente)")
             made.append(row)
         return made, None
 

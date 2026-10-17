@@ -591,6 +591,90 @@ async def b4_fori(c):
     await hole_case(c, "JIS M6 lamato (Ø11 x 6.0)", {"thru": 6.6, "cb": (11.0, 6.0)}, kind="counterbore", size="M6", standard="jis", **T)
     await hole_case(c, "JIS M6 filettato (5.0)", {"thru": 5.0}, kind="tapped", size="M6", standard="jis", **T)
 
+    # ---------- facce cilindriche: foro radiale nel punto richiesto (scarto < 0,01 gradi)
+    def vunit(v):
+        n = norm(v)
+        return [x / n for x in v]
+
+    def vbasis(a):
+        ref = [1, 0, 0] if abs(a[0]) < 0.9 else [0, 1, 0]
+        e1 = vunit(cross(a, ref))
+        return e1, cross(a, e1)
+
+    async def big_cylinder():
+        ok, _, d = await c.call("list_entities", kind="face", limit=400)
+        for e in (d.get("entities", []) if ok else []):
+            if e.get("type") == "cylinder" and abs(e.get("radius", 0) - 30) < 1e-3:
+                return e["axis_origin"], vunit(e["axis_dir"])
+        return None, None
+
+    async def hole_axes():
+        ok, _, d = await c.call("list_entities", kind="face", limit=400)
+        return [(e["axis_origin"], vunit(e["axis_dir"])) for e in (d.get("entities", []) if ok else [])
+                if e.get("type") == "cylinder" and abs(e.get("radius", 0) - 3.3) < 0.05]
+
+    def radial_point(c0, a, e1, e2, t, ang):
+        ar = math.radians(ang)
+        rad = [math.cos(ar) * e1[i] + math.sin(ar) * e2[i] for i in range(3)]
+        p = [c0[i] + t * a[i] + 30 * rad[i] for i in range(3)]
+        return p, rad
+
+    def check_radial(label, p, rad, axes, ok, text, hd):
+        hd = hd or {}
+        if not ok or not axes:
+            record(label, False, (text or "nessun foro").split("\n")[0][:150])
+            return
+        o, dd = min(axes, key=lambda ax: norm(cross(sub(p, ax[0]), ax[1])))
+        dist = norm(cross(sub(p, o), dd))
+        dang = math.degrees(math.acos(min(1.0, abs(dot(dd, rad)))))
+        record(label, dist < 0.01 and dang < 0.01,
+               f"distanza {dist:.4f} mm, scarto {dang:.4f} gradi, corretto={hd.get('curved_face_pick_corrected')}")
+
+    casi = [("Right", 0, 0, [0, 45, 90, 180]), ("Top", 0, 0, [0, 45, 90, 180]), ("Front", 0, 0, [0, 45, 90, 180]),
+            ("Right", 12, -7, [30, 135, 250])]
+    for PIANO, CX, CY, ANGS in casi:
+        await new_part(c)
+        await c.call("create_sketch", plane=PIANO)
+        await c.call("draw_circle", x=CX, y=CY, radius=30)
+        await c.call("extrude_boss", depth=60)
+        c0, a = await big_cylinder()
+        if c0 is None:
+            record(f"B4 cilindro {PIANO} centro ({CX},{CY}): cilindro R30 trovato", False, "nessuna faccia cilindrica R30")
+            await discard_all(c)
+            continue
+        e1, e2 = vbasis(a)
+        made = []
+        for k, ang in enumerate(ANGS):
+            p, rad = radial_point(c0, a, e1, e2, 10 + 12 * k, ang)
+            ok, text, hd = await c.call("create_hole", kind="simple", size="M6", face_point=p, depth=10)
+            made.append((ang, p, rad, ok, text, hd))
+        axes = await hole_axes()
+        for ang, p, rad, ok, text, hd in made:
+            check_radial(f"B4 cilindro {PIANO} centro ({CX},{CY}) a={ang}: foro nel punto, radiale",
+                         p, rad, axes, ok, text, hd)
+        await discard_all(c)
+
+    # caso multiplo: piu' fori in una sola chiamata (positions) su cilindro R30, piano Top
+    await new_part(c)
+    await c.call("create_sketch", plane="Top")
+    await c.call("draw_circle", x=0, y=0, radius=30)
+    await c.call("extrude_boss", depth=60)
+    c0, a = await big_cylinder()
+    if c0 is None:
+        record("B4 cilindro multipla: cilindro R30 trovato", False, "nessuna faccia cilindrica R30")
+    else:
+        e1, e2 = vbasis(a)
+        pts = []
+        for k, ang in enumerate([10, 100, 200, 300]):
+            p, rad = radial_point(c0, a, e1, e2, 10 + 12 * k, ang)
+            pts.append((ang, p, rad))
+        ok, text, hd = await c.call("create_hole", kind="simple", size="M6", positions=[p for _, p, _ in pts], depth=10)
+        axes = await hole_axes()
+        for ang, p, rad in pts:
+            check_radial(f"B4 cilindro Top centro (0,0) a={ang}: foro multipla nel punto, radiale",
+                         p, rad, axes, ok, text, hd)
+    await discard_all(c)
+
     # ---------- errori chiari
     await plate(c)
     ok, text, _ = await c.call("create_hole", kind="simple", size="M6", through=True, face_point=[30, 40, 40], standard="uni")

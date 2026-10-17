@@ -318,7 +318,10 @@ class AssemblyMotionMixin:
                 comp.Transform2 = self._as_transform(_mm(R_req, M0), _add(t0, T_req)) if False else \
                     self._as_transform(_mm(R_req, M0), _add(t0, T_req))
             else:
-                basis = self._as_dof_basis(comp)
+                # le prove di SetTransformAndSolve2 trascinano anche altri componenti (es. la seconda ruota di un ingranaggio:
+                # +1,72 gradi per prova): si rimettono tutti a posto, non solo `comp`
+                others = [o for o in self._as_top_components(doc, False) if str(o.Name2) != str(comp.Name2)]
+                basis = self._as_dof_basis(comp, others=others)
                 U, Rax = basis["translations"], basis["rotations"]
                 free_all = len(U) == 3 and len(Rax) == 3
                 if free_all:
@@ -362,7 +365,18 @@ class AssemblyMotionMixin:
                 elif len(U) + len(Rax) > 0 and not free_all and (ign_T > 1e-9 or ign_rot > 1e-9):
                     extra["note"] = ("parte del movimento richiesto e' vietata dagli accoppiamenti ed e' stata scartata "
                                      "(vedi 'ignored')")
-                if U or Rax:
+                mech = self._as_mech_mates(doc, comp) if (applied_rot and not free_all) else []
+                if mech and len(applied_rot) == 1 and _norm(applied_T) < 1e-12:
+                    # ingranaggio/vite/pignone: rotazione pilotata, cosi' il solutore muove anche chi e' collegato (C5)
+                    dr = self._as_drive_rotation(doc, comp, applied_rot[0][0], applied_rot[0][1])
+                    extra["mechanical_drive"] = {"mates": mech, **dr}
+                    if not dr["ok"]:
+                        extra["note"] = (dr.get("note") or "") + "; applicata senza propagare gli accoppiamenti meccanici"
+                        comp.SetTransformAndSolve2(self._as_transform(xf_M, xf_t))
+                elif U or Rax:
+                    if mech:
+                        extra["note"] = ("accoppiamenti meccanici " + ", ".join(mech) + ": la propagazione funziona solo per una "
+                                         "rotazione attorno a un solo asse libero, senza traslazione")
                     comp.SetTransformAndSolve2(self._as_transform(xf_M, xf_t))
             doc.ForceRebuild2(False)
             info = self._as_comp_info(comp)
@@ -372,6 +386,75 @@ class AssemblyMotionMixin:
             return self._result(True, f"{comp.Name2} spostato di {moved:.3f} mm", SwErrors.swSuccess, info)
         except Exception as e:
             return self._as_fail("move_component", e)
+
+    # ====================================================================
+    # rotazione pilotata per gli accoppiamenti meccanici (C5)
+    # ====================================================================
+    # SetTransformAndSolve2 e IDragOperator NON propagano ingranaggio/vite/pignone (la seconda ruota non segue, la
+    # chiocciola non avanza). Un accoppiamento d'ANGOLO temporaneo invece passa dal solutore completo, che rispetta anche
+    # i meccanici (misurato 2026-10-17, istanza nascosta: ingranaggio 2:1 -> B/A = -2,0000; vite 2 mm/giro -> 2,0000).
+
+    MECHANICAL_MATES = ("gear", "screw", "rack_pinion")
+
+    def _as_mech_mates(self, doc, comp) -> List[str]:
+        """Tipi degli accoppiamenti meccanici in cui compare il componente."""
+        name = str(comp.Name2).lower()
+        out = []
+        for f in self._as_mate_features(doc):
+            info = self._as_mate_info(doc, f)
+            if info.get("type") in self.MECHANICAL_MATES and \
+                    any(str(c).split("/")[0].lower() == name for c in info.get("components", [])):
+                out.append(info["type"])
+        return out
+
+    def _as_signed_rot(self, comp, M0, w) -> float:
+        """Angolo (radianti, con segno attorno a w) della rotazione del componente rispetto alla matrice M0."""
+        axis, ang = _axis_angle(_mm(self._as_pose(comp)[0], _tr(M0)))
+        return ang if _dot(axis, w) >= 0 else -ang
+
+    def _as_drive_rotation(self, doc, comp, w, theta) -> Dict:
+        """Ruota `comp` di theta (radianti) attorno all'asse libero w con un accoppiamento d'angolo temporaneo fra un piano
+        standard del componente e uno dell'assieme (entrambi paralleli a w). -> {"ok", "rotation_deg", "note"}."""
+        M0, _ = self._as_pose(comp)
+        planes_c = []
+        for nm in ("front", "top", "right"):
+            f = self._std_ref_feature(comp, nm)
+            if f is None:
+                continue
+            t = [float(v) for v in f.GetSpecificFeature2.Transform.ArrayData]
+            planes_c.append((nm, _unit(_mv(M0, t[6:9]))))
+        planes_a = []
+        for nm in ("front", "top", "right"):
+            f = self._std_ref_feature(doc, nm)
+            t = [float(v) for v in f.GetSpecificFeature2.Transform.ArrayData]
+            planes_a.append((str(self._com(f, "Name")), _unit(t[6:9])))
+        pc = next(((n, v) for n, v in planes_c if abs(_dot(v, w)) < 1e-6), None)
+        pa = next(((n, v) for n, v in planes_a if abs(_dot(v, w)) < 1e-6), None)
+        if pc is None or pa is None:
+            return {"ok": False, "note": "asse di rotazione non parallelo ai piani standard: rotazione pilotata non disponibile"}
+        th0 = math.degrees(math.acos(max(-1.0, min(1.0, _dot(pc[1], pa[1])))))
+        r = self.add_mate(mate_type="angle", entity1={"component": comp.Name2, "plane": pc[0]}, entity2=pa[0], angle=th0)
+        mname = (r.get("data") or {}).get("name")
+        if not r.get("success") or not mname:
+            return {"ok": False, "note": f"accoppiamento d'angolo temporaneo non creato: {r.get('message')}"}
+        try:
+            r0 = self._as_signed_rot(comp, M0, w)
+            self.edit_mate(name=mname, value=(th0 + 10.0) % 360.0)
+            doc.ForceRebuild3(False)
+            r1 = self._as_signed_rot(comp, M0, w)
+            s = (r1 - r0) / math.radians(10.0)
+            if abs(abs(s) - 1.0) > 1e-3:
+                return {"ok": False, "note": f"risposta dell'angolo pilota non lineare (pendenza {s:.4f})"}
+            v = th0 + 10.0 + math.degrees((theta - r1) / s)
+            self.edit_mate(name=mname, value=v % 360.0)
+            doc.ForceRebuild3(False)
+        finally:
+            self.delete_mate(name=mname, check_dof=False)
+            doc.ForceRebuild3(False)
+        got = self._as_signed_rot(comp, M0, w)
+        ok = abs(got - theta) < math.radians(1e-3)
+        return {"ok": ok, "rotation_deg": round(math.degrees(got), 4),
+                "note": None if ok else f"rotazione ottenuta {math.degrees(got):.4f} gradi invece di {math.degrees(theta):.4f}"}
 
     # ====================================================================
     # delete_mate con confronto dei gradi di liberta' (C6)

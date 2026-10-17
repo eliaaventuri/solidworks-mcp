@@ -475,3 +475,24 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
 - Attenzione: il PC va in sospensione durante le regressioni lunghe (2026-10-16 16:47, il test riprendeva per pochi secondi ogni ~2,5 h).
   Tenere sveglio il PC; un sotto-agente che lancia run_all.py in background lo uccide quando chiude: lanciarlo dalla sessione principale.
 - `insert_model_dimensions` sulla tavola verticale della staffa: 3 min 17 s il 2026-10-16, 5 min 25 s il 2026-10-17 (stesso codice).
+
+## Fase 2: ripresa di B4, C5, C3 (2026-10-17)
+- B4 `[x]`, fori Hole Wizard su facce cilindriche: HoleWizard5 mette il pick nello schizzo 3D come coordinate del Piano frontale (F)
+  lette nel sistema dello schizzo (R): punto reale = R F p. Con il modello di parte di Elia F e R non sono l'identita' (Front normale X,
+  Top Z, Right Y). Il server passa g = F^T R^T p (`_hw_on_curved`, `_hw_sketch_point`, `_hw_pick`, `_hw_front_frame`, `_rotations24`):
+  R letta dallo schizzo del primo foro, o cercata fra le 24 rotazioni se il primo pick cade fuori dalla faccia; cache per F; ogni foro
+  verificato (scarto <= 0,01 mm). Worker: 19 fori, 3 orientamenti, cilindro decentrato -> 0,00000 mm / 0,00000 gradi. Test B4 70/70
+  (14 min): R30 asse del foro incidente all'asse del cilindro, distanza 0,00e+00 mm, x=30,000, volume 2049,337 contro 2049,807 (0,023 %).
+- C5 `[x]`, ingranaggio/vite/blocco: SetTransformAndSolve2 non propaga questi accoppiamenti, ma un accoppiamento d'ANGOLO temporaneo
+  si' (`_as_drive_rotation`, `_as_mech_mates`, `_as_signed_rot`; `move_component` lo usa quando il componente ha gear/screw/rack_pinion).
+  `_as_dof_basis` ora rimette a posto TUTTI i componenti (prima la seconda ruota restava ruotata di 1,7188 gradi).
+  Trappola: nella vite `RevolutionType` 0 = giri per lunghezza (2 mm/giro diventava 500 mm/giro), 1 = distanza per giro.
+  Test C5 82/82: A +30 -> B -60,0000; vite 90 gradi -> 0,5000 mm; blocco: angolo di 50 gradi imposto, matrice invariata (0,00e+00).
+  Ancora visibile: `_as_dof_basis` vede 3 rotazioni libere sul componente bloccato; SetTransformAndSolve2 dx=20 -> deriva 0,400 mm.
+- C3 resta `[~]` (`scripts_tmp/c3p1..4.py`): scrivere `IExplodeStep.RotationAngle` dopo la creazione non ha effetto (riletto 0,0);
+  `IExplodeStep.GetRotationAxis` e' un metodo, non una proprieta'. AddRadialExplodeStep accetta distanza 0: dopo una traslazione ruota il
+  componente di `angle` attorno alla DIREZIONE RADIALE (asse -> componente), misurato 45,0000 gradi attorno a +Y, raggio invariato.
+  Su un componente coassiale all'asse radiale AddRadialExplodeStep restituisce codice 1 (direzione radiale indefinita).
+- Trappole di lavoro: con l'uscita su file Python scrive a blocchi, un test live sembra fermo (log a 0 byte, CPU quasi nulla) mentre lavora:
+  usare `python -u`. Un `> file` di PowerShell scrive in UTF-16 (leggerlo con `iconv -f UTF-16`). Un secondo test sullo stesso log
+  fallisce con "file in uso": controllare prima i processi `tests/*.py` gia' attivi.

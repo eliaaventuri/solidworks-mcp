@@ -78,5 +78,5 @@ I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata
 ```
 .venv/          ambiente Python
 test_output/    file generati dai test
-scripts_tmp/    strumenti di sviluppo locali: esplorazione della type library (tlb.py, tlbgrep.py, swenum.py), worker con istanza dedicata (worker.py + run.sh), pngtool.py
+scripts_tmp/    strumenti di sviluppo locali: esplorazione della type library (tlb.py, tlbgrep.py, swenum.py), worker con istanza dedicata (worker.py + run.sh + restart_worker.sh), pngtool.py, lingua.py (it/en), contatore di fase (fase2.ps1 + fase2.json), prove (c3p*.py)
 ```

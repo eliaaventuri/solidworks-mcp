@@ -298,8 +298,9 @@ class ModelingBase:
             return self._result(False, info["error"], SwErrors.swSelectionError, info)
         return self._result(True, f"Selezionato {kind} a ({x}, {y}, {z})", SwErrors.swSuccess, info)
 
-    def _select_point(self, doc, kind: str, pt, unit=None, append=False, mark=0, tol_mm: float = 0.05):
-        """-> (ok, info). tol_mm in millimetri (indipendente da `unit`)."""
+    def _select_point(self, doc, kind: str, pt, unit=None, append=False, mark=0, tol_mm: float = 0.05, pick=None):
+        """-> (ok, info). tol_mm in millimetri (indipendente da `unit`). pick: punto di pick in metri da dare a SelectData
+        al posto di `pt` (foro guidato su facce curve, vedi create_hole); l'entita' si cerca sempre con `pt`."""
         kind = {"faccia": "face", "spigolo": "edge", "vertice": "vertex", "faces": "face",
                 "edges": "edge", "vertices": "vertex"}.get(kind.lower(), kind.lower())
         if kind not in ("face", "edge", "vertex"):
@@ -317,7 +318,8 @@ class ModelingBase:
                            "closest_mm": round(d * 1000, 4) if d < 1e8 else None}
         sd = self._sd(doc, mark)
         try:
-            sd.X, sd.Y, sd.Z = p[0], p[1], p[2]     # punto di pick (serve al foro guidato)
+            q = p if pick is None else [float(c) for c in pick]
+            sd.X, sd.Y, sd.Z = q[0], q[1], q[2]     # punto di pick (serve al foro guidato)
         except Exception:
             pass
         ok = bool(ent.Select4(append, sd))

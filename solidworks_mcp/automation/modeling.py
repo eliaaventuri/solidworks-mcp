@@ -925,24 +925,50 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             created, fails, infos = [], [], []
             v0 = self._volume_m3(doc)
             before_all = self._names(doc)
+            pick_map = None         # (F, R) dal primo foro su faccia curva: punto di pick = F^T R^T p (vedi _hw_pick)
+            pos_errs = []
+
+            def hw():
+                return fm.HoleWizard5(gen, std_idx, fast, sz, end_t, dia_m, use_depth, 0.0, *vals, 0, False, True, True,
+                                      True, True, True)
+
             for i, pt in enumerate(pts):
                 doc.ClearSelection2(True)
                 ok, info = self._select_point(doc, "face", pt, unit, False, 0)
                 if not ok:
                     fails.append(info.get("error", "faccia non trovata"))
                     continue
-                before = self._names(doc)
+                p_m = [self._mmu(float(c), unit) for c in pt]
                 try:
-                    feat = fm.HoleWizard5(gen, std_idx, fast, sz, end_t, dia_m, use_depth, 0.0, *vals, 0, False, True, True,
-                                          True, True, True)
-                except Exception as ex:
-                    fails.append(f"punto {pt}: {ex}")
-                    continue
-                doc.ClearSelection2(True)
-                if feat is None:
-                    fails.append(f"punto {pt}: HoleWizard5 ha restituito None (parametri non validi per {kind} {sz} {std_key}: "
-                                 f"controlla misura e head)")
-                    continue
+                    curved = not bool(doc.SelectionManager.GetSelectedObject6(1, -1).GetSurface.IsPlane)
+                except Exception:
+                    curved = False
+                if curved:
+                    try:
+                        feat, err, pick_map = self._hw_on_curved(doc, hw, pt, p_m, unit, pick_map)
+                    except Exception as ex:
+                        fails.append(f"punto {pt}: {ex}")
+                        continue
+                    if feat is None:
+                        fails.append(f"punto {pt}: HoleWizard5 non ha creato il foro sulla faccia curva (parametri non validi "
+                                     f"per {kind} {sz} {std_key}, oppure punto non raggiungibile)")
+                        continue
+                    if err is None or err > 1e-5:
+                        fails.append(f"punto {pt}: foro creato ma il centro e' a "
+                                     f"{'?' if err is None else round(err * 1000, 4)} mm dal punto richiesto")
+                    if err is not None:
+                        pos_errs.append(round(err * 1000, 6))
+                else:
+                    try:
+                        feat = hw()
+                    except Exception as ex:
+                        fails.append(f"punto {pt}: {ex}")
+                        continue
+                    doc.ClearSelection2(True)
+                    if feat is None:
+                        fails.append(f"punto {pt}: HoleWizard5 ha restituito None (parametri non validi per {kind} {sz} "
+                                     f"{std_key}: controlla misura e head)")
+                        continue
                 created.append(self._com(feat, "Name"))
                 try:
                     fd = feat.GetDefinition
@@ -968,11 +994,126 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                                  "volume_mm3": round(vol * 1e9, 3), "volume_delta_mm3": round((vol - v0) * 1e9, 3),
                                  "failures": fails, "through": through, "standard": std_key, "head": head_key,
                                  "size_used": sz, "fastener_index": fast, "fit": fit_l if metric else "database",
+                                 "curved_face_position_error_mm": pos_errs or None,
+                                 "curved_face_pick_corrected": pick_map is not None,
                                  "note": "tapped blind: la zona filettata e' modellata a Ø nominale per thread_depth, "
                                          "poi Ø punta fino a depth + punta a 118 gradi"})
         except Exception as e:
             logger.error(f"create_hole: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
+
+    # ------------------------------------------------------------------ foro guidato su facce curve (B4)
+    # Su una faccia NON piana HoleWizard5 crea uno schizzo 3D di posizione e ci mette il punto di pick espresso nel sistema
+    # del Piano frontale (F) come se fossero coordinate dello schizzo 3D (sistema R): punto reale = R F p. Con il modello
+    # di parte standard F = R = identita' e non succede nulla; con un modello orientato diversamente il foro finiva ruotato
+    # (2026-10-17: pick a 45 gradi -> foro a -37). Si passa quindi il pick g = F^T R^T p (misurato: scarto 0).
+    def _hw_front_frame(self, doc) -> List[List[float]]:
+        """Righe = asse u, asse v, normale del Piano frontale in coordinate del modello (IRefPlane.Transform)."""
+        t = [float(v) for v in self._std_ref_feature(doc, "front").GetSpecificFeature2.Transform.ArrayData]
+        return [t[0:3], t[3:6], t[6:9]]
+
+    @staticmethod
+    def _hw_sketch_point(feat):
+        """(punto in metri nel modello, R) dello schizzo 3D di posizione di un foro guidato; None se manca."""
+        try:
+            sub = feat.GetFirstSubFeature
+            while sub is not None:
+                if sub.GetTypeName2 == "3DProfileFeature":
+                    sk = sub.GetSpecificFeature2
+                    a = [float(v) for v in sk.ModelToSketchTransform.ArrayData]
+                    R, t = [a[0:3], a[3:6], a[6:9]], a[9:12]
+                    pts = sk.GetSketchPoints2 or []
+                    if len(pts) != 1:
+                        return None
+                    s = [pts[0].X - t[0], pts[0].Y - t[1], pts[0].Z - t[2]]   # schizzo = R^T modello + t
+                    return [sum(R[i][j] * s[j] for j in range(3)) for i in range(3)], R
+                sub = sub.GetNextSubFeature
+        except Exception as ex:
+            logger.debug(f"_hw_sketch_point: {ex}")
+        return None
+
+    _HW_R_CACHE: Dict[tuple, list] = {}      # F del modello di parte -> R misurata (vale per tutti i documenti con quel F)
+
+    @staticmethod
+    def _rotations24() -> List[List[List[int]]]:
+        """Le 24 rotazioni che scambiano gli assi (matrici di permutazione con segno, determinante +1)."""
+        import itertools
+        out = []
+        for perm in itertools.permutations(range(3)):
+            for signs in itertools.product((1, -1), repeat=3):
+                M = [[0] * 3 for _ in range(3)]
+                for i in range(3):
+                    M[i][perm[i]] = signs[i]
+                det = (M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
+                       + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]))
+                if det == 1:
+                    out.append(M)
+        return out
+
+    def _hw_on_curved(self, doc, hw, pt, p_m, unit, pick_map):
+        """Foro su faccia curva nel punto p_m. -> (feature o None, scarto in metri o None, pick_map).
+        Ordine: R gia' nota (cache per F) -> pick diretto (se il foro esce fuori posto si legge R dal suo schizzo e si rifa')
+        -> se HoleWizard5 rifiuta il pick diretto (il punto ruotato cade fuori dalla faccia), le 24 rotazioni possibili.
+        Ogni foro e' accettato solo se il punto del suo schizzo di posizione coincide con quello richiesto."""
+        F = self._hw_front_frame(doc)
+        key = tuple(round(v, 6) for row in F for v in row)
+        if pick_map is None and key in self._HW_R_CACHE:
+            pick_map = (F, self._HW_R_CACHE[key])
+
+        def attempt(pick):
+            doc.ClearSelection2(True)
+            self._select_point(doc, "face", pt, unit, False, 0, pick=pick)
+            f = hw()
+            doc.ClearSelection2(True)
+            if f is None:
+                return None, None, None
+            got = self._hw_sketch_point(f)
+            return f, (math.dist(got[0], p_m) if got else None), (got[1] if got else None)
+
+        def drop(f):
+            f.Select2(False, 0)
+            doc.Extension.DeleteSelection2(1)           # swDelete_Absorbed: anche lo schizzo di posizione
+            doc.ClearSelection2(True)
+
+        tried = []
+        if pick_map is not None:
+            tried.append(pick_map[1])
+            f, err, R = attempt(self._hw_pick(pick_map, p_m))
+            if f is not None and err is not None and err <= 1e-5:
+                return f, err, pick_map
+            if f is not None:
+                drop(f)
+        f, err, R = attempt(None)                       # pick diretto
+        if f is not None and err is not None and err <= 1e-6:
+            return f, err, pick_map
+        if f is not None and R is not None:
+            drop(f)
+            pick_map = (F, R)
+            f, err, _ = attempt(self._hw_pick(pick_map, p_m))
+            if f is not None and err is not None and err <= 1e-5:
+                self._HW_R_CACHE[key] = R
+                return f, err, pick_map
+            if f is not None:
+                drop(f)
+            tried.append(R)
+        for Rc in self._rotations24():
+            if Rc in tried:
+                continue
+            f, err, _ = attempt(self._hw_pick((F, Rc), p_m))
+            if f is None:
+                continue
+            if err is not None and err <= 1e-5:
+                self._HW_R_CACHE[key] = Rc
+                return f, err, (F, Rc)
+            drop(f)
+        return None, None, pick_map
+
+    @staticmethod
+    def _hw_pick(pick_map, p) -> List[float]:
+        """Punto di pick da dare a HoleWizard5 perche' il foro cada in p: g = F^T R^T p."""
+        F, R = pick_map
+        u = [sum(R[j][i] * p[j] for j in range(3)) for i in range(3)]          # R^T p
+        return [sum(F[j][i] * u[j] for j in range(3)) for i in range(3)]       # F^T u
 
     # ------------------------------------------------------------------ geometria di riferimento
     def _plane_pose(self, doc, name: str, unit: str = None) -> Dict:

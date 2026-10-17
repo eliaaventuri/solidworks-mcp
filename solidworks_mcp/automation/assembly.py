@@ -1210,7 +1210,7 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                                         SwErrors.swInvalidInput)
                 md = doc.CreateMateData(17)
                 md.EntitiesToMate = disp_array(objs[:2])
-                md.RevolutionType = 0                      # distanza per giro
+                md.RevolutionType = 1                      # swDistancePerRevolution (0 = giri per unita' di lunghezza)
                 md.RevolutionVal = self._mmu(pitch, unit)
                 md.Reverse = bool(flip)
                 mate = doc.CreateMate(md)

@@ -677,8 +677,15 @@ async def c5_accoppiamenti_avanzati(c):
     d = await need(c, "move_component", "dx=20 sul componente bloccato", component="cx_perno-1", dx=20)
     p, _, _ = await pos_of(c, "cx_perno-1")
     drift = math.dist(p, [30, 20, 25])
-    record("LIMITE NOTO (C5): il blocco creato via API trattiene le traslazioni ma NON le rotazioni (SetTransformAndSolve2): misura", True,
+    record("blocco: dx=20 sul componente bloccato -> deriva < 0,5 mm (SetTransformAndSolve2)", drift < 0.5,
            f"deriva {drift:.3f} mm con dx=20; traslazioni libere {d.get('free_translation_directions')}, rotazioni libere {d.get('free_rotation_axes')}")
+    # il solutore completo (accoppiamento d'angolo che chiede 50 gradi) non ruota il componente bloccato
+    _, _, tf2 = await pos_of(c, "cx_perno-1")
+    ok_a, _, _ = await c.call("add_mate", mate_type="angle", entity1={"component": "cx_perno-1", "plane": "Top"}, entity2="Top", angle=50)
+    _, _, tf3 = await pos_of(c, "cx_perno-1")
+    dmax = max(abs(a - b) for a, b in zip(tf2, tf3))
+    record("blocco: un angolo di 50 gradi imposto dal solutore NON ruota il componente bloccato (C5)", ok_a and dmax < 1e-9,
+           f"variazione massima della matrice {dmax:.2e}")
     await c.call("close_document", discard=True)
     # ---------------------------------------------------------------- ingranaggio
     await need(c, "create_new_assembly", "ingranaggio")
@@ -698,12 +705,12 @@ async def c5_accoppiamenti_avanzati(c):
     record("tipo 'gear' (MateGearDim) e rapporto 2:1 letto dal modello (SolidWorks lo restituisce scambiato)", d.get("type") == "gear" and gr is not None and sorted(gr) == [1.0, 2.0], f"{d.get('feature_type')} {gr}")
     _, ra0, _ = await pos_of(c, "cx_gear-1")
     _, rb0, _ = await pos_of(c, "cx_gear_s-1")
-    await c.call("move_component", component="cx_gear-1", rotate_by=[30, 0, 0])
+    ok, _, d = await c.call("move_component", component="cx_gear-1", rotate_by=[30, 0, 0])
     _, ra1, _ = await pos_of(c, "cx_gear-1")
     _, rb1, _ = await pos_of(c, "cx_gear_s-1")
     record("ruota A ruotata di 30 gradi attorno al proprio asse (libera)", abs((ra1[0] - ra0[0]) - 30) < 1e-3, f"{ra1[0] - ra0[0]}")
-    record("LIMITE NOTO (C5): la seconda ruota NON segue il rapporto (SolidWorks non lo propaga via API)", abs(abs(rb1[0] - rb0[0]) - 15) > 1 and abs(abs(rb1[0] - rb0[0]) - 60) > 1,
-           f"rotazione di B {rb1[0] - rb0[0]:.4f} gradi (attesi 15 o 60 se propagasse)")
+    record("ingranaggio: la ruota B segue nel rapporto 2:1 (A +30 -> B -60, entro 0,1 %) (C5)", abs((rb1[0] - rb0[0]) + 60) < 0.06,
+           f"rotazione di B {rb1[0] - rb0[0]:.4f} gradi, pilotaggio {d.get('mechanical_drive')}")
     await c.call("close_document", discard=True)
     # ---------------------------------------------------------------- vite
     await need(c, "create_new_assembly", "vite")
@@ -718,7 +725,8 @@ async def c5_accoppiamenti_avanzati(c):
     await c.call("move_component", component="cx_gear_s-1", rotate_by=[90, 0, 0])
     p1, r1, _ = await pos_of(c, "cx_gear_s-1")
     record("chiocciola ruotata di 90 gradi attorno all'asse (libera)", abs((r1[0] - r0[0]) - 90) < 1e-3, f"{r1[0] - r0[0]}")
-    record("LIMITE NOTO (C5): la chiocciola NON avanza del passo (SolidWorks non lo propaga via API)", abs(abs(p1[0] - p0[0]) - 0.5) > 0.05, f"avanzamento {p1[0] - p0[0]:.4f} mm (atteso 0.5 se propagasse)")
+    record("vite: 90 gradi -> avanzamento 0,5 mm = passo 2 x 1/4 di giro (entro 0,01 mm) (C5)", abs(abs(p1[0] - p0[0]) - 0.5) < 0.01,
+           f"avanzamento {p1[0] - p0[0]:.4f} mm")
     await c.call("close_document", discard=True)
 
 

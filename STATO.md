@@ -12,14 +12,14 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 ## Cosa c'e'
 196 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 30 dati/export, 18 simulazione statica.
 
-| Area | Stato | Test live (ultima regressione, 2026-10-11) |
+| Area | Stato | Test live (ultima regressione, 2026-10-17) |
 |---|---|---|
-| Modellazione 3D (blocco 1, gruppo B) | completa; Hole Wizard senza UNI (B4 `[~]`) | `test_modeling_live` 175/175, `test_modeling_extra_live` 240/240 |
+| Modellazione 3D (blocco 1, gruppo B) | completa (UNI assente dal database di SolidWorks) | `test_modeling_live` 175/175, `test_modeling_extra_live` 259/259 |
 | Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 |
-| Assiemi (blocco 2, gruppo C) | completi; C3, C5 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 213/213 |
+| Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
 | Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 83/83 (2026-10-13, Linux; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 83/83 (2026-10-17; anche su GitHub Actions) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -31,8 +31,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 
 ## Aperto
 - **Gruppo D** (dati ed export) e **gruppo E** (simulazione): tutto da fare, piano in `PIANO_D_E.md`.
-- Parziali (B4 e C5 riaperti, piano in `PIANO_D_E.md`): B4 (UNI assente dal database; posizione angolare dei fori su facce cilindriche non controllabile), C3 (rotazione nei
-  passi di traslazione dell'esploso), C5 (blocco/ingranaggio/vite non propagati dal solutore via API).
+- Parziale: C3 (rotazione nei passi di traslazione dell'esploso: solo attorno alla direzione radiale, con un passo radiale di distanza 0).
 - Residuo visivo non bloccante: nella tavola del cuneo la vista ausiliaria non sta sulla perpendicolare allo spigolo.
 - Preferenze di SolidWorks cambiate durante lo sviluppo di cui non si conosce il valore originale: qualita' STL (int 78 = 2 fine)
   e tipo di import STL (int 208 = 2 solido). Controllare in Opzioni > Esporta/Importa se si notano differenze.
@@ -96,6 +95,17 @@ dell'assieme). Conferma in italiano dopo le correzioni (`regressione_20261017_12
 assembly 113/113, data 159/159. G1 `[x]`. Dettagli in `STATO_STORICO.md`.
 Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italiano.
 
+## Fase 2 (2026-10-17, PC, italiano) — CHIUSA
+- **B4 `[x]`** (fori su facce cilindriche): pick passato come g = F^T R^T p (dettagli e trappola in `STATO_STORICO.md`). Test B4 70/70:
+  asse del foro per l'asse del cilindro (0,00e+00 mm), volume 0,023 % dall'integrale.
+- **C5 `[x]`** (ingranaggio, vite, blocco): rotazione pilotata con un accoppiamento d'angolo temporaneo; corretto `RevolutionType` della vite.
+  Test C5 82/82: B/A = -2,0000, vite 0,5000 mm per 90 gradi, blocco fermo sotto un angolo imposto.
+- **C3 resta `[~]`**: `RotationAngle` non scrivibile; un passo radiale con distanza 0 ruota di 45,0000 gradi ma solo attorno alla direzione
+  radiale (il `rotation_note` del tool ora lo suggerisce). Prove in `scripts_tmp/c3p1..4.py`.
+- Regressione completa `testsun_all.py`, exit 0, tutto verde (`test_output/regressione_20261017_1604.md`, log `%TEMP%egr_f2.log`):
+  offline 83/83, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113,
+  assembly_extra 214/214, data 159/159, simulation 120/120. 0 processi SolidWorks rimasti.
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0 e 1 chiuse. Prossima: fase 5 (robustezza; parti offline delegabili),
-poi fase 2 (B4/C5/C3), fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Prossima: fase 5 (robustezza; parti offline delegabili),
+poi fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).
