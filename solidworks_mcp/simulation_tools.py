@@ -64,7 +64,9 @@ _TOOLS = {
     "add_simulation_contact": ("add_simulation_contact",
         "Local contact set between faces of two different components of an assembly study: no_penetration | bonded | shrink_fit | "
         "free | virtual_wall. It overrides the global contact (set_simulation_contact). faces1 and faces2 are points on the "
-        "(coincident) contact faces: each point is matched to the nearest face, faces2 only among components other than faces1.",
+        "(coincident) contact faces: each point is matched to the nearest face, faces2 only among components other than faces1. "
+        "Warning: with no_penetration every part must stay restrained when the contact opens (e.g. a pulled part held only by "
+        "that contact): otherwise the solver may hang until the run_simulation timeout.",
         {"faces1": (A, "Faces of the first component: [[x,y,z],...] in mm"),
          "faces2": (A, "Faces of the other component: [[x,y,z],...] in mm"),
          "contact": (S, "no_penetration | bonded | shrink_fit | free | virtual_wall (default bonded)"), "study": _ST},
