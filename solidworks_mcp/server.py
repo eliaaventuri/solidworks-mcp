@@ -7,8 +7,11 @@ import io
 import os
 import sys
 import json
+import asyncio
 import logging
+import subprocess
 import traceback
+import concurrent.futures
 from typing import Dict
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -385,30 +388,80 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if refusal:
             result = sw_automation._result(False, refusal, SwErrors.swFileSaveError, {"refused": "file_exists"})
             return [TextContent(type="text", text=format_result(result))]
-        
+
+        global _active_job
+        if _active_job is not None and not _active_job.done():
+            return [TextContent(type="text", text="[ERROR] SolidWorks sta ancora eseguendo un tool precedente (scaduto o bloccato): "
+                                                  "controllare la finestra di SolidWorks e riprovare piu' tardi.")]
+        _active_job = _SW_EXECUTOR.submit(_dispatch_tool, name, arguments or {})
+        timeout = _tool_timeout()
         try:
-            if sw_automation._sw_app is not None:
-                sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
-            if name in SPECIAL_HANDLERS:
-                result = SPECIAL_HANDLERS[name](arguments or {})
-            else:
-                for table in DISPATCH_TABLES:
-                    if name in table:
-                        method, allowed = table[name]
-                        kwargs = {k: v for k, v in (arguments or {}).items() if k in allowed}
-                        result = getattr(sw_automation, method)(**kwargs)
-                        break
-                else:
-                    result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
-        finally:
-            sw_automation._restore_prefs()          # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
-        
+            result = await asyncio.wait_for(asyncio.wrap_future(_active_job), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"Tool {name}: oltre {timeout} s")
+            return [TextContent(type="text", text=f"[ERROR] {_timeout_message(name, timeout)}")]
+
         logger.info(f"Result: success={result['success']}")
         return [TextContent(type="text", text=format_result(result))]
         
     except Exception as e:
         logger.error(f"Tool error: {e}\n{traceback.format_exc()}")
         return [TextContent(type="text", text=f"[ERROR] {e}")]
+
+
+# ============================================================================
+# Thread COM e timeout: SolidWorks (STA) va chiamato sempre dallo stesso thread; il server risponde anche se SolidWorks si blocca
+# ============================================================================
+
+def _com_worker_init():
+    import pythoncom
+    pythoncom.CoInitialize()
+
+
+# un solo thread per tutte le chiamate COM (incluse preferenze, connessione e chiusura dell'istanza)
+_SW_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="sw-com",
+                                                     initializer=_com_worker_init)
+_active_job = None      # future del tool in corso sul thread COM; None o concluso = libero
+
+
+def _tool_timeout() -> float:
+    """Secondi massimi per un tool (config.json: tool_timeout)."""
+    return float(config.tool_timeout)
+
+
+def _timeout_message(name: str, timeout: float) -> str:
+    if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
+        pid = sw_automation._dedicated_pid
+        killed = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True).returncode == 0
+        if killed:
+            sw_automation._sw_app = None
+            sw_automation._connected = False
+            return (f"il tool '{name}' ha superato {timeout:.0f} s. L'istanza dedicata di SolidWorks (PID {pid}) e' stata chiusa "
+                    "perche' bloccata; i documenti non salvati sono persi. Il server andra' riavviato per riprendere.")
+        return (f"il tool '{name}' ha superato {timeout:.0f} s e l'istanza dedicata (PID {pid}) non si e' chiusa: "
+                "terminarla da Gestione attivita'.")
+    return (f"il tool '{name}' ha superato {timeout:.0f} s. SolidWorks potrebbe essere bloccato da una finestra di dialogo: "
+            "controllare SolidWorks. Il server non chiude l'istanza dell'utente.")
+
+
+def _dispatch_tool(name: str, arguments: dict) -> Dict:
+    """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool."""
+    try:
+        if sw_automation._sw_app is not None:
+            sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
+        if name in SPECIAL_HANDLERS:
+            return SPECIAL_HANDLERS[name](arguments)
+        for table in DISPATCH_TABLES:
+            if name in table:
+                method, allowed = table[name]
+                kwargs = {k: v for k, v in arguments.items() if k in allowed}
+                return getattr(sw_automation, method)(**kwargs)
+        return sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+    finally:
+        try:
+            sw_automation._restore_prefs()      # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
+        except Exception as e:
+            logger.warning(f"ripristino preferenze: {e}")
 
 
 # ============================================================================
@@ -887,15 +940,21 @@ async def main():
             await server.run(read_stream, write_stream, server.create_initialization_options())
     finally:
         # client disconnesso: l'istanza dedicata e nascosta non deve restare accesa (chiude SOLO il suo PID)
-        if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
-            try:
-                if _dedicated_has_unsaved():
-                    logger.warning(f"istanza dedicata (PID {sw_automation._dedicated_pid}) lasciata aperta: "
-                                   "ci sono documenti con modifiche non salvate")
-                else:
-                    sw_automation.shutdown_dedicated()
-            except Exception as e:
-                logger.warning(f"chiusura dell'istanza dedicata: {e}")
+        # le chiamate COM vanno sul thread COM, non su quello di asyncio
+        try:
+            await asyncio.wait_for(asyncio.wrap_future(_SW_EXECUTOR.submit(_close_dedicated_on_exit)), timeout=60)
+        except Exception as e:
+            logger.warning(f"chiusura dell'istanza dedicata: {e}")
+        _SW_EXECUTOR.shutdown(wait=False)
+
+
+def _close_dedicated_on_exit():
+    if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
+        if _dedicated_has_unsaved():
+            logger.warning(f"istanza dedicata (PID {sw_automation._dedicated_pid}) lasciata aperta: "
+                           "ci sono documenti con modifiche non salvate")
+        else:
+            sw_automation.shutdown_dedicated()
 
 
 def _dedicated_has_unsaved() -> bool:

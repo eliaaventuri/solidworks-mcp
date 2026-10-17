@@ -731,6 +731,49 @@ def test_toolsets(tmp):
         srv.sw_automation = real
 
 
+# ============================================================================ thread COM e timeout
+def test_worker_timeout():
+    import time
+    import threading
+    real = srv.sw_automation
+    fake = _FakeAutomation()
+    srv.sw_automation = fake
+    old_timeout = srv.config.tool_timeout
+    try:
+        def call(name, args=None):
+            out = asyncio.run(srv.call_tool(name, args or {}))
+            return out[0].text
+
+        fake.threads = []
+
+        def thread_draw_line(**kw):
+            fake.threads.append(threading.current_thread().name)
+            return {"success": True, "message": "ok", "error_code": 0, "error_name": "swSuccess", "data": {}}
+        fake.draw_line = thread_draw_line
+        call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        record("tool eseguiti sul thread COM unico", fake.threads and fake.threads[0].startswith("sw-com"), str(fake.threads))
+
+        def slow_draw_line(**kw):
+            time.sleep(2.5)
+            return {"success": True, "message": "tardi", "error_code": 0, "error_name": "swSuccess", "data": {}}
+        fake.draw_line = slow_draw_line
+        srv.config.tool_timeout = 0.5
+        t0 = time.time()
+        text = call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        dt = time.time() - t0
+        record("timeout: errore dopo il limite, senza aspettare il tool", text.startswith("[ERROR]") and "superato" in text and dt < 2.0,
+               f"{dt:.2f} s: {text[:70]}")
+        text = call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        record("tool successivo rifiutato finche' il precedente e' ancora bloccato", "ancora eseguendo" in text, text[:70])
+        time.sleep(2.5)                                  # il tool lento finisce
+        srv.config.tool_timeout = 300
+        text = call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        record("dopo lo sblocco il server riprende", text.startswith("[SUCCESS]"), text[:70])
+    finally:
+        srv.config.tool_timeout = old_timeout
+        srv.sw_automation = real
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -742,7 +785,7 @@ def main():
                          ("configurazione", lambda: test_config(tmp)), ("lingua", test_language),
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units),
-                         ("toolset", lambda: test_toolsets(tmp))):
+                         ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout)):
             try:
                 fn()
             except Exception as e:

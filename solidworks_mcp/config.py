@@ -20,6 +20,7 @@ class SolidWorksConfig:
         exe_path: percorso di SLDWORKS.exe ("auto" = ricerca automatica)
         startup_timeout: secondi di attesa all'avvio di SolidWorks
         connection_retry_interval: secondi fra due tentativi di connessione durante l'avvio
+        tool_timeout: secondi massimi per un tool; allo scadere il server risponde con un errore (vedi server.py)
         default_unit: unita' predefinita delle quote (mm, cm, m, inch, ft)
         log_level: DEBUG, INFO, WARNING, ERROR
         log_file: nome del file di log in %LOCALAPPDATA%/solidworks-mcp/ (o percorso assoluto); rotazione 5 x 5 MB
@@ -29,6 +30,7 @@ class SolidWorksConfig:
     exe_path: str = "auto"
     startup_timeout: int = 120
     connection_retry_interval: int = 5
+    tool_timeout: int = 300
     default_unit: str = "mm"
     log_level: str = "INFO"
     log_file: str = "solidworks_mcp.log"

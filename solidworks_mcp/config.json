@@ -2,6 +2,7 @@
   "exe_path": "auto",
   "startup_timeout": 120,
   "connection_retry_interval": 5,
+  "tool_timeout": 300,
   "default_unit": "mm",
   "log_level": "INFO",
   "log_file": "solidworks_mcp.log"

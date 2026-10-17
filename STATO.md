@@ -119,7 +119,14 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   da togliere, `assembly.py` `comp, _ =`). Restano nel pacchetto solo 5 import di `win32com.client`/`pythoncom` (side-effect, da
   verificare dal vivo prima di togliere) e nei test 17 avvisi. Il CI NON e' ancora cambiato: controlla ancora solo i nomi non definiti.
 - Test offline **91/91** (con `.venv`), nuovi controlli: gating di execute_python, gruppi di SW_MCP_TOOLSETS, gruppo sconosciuto.
-- **Non ancora fatti** (servono SolidWorks o altra decisione): 5.1 timeout generale, 5.2 ripresa dopo crash (entrambi da provare dal vivo),
+- **5.1 timeout (2026-10-17, scelta di Elia: thread di lavoro)**: tutte le chiamate COM passano da un thread unico (`_SW_EXECUTOR`,
+  `CoInitialize` nel thread); il server risponde anche se SolidWorks si blocca. `tool_timeout` in config.json (default 300 s).
+  Allo scadere: in modalita' dedicata il PID viene chiuso con taskkill (documenti non salvati persi, il server va riavviato);
+  con l'istanza dell'utente non viene toccata, si riceve un errore che chiede di controllare SolidWorks. Mentre il tool precedente
+  e' ancora bloccato i tool successivi rispondono subito con un errore. La chiusura all'uscita passa anche dal thread COM.
+  Offline: 95/95 (thread unico, timeout, blocco dei tool successivi, ripresa). **Da provare dal vivo** sull'istanza dedicata
+  (es. execute_python con sleep) prima di chiudere la voce: non ancora fatto.
+- **Non ancora fatti**: 5.2 ripresa dopo crash (riavvio automatico dell'istanza dedicata, da provare dal vivo),
   5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).
 
 ## Prossimo passo
