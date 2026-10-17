@@ -506,3 +506,21 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
 - Costanti trovate in `swconst.tlb` (enum `swUserPreferenceToggle_e`): 4 assi, 5 piani, 6 origini, 13 sistemi di coordinate,
   19/219 punti di riferimento, 196 schizzi, 197 annotazioni, 198 nascondi tutti i tipi.
 - Misura: piano del componente 1596 pixel azzurri senza `hide_reference`, 0 con, 1596 dopo (ripristino ok). Sonda: `scripts_tmp/d5probe.py`.
+
+## D6 — assiemi: export, box, immagini (2026-10-17)
+- Test live `test_data_live` sez. 12: 183/183 (esito dopo tre correzioni, log `test_output/`, `%TEMP%\claude\d6_run3.log`).
+  Numeri: box dell'assieme = unione dei box traslati, scarto 0,0 mm (min -1,2e-05 / max 230, 160, 25 mm);
+  STL in un file: box del file = box del modello (230,000012 x 200 x 50 mm, scarto 0,0); STEP: 3 PRODUCT_DEFINITION, 3 istanze;
+  STEP reimportato: volume 135456,7664 mm3 contro 135456,8204 (blocco 116607,26 + 2 x 9424,78), scarto 4e-7 (< 0,01 %).
+- Trappole trovate:
+  - `GetComponents` e' un metodo con argomento (`GetComponents(TopLevelOnly)`): chiamato come proprieta' (`_com`) dava
+    "Parametro non facoltativo" e il box dell'assieme risultava vuoto. Corretto con `doc.GetComponents(True)`.
+  - `IComponent2.GetBox` non e' affidabile per il box del componente (sovrastimava X di 0,165 mm). Ora il box si calcola dal
+    pezzo (`GetExtremePoint`) portato nel sistema dell'assieme con `Transform2.ArrayData` (rotazione per colonne, traslazione in m).
+    La rotazione e' verificata solo per traslazioni: vale la convenzione standard di `ArrayData`, da provare con un componente ruotato.
+  - `GetBodies2` sull'assieme non e' valido: l'import di uno STEP d'assieme ora elenca i componenti di primo livello.
+  - Export STL "un file per componente": SolidWorks scrive `<nome> - <componente>.stl` accanto al nome indicato; il controllo
+    di esistenza ora cerca questi file (nel risultato `files`). Cosmetico da sistemare: il messaggio mostra "0 byte" per il file base.
+  - Il test leggeva "il blocco" dopo aver aperto il cilindro senza chiuderlo (`open_document` non cambia il documento attivo):
+    misurava il cilindro due volte. Ora il cilindro viene chiuso dopo il salvataggio.
+  - Il test per componente contava solo i file, ignorando `ok`: ora conta anche l'esito.

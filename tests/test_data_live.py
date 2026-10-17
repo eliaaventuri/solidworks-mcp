@@ -462,6 +462,86 @@ async def scenario(c: Client, tools):
     record("D5: dopo l'export il piano del componente e' di nuovo visibile (> 50)", imgs.get("asm_dopo", 0) > 50, str(imgs))
     await c.call("close_document", discard=True)
 
+    # ------------------------------------------------------------------ 12. D6: assiemi, export STEP/STL, box, immagine
+    print("\n== 12. D6 assieme: export, box, immagine")
+    cyl = F("dx_cil")
+    rm(cyl)
+    await c.call("create_new_part")
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_circle", x=0, y=0, radius=10)
+    await T(c, "extrude_boss", "cilindro R10 x 30", depth=30)
+    ok, _, m = await c.call("get_mass_properties")
+    v_cyl = m.get("volume_mm3", 0)
+    record("D6: cilindro 9424,78 mm3", ok and rel(v_cyl, math.pi * 100 * 30) < 1e-5, f"{v_cyl}")
+    _, _, bb_cyl = await c.call("get_bounding_box")
+    await T(c, "save_document", "salva dx_cil", filepath=cyl)
+    await c.call("close_document", discard=True)      # chiude il cilindro, cosi' il blocco letto dopo e' davvero dx_blocco
+    await c.call("open_document", filepath=part)
+    _, _, m = await c.call("get_mass_properties")
+    v_blk = m.get("volume_mm3", 0)
+    _, _, bb_blk = await c.call("get_bounding_box")
+    await c.call("activate_document", name="dx_blocco")
+    await c.call("close_document", discard=True)
+
+    asm = F("dx_asm", "SLDASM")
+    rm(asm)
+    offs = [(part, bb_blk, (0, 0, 0)), (cyl, bb_cyl, (200, 0, 0)), (cyl, bb_cyl, (0, 150, 0))]
+    await T(c, "create_new_assembly", "assieme D6: blocco + 2 cilindri")
+    for path, _, (x, y, z) in offs:
+        await T(c, "insert_component", f"{Path(path).stem} in ({x},{y},{z})", file_path=path, x=x, y=y, z=z, fixed=True)
+    await T(c, "save_document", "salva dx_asm", filepath=asm)
+    v_sum = v_blk + 2 * v_cyl
+
+    # box: unione dei box dei pezzi traslati (nessuna rotazione)
+    exp_min = [min(bb["min"][i] + o[i] for _, bb, o in offs) for i in range(3)]
+    exp_max = [max(bb["max"][i] + o[i] for _, bb, o in offs) for i in range(3)]
+    ok, text, bb = await c.call("get_bounding_box")
+    diff = max([abs(a - b) for a, b in zip(bb.get("min", [9e9] * 3), exp_min)] + [abs(a - b) for a, b in zip(bb.get("max", [9e9] * 3), exp_max)])
+    record("D6 box dell'assieme = unione dei box dei componenti traslati (< 0,01 mm)", ok and diff < 0.01,
+           f"min {bb.get('min')} max {bb.get('max')} atteso {exp_min} {exp_max}")
+
+    # STEP: 2 pezzi distinti + 1 assieme, 3 istanze; reimport: volume = somma
+    stp = F("dx_asm", "step")
+    rm(stp)
+    ok, text, d = await c.call("export_model", filepath=stp)
+    v = d.get("verify", {})
+    record("D6 STEP dell'assieme: 3 PRODUCT_DEFINITION (2 pezzi + assieme)", ok and v.get("product_definitions") == 3, f"{v.get('product_definitions')} {text[:80]}")
+    record("D6 STEP dell'assieme: 3 istanze (NEXT_ASSEMBLY_USAGE_OCCURRENCE)", v.get("assembly_occurrences") == 3, f"{v.get('assembly_occurrences')}")
+
+    # STL in un file: box del file = box dell'assieme
+    stl = F("dx_asm", "stl")
+    rm(stl)
+    ok, text, d = await c.call("export_model", filepath=stl, one_file=True)
+    record("D6 STL in un file: box del file = box dell'assieme (< 0,05 mm)", ok and d.get("bbox_max_diff", 9) < 0.05,
+           f"diff {d.get('bbox_max_diff')} file {d.get('verify', {}).get('bbox_size')} modello {d.get('model_bbox_size')}")
+
+    # STL un file per componente
+    before = {p.name for p in OUT.glob("*.stl")}
+    ok, text, d = await c.call("export_model", filepath=F("dx_asm_sep", "stl"), one_file=False)
+    new = sorted(p.name for p in OUT.glob("*.stl") if p.name not in before)
+    record("D6 STL un file per componente: 3 file, esito SUCCESS", ok and len(new) == 3, f"{new} {text[:80]}")
+    for n in new:
+        rm(OUT / n)
+
+    # immagine
+    img = F("dx_img_asm_d6", "png")
+    rm(img)
+    ok, text, d = await c.call("export_model_image", filepath=img, white_background=True, width=900, height=600)
+    nonwhite = 0
+    if Path(img).exists():
+        from solidworks_mcp.automation.data_export import _read_png
+        w, h, bpp, rows = _read_png(img)
+        nonwhite = sum(1 for y in range(h) for x in range(w) if min(rows[y][x * bpp:x * bpp + 3]) < 200)
+    record("D6 immagine dell'assieme: 900x600 con i componenti visibili (> 5000 pixel non bianchi)",
+           ok and d.get("width") == 900 and nonwhite > 5000, f"{nonwhite} pixel")
+    await c.call("close_document", discard=True)
+
+    # reimport dello STEP: volume totale = somma dei componenti
+    ok, text, d = await c.call("import_model", filepath=stp)
+    record("D6 STEP reimportato: volume = blocco + 2 cilindri (< 0,01 %)", ok and rel(d.get("volume_mm3", 0), v_sum) < 1e-4,
+           f"{d.get('volume_mm3')} atteso {round(v_sum, 4)}; corpi {len(d.get('bodies', []))}; tipo {d.get('document_type')}")
+    await c.call("close_document", discard=True)
+
 
 if __name__ == "__main__":
     done = asyncio.run(run())

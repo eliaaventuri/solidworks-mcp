@@ -44,6 +44,7 @@ Trappole API scoperte (SW 2026 italiano, late binding) — dettagli anche in STA
 
 import os
 import re
+import glob
 import math
 import struct
 import zipfile
@@ -342,7 +343,7 @@ class DataExportOperations:
         lo = [1e9, 1e9, 1e9]
         hi = [-1e9, -1e9, -1e9]
         if int(doc.GetType) == 2 and body is None:
-            comps = self._com(doc, "GetComponents")  # top level
+            comps = doc.GetComponents(True)  # solo componenti di primo livello (metodo con argomento: non e' una proprieta')
             tmp = self._dx_asm_box(doc, comps)
             return tmp
         for b in bodies:
@@ -361,6 +362,8 @@ class DataExportOperations:
         return lo + hi
 
     def _dx_asm_box(self, doc, comps):
+        """Box dell'assieme: per ogni componente attivo, box esatto del suo pezzo (GetExtremePoint) portato nel sistema
+        dell'assieme con Transform2 (rotazione = ArrayData[0:9] per colonne, traslazione = ArrayData[9:12], in m)."""
         lo = [1e9, 1e9, 1e9]
         hi = [-1e9, -1e9, -1e9]
         for c in (comps or ()):
@@ -370,14 +373,19 @@ class DataExportOperations:
             except Exception:
                 pass
             try:
-                bx = self._com(c, "GetBox") if False else c.GetBox(False, False)
+                pbox = self._dx_box_m(self._com(c, "GetModelDoc2"))
+                t = list(self._com(self._com(c, "Transform2"), "ArrayData"))
             except Exception:
-                bx = None
-            if not bx:
                 continue
-            for i in range(3):
-                lo[i] = min(lo[i], bx[i])
-                hi[i] = max(hi[i], bx[3 + i])
+            if not pbox:
+                continue
+            R, T = t[0:9], t[9:12]
+            for k in range(8):
+                x, y, z = (pbox[0] if k & 1 == 0 else pbox[3]), (pbox[1] if k & 2 == 0 else pbox[4]), (pbox[2] if k & 4 == 0 else pbox[5])
+                p = [R[i] * x + R[3 + i] * y + R[6 + i] * z + T[i] for i in range(3)]
+                for i in range(3):
+                    lo[i] = min(lo[i], p[i])
+                    hi[i] = max(hi[i], p[i])
         return None if lo[0] > 1e8 else lo + hi
 
     # ====================================================================== materiali
@@ -1321,12 +1329,20 @@ class DataExportOperations:
                 if prev_cfg:
                     doc.ShowConfiguration2(prev_cfg)
             exists = os.path.exists(filepath) and os.path.getsize(filepath) > 0
-            data = {"filepath": filepath, "size_bytes": os.path.getsize(filepath) if exists else 0, "api_ok": bool(ok),
-                    "errors": int(e.value), "warnings": int(w.value), "options": opts}
+            per_comp = []
+            if not exists and fmt == "stl" and not one_file:
+                # assieme con un file per componente: SolidWorks scrive "<nome> - <componente>.stl" accanto al nome indicato
+                base, ext = os.path.splitext(filepath)
+                per_comp = sorted(p for p in glob.glob(glob.escape(base) + " - *" + ext) if os.path.getsize(p) > 0)
+                exists = bool(per_comp)
+            data = {"filepath": filepath, "size_bytes": os.path.getsize(filepath) if os.path.exists(filepath) else 0,
+                    "api_ok": bool(ok), "errors": int(e.value), "warnings": int(w.value), "options": opts}
+            if per_comp:
+                data["files"] = per_comp
             if not exists:
                 return self._result(False, f"Export NON riuscito (errori {int(e.value)})", SwErrors.swExportError, data)
             good = True
-            if verify and fmt in ("stl", "3mf", "step", "pdf3d", "iges", "x_t", "x_b"):
+            if verify and fmt in ("stl", "3mf", "step", "pdf3d", "iges", "x_t", "x_b") and not per_comp:
                 chk = self.inspect_export_file(filepath)
                 data["verify"] = chk.get("data", {})
                 v = data["verify"]
@@ -1550,7 +1566,14 @@ class DataExportOperations:
             except Exception:
                 pass
             bodies = []
-            for kind, label in ((0, "solid"), (1, "surface")):
+            if int(doc.GetType) == 2:
+                # assieme: niente corpi diretti, si elencano i componenti di primo livello (il volume e' la somma)
+                for c in (doc.GetComponents(True) or ()):
+                    try:
+                        bodies.append({"name": str(c.Name2), "type": "component"})
+                    except Exception:
+                        pass
+            for kind, label in (() if int(doc.GetType) == 2 else ((0, "solid"), (1, "surface"))):
                 for b in (doc.GetBodies2(kind, False) or ()):
                     info = {"name": str(b.Name), "type": label}
                     try:

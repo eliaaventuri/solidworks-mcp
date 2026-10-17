@@ -162,6 +162,12 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   198, salvato e ripristinato). `test_data_live` 168/168 (sez. 11: 1596 / 0 / 1596 pixel azzurri). Trappola: nell'assieme la
   visualizzazione dei piani e' spenta di default (dettagli in `STATO_STORICO.md`).
 
+- **D6 `[x]`** (assiemi: export STL/STEP, box, immagine): `test_data_live` sez. 12 183/183 dal vivo (tre giri di correzioni; trappole
+  in `STATO_STORICO.md`). Il box dell'assieme ora si calcola dai pezzi con `Transform2` (non piu' `GetBox`); `GetComponents(True)`;
+  export STL per componente riconosciuto dai file `<nome> - <componente>.stl`. Dettaglio: scarto box 0,0 mm, volume STEP reimportato
+  135456,7664 contro 135456,8204 mm3. Da fare: il messaggio del per-componente mostra "0 byte" per il file base (cosmetico).
+  Regressione completa non rifatta dopo queste modifiche: offline 103/103 (OK); `test_data_live` completo sì.
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2 e 5 chiuse. Prossima: fase 3 (gruppo D, a partire da
-D5 come da tabella del piano), poi fase 4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2 e 5 chiuse. Fase 3 in corso: D5 e D6 chiuse; prossima D7
+(proprietà di massa nel sistema di coordinate utente), poi D8, D1, D10, D4, D9, D2, D3.

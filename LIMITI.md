@@ -46,7 +46,7 @@ Piano dettagliato (API candidate, test, numeri attesi) per i gruppi D ed E: `PIA
 - [ ] D3 eDrawings `.eprt` verificato (apertura/lettura)
 - [ ] D4 Immagini oltre la risoluzione nativa (es. 4K) e resa migliore (RealView/ambient occlusion/prospettiva); rendering fotorealistico se Visualize è automatizzabile
 - [x] D5 `hide_reference` anche dentro i componenti degli assiemi (2026-10-17: toggle di documento swViewDisplayHideAllTypes = 198, salvato e ripristinato; `test_data_live` sez. 11: piano del componente 1596 pixel azzurri senza, 0 con, 1596 dopo)
-- [ ] D6 Assiemi: test di export STL/STEP, bounding box, immagini
+- [x] D6 Assiemi: export STL/STEP, bounding box, immagini (2026-10-17: `test_data_live` sez. 12, 183/183; box dell'assieme scarto 0,0 mm; STEP reimportato volume 135456,7664 contro 135456,8204 mm3, scarto 4e-7; STL un file box = modello 230,000012 x 200 x 50; STL per componente 3 file; immagine 32793 pixel non bianchi; correzioni in `solidworks_mcp/automation/data_export.py`: box da Transform2, GetComponents(True), export per componente)
 - [ ] D7 Proprietà di massa rispetto a un sistema di coordinate utente
 - [ ] D8 Materiali personalizzati fuori dalla cartella standard (librerie utente)
 - [ ] D9 Import: opzioni avanzate (riparazione, unione facce, import come assieme/pezzo)
