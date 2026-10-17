@@ -4,7 +4,7 @@ Server [MCP](https://modelcontextprotocol.io/) che permette a Claude (Claude Cod
 modellare pezzi, montare assiemi, fare messe in tavola ISO, esportare e lanciare simulazioni statiche, descrivendo il lavoro a parole.
 
 Il progetto e' partito da [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) (22 tool di base) ed e' stato
-riscritto ed esteso fino a **196 tool**, ognuno verificato su SolidWorks con test che misurano il risultato
+riscritto ed esteso fino a **197 tool**, ognuno verificato su SolidWorks con test che misurano il risultato
 (volumi, masse, quote, posizioni, reazioni) e lo confrontano con il valore calcolato a mano.
 
 ## Cosa sa fare

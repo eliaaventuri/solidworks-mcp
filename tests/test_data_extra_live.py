@@ -9,8 +9,10 @@ Uso:  .venv\\Scripts\\python.exe tests\\test_data_extra_live.py            tutte
 """
 
 import os
+import re
 import sys
 import math
+from pathlib import Path
 import asyncio
 from datetime import timedelta
 
@@ -460,8 +462,103 @@ async def sec_d4(c: Client):
 
 # ============================================================================================ D9
 async def sec_d9(c: Client):
-    """D9: opzioni di import."""
+    """D9: opzioni di import (STEP come assieme o pezzo, 3D Interconnect, diagnostica/riparazione).
+
+    Si costruisce l'assieme come in D6 (blocco 30x80x50 + 2 cilindri R10x30, 3 componenti fissi), lo si scrive in STEP e lo si
+    reimporta con le varie opzioni; le attese (volumi) si calcolano qui. Le preferenze 579 (struttura STEP) e 691 (3D Interconnect)
+    sono GLOBALI: si leggono con execute_python prima e dopo e devono tornare uguali. Poi una prova di riparazione: STEP del solo
+    blocco con UNA faccia tolta a mano, importato con diagnose=true."""
     print("\n== D9 import")
+    blk, cyl, asm = F("dxe_d9_blocco"), F("dxe_d9_cil"), F("dxe_d9_asm", "SLDASM")
+    stp_asm, stp_blk, stp_bad = F("dxe_d9_asm", "step"), F("dxe_d9_blocco", "step"), F("dxe_d9_blocco_rotto", "step")
+    rm(blk, cyl, asm, stp_asm, stp_blk, stp_bad)
+    v_cyl = PI * 10 ** 2 * 30
+    v_sum = V_BLOCK + 2 * v_cyl
+
+    # --- pezzi e assieme di partenza
+    await c.call("create_new_part")
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_rectangle", x1=-B / 2, y1=-C / 2, x2=B / 2, y2=C / 2)
+    await T(c, "extrude_boss", "D9 blocco 80x50x30", depth=A)
+    await T(c, "save_document", "D9 salva blocco", filepath=blk)
+    ok, text, d = await c.call("export_model", filepath=stp_blk)
+    record("D9 STEP del solo blocco scritto", ok and Path(stp_blk).exists(), text.split("\n")[0][:100])
+    await c.call("close_document", discard=True)
+    await c.call("create_new_part")
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_circle", x=0, y=0, radius=10)
+    await T(c, "extrude_boss", "D9 cilindro R10 x 30", depth=30)
+    await T(c, "save_document", "D9 salva cilindro", filepath=cyl)
+    await c.call("close_document", discard=True)
+    await T(c, "create_new_assembly", "D9 assieme: blocco + 2 cilindri")
+    for path, (x, y, z) in ((blk, (0, 0, 0)), (cyl, (200, 0, 0)), (cyl, (0, 150, 0))):
+        await T(c, "insert_component", f"D9 {Path(path).stem} in ({x},{y},{z})", file_path=path, x=x, y=y, z=z, fixed=True)
+    await T(c, "save_document", "D9 salva assieme", filepath=asm)
+    ok, text, d = await c.call("export_model", filepath=stp_asm)
+    record("D9 STEP dell'assieme scritto", ok and Path(stp_asm).exists(), text.split("\n")[0][:100])
+    await c.call("close_document", discard=True)
+    if not Path(stp_asm).exists():
+        return
+
+    async def prefs():
+        ok, _t, d = await c.call("execute_python", code="result = [sw.GetUserPreferenceIntegerValue(579), bool(sw.GetUserPreferenceToggle(691))]")
+        return d.get("result") if ok else None
+
+    p0 = await prefs()
+    record("D9 preferenze 579 (struttura STEP) e 691 (3D Interconnect) leggibili con execute_python", p0 is not None, repr(p0))
+
+    # --- STEP come assieme, senza collegamento: 3 componenti, volume = somma
+    ok, text, d = await c.call("import_model", filepath=stp_asm, step_as="assembly", interconnect=False)
+    record("D9 step_as=assembly, interconnect=false: assieme (tipo 2) con 3 componenti di primo livello",
+           ok and d.get("document_type") == 2 and d.get("components_top") == 3,
+           f"tipo {d.get('document_type')} top {d.get('components_top')} tutti {d.get('components_all')} titolo {d.get('title')} {d.get('options_used')} {d.get('notes')}")
+    record("D9 assieme importato: volume = blocco + 2 cilindri (< 0,01 %)", ok and rel(d.get("volume_mm3", 0), v_sum) < 1e-4,
+           f"{d.get('volume_mm3')} atteso {round(v_sum, 4)}")
+    await c.call("close_document", discard=True)
+
+    # --- STEP come pezzo multicorpo
+    ok, text, d = await c.call("import_model", filepath=stp_asm, step_as="part")
+    solids = [b for b in d.get("bodies", []) if b.get("type") == "solid"]
+    record("D9 step_as=part: pezzo (tipo 1) con 3 corpi solidi", ok and d.get("document_type") == 1 and len(solids) == 3,
+           f"tipo {d.get('document_type')} solidi {len(solids)} titolo {d.get('title')} {d.get('options_used')} {d.get('notes')}")
+    record("D9 pezzo multicorpo: volume = blocco + 2 cilindri (< 0,01 %)", ok and rel(d.get("volume_mm3", 0), v_sum) < 1e-4,
+           f"{d.get('volume_mm3')} atteso {round(v_sum, 4)}")
+    await c.call("close_document", discard=True)
+
+    # --- 3D Interconnect acceso (informativo)
+    ok, text, d = await c.call("import_model", filepath=stp_asm, step_as="assembly", interconnect=True)
+    record("D9 interconnect=true: import riuscito (informativo)", ok,
+           f"tipo {d.get('document_type')} top {d.get('components_top')} tutti {d.get('components_all')} titolo {d.get('title')} volume {d.get('volume_mm3')}")
+    await c.call("close_document", discard=True)
+
+    p1 = await prefs()
+    record("D9 preferenze 579 e 691 ripristinate dopo gli import", p1 is not None and p1 == p0, f"prima {p0} dopo {p1}")
+
+    # --- riparazione: STEP del blocco con UNA ADVANCED_FACE tolta a mano
+    txt = Path(stp_blk).read_text(encoding="latin-1")
+    m = re.search(r"#(\d+)\s*=\s*ADVANCED_FACE\s*\([^;]*;", txt)
+    if not m:
+        record("D9 STEP del blocco: ADVANCED_FACE trovata per il guasto", False, "nessuna ADVANCED_FACE")
+        return
+    fid = m.group(1)
+    txt = txt[:m.start()] + txt[m.end():]
+    shell = re.search(r"CLOSED_SHELL\s*\([^;]*;", txt)
+    if shell:
+        body = re.sub(r"#%s\b\s*,?\s*" % fid, "", shell.group(0), count=1)
+        body = re.sub(r",\s*\)", ")", body)
+        txt = txt[:shell.start()] + body + txt[shell.end():]
+    Path(stp_bad).write_text(txt, encoding="latin-1")
+    record("D9 STEP rotto scritto (tolta una ADVANCED_FACE e il suo riferimento nel CLOSED_SHELL)", shell is not None and Path(stp_bad).exists(), f"faccia #{fid}")
+    ok, text, d = await c.call("import_model", filepath=stp_bad, diagnose=True)
+    dg = d.get("diagnosis", {})
+    solids = [b for b in d.get("bodies", []) if b.get("type") == "solid"]
+    vol_after = dg.get("volume_after_mm3", 0)
+    good = ok and not dg.get("error") and len(solids) >= 1 and rel(vol_after, V_BLOCK) < 0.01
+    record("D9 diagnosi: dopo la riparazione c'e' un corpo solido con volume entro 1 % del blocco originale", good,
+           f"volume dopo {vol_after} atteso {V_BLOCK}; corpi prima {dg.get('bodies_before')} dopo {dg.get('bodies_after')}; "
+           f"codice {dg.get('return_code')}; solidi {len(solids)} {dg.get('error', '')} {text.split(chr(10))[0][:80] if not ok else ''}")
+    await c.call("close_document", discard=True)
+    rm(blk, cyl, asm, stp_bad)
 
 
 # ============================================================================================ D2
@@ -530,9 +627,10 @@ async def sec_d3(c: Client):
                     check=lambda d: d.get("verify", {}).get("edrawings", {}).get("valid") is True)
         e = d.get("verify", {}).get("edrawings", {})
         n = e.get("bodies")
-        record(f"D3: .easm dell'assieme valido, bodies={n} (atteso 3 = un corpo per componente; informativo)",
-               e.get("valid") is True and isinstance(n, int) and n >= 1,
-               f"bodies {n} (confronto con 3), entita' {e.get('entities')}, voci {e.get('entries')}, note {e.get('notes')}")
+        # misurato 2026-10-17: materials.xml ha un'entita' per CORPO DISTINTO (blocco + cilindro), non per istanza (3)
+        record("D3: .easm dell'assieme valido, 2 corpi distinti (blocco + cilindro, 3 istanze)",
+               e.get("valid") is True and n == 2,
+               f"bodies {n}, entita' {e.get('entities')}, voci {e.get('entries')}, note {e.get('notes')}")
     finally:
         await c.call("close_document", discard=True)
         rm(part, cyl, asm, ep, ea, et)

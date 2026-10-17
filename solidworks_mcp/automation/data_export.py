@@ -214,11 +214,73 @@ def _print_dpi(W, H) -> int:
     return max(_PRINT_DPI_MIN, min(_PRINT_DPI_MAX, d))
 
 
-def _resize_png(src: str, dst: str, W: int, H: int) -> Tuple[int, int, bool]:
+def _png_dims(path: str) -> Tuple[int, int]:
+    """Larghezza e altezza di un PNG lette dall'intestazione IHDR (senza decodificare l'immagine)."""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    return struct.unpack(">II", head[16:24])
+
+
+def _recenter_box(rows, sw: int, sh: int, bpp: int, W: int, H: int, margin: float = 0.04):
+    """Ritaglio centrato sul contenuto: SolidWorks non centra il modello nella sua cattura (misurato: centro a +12 % in X a
+    3840x2160). Solo con sfondo uniforme (4 angoli uguali). Il riquadro (contenuto + margine) ha le proporzioni W:H ed e' sempre
+    un po' piu' grande di W x H (cosi' si riduce e non si ingrandisce). None se lo sfondo non e' uniforme o l'immagine e' vuota."""
+    bg = bytes(rows[0][0:bpp])
+    corners = (rows[0][(sw - 1) * bpp:sw * bpp], rows[sh - 1][0:bpp], rows[sh - 1][(sw - 1) * bpp:sw * bpp])
+    if any(bytes(c) != bg for c in corners):
+        return None
+    # pixel "di contenuto" = almeno un canale a piu' di `tol` dallo sfondo (i bordi sfumati e quasi bianchi non spostano il centro);
+    # per ogni riga: translate (tabella 0/1 per canale) + find/rfind, tutto in C
+    tol = 40
+    tabs = [bytes(1 if abs(v - bg[c]) > tol else 0 for v in range(256)) for c in range(3)]
+    y0 = y1 = None
+    x0, x1 = sw, -1
+    for y in range(sh):
+        r = bytes(rows[y])
+        left, right = sw, -1
+        for c in range(3):
+            fl = r[c::bpp][:sw].translate(tabs[c])
+            i = fl.find(1)
+            if i >= 0:
+                left, right = min(left, i), max(right, fl.rfind(1))
+        if right < 0:
+            continue
+        x0, x1 = min(x0, left), max(x1, right)
+        y0 = y if y0 is None else y0
+        y1 = y
+    if y0 is None:
+        return None
+    m = int(margin * max(x1 - x0 + 1, y1 - y0 + 1))
+    cw, ch = x1 - x0 + 1 + 2 * m, y1 - y0 + 1 + 2 * m
+    if cw / ch < W / H:
+        cw = ch * W / H
+    else:
+        ch = cw * H / W
+    s = max(1.0, W * 1.002 / cw, H * 1.002 / ch)
+    cw, ch = int(math.ceil(cw * s)), int(math.ceil(ch * s))
+    bx0 = int(round((x0 + x1) / 2 - cw / 2))
+    by0 = int(round((y0 + y1) / 2 - ch / 2))
+    out = []
+    for y in range(by0, by0 + ch):
+        if y < 0 or y >= sh:
+            out.append(bg * cw)
+            continue
+        r = rows[y]
+        a, b = max(0, bx0), min(sw, bx0 + cw)
+        out.append(bg * (a - bx0) + bytes(r[a * bpp:b * bpp]) + bg * (bx0 + cw - b))
+    return cw, ch, out
+
+
+def _resize_png(src: str, dst: str, W: int, H: int, recenter: bool = False) -> Tuple[int, int, bool]:
     """Riduce un PNG a W x H (box filter intero + campionamento; bande con il colore d'angolo se le proporzioni differiscono).
-    Mai ingrandisce oltre l'originale: restituisce (W, H, ridotto?) effettivi."""
+    Mai ingrandisce oltre l'originale: restituisce (W, H, ridotto?) effettivi. `recenter`: con sfondo uniforme ritaglia prima
+    attorno al contenuto (vedi `_recenter_box`), cosi' il modello risulta centrato."""
     sw, sh, bpp, rows = _read_png(src)
     W, H = int(W), int(H)
+    if recenter:
+        box = _recenter_box(rows, sw, sh, bpp, W, H)
+        if box:
+            sw, sh, rows = box
     k = min(W / sw, H / sh)
     if k >= 1.0:                       # nessun ingrandimento: copia l'originale
         import shutil
@@ -1749,10 +1811,10 @@ class DataExportOperations:
                 use_print = sized and _wants_print_capture(width, height)
                 shoot(use_print)
                 if sized and os.path.exists(target):
-                    ww, hh, shrunk = _resize_png(target, filepath, int(width), int(height))
-                    if not shrunk and not use_print:      # finestra piu' piccola del richiesto: ricatturo di stampa
+                    nw, nh = _png_dims(target)
+                    if not use_print and (nw < int(width) or nh < int(height)):   # finestra piu' piccola del richiesto: ricatturo di stampa
                         shoot(True)
-                        ww, hh, shrunk = _resize_png(target, filepath, int(width), int(height))
+                    ww, hh, shrunk = _resize_png(target, filepath, int(width), int(height), recenter=True)
                     os.remove(target)
                     size = (ww, hh)
                     if not shrunk:
@@ -1804,10 +1866,60 @@ class DataExportOperations:
             return self._dx_fail("export_model_image", e, SwErrors.swExportError)
 
     # ====================================================================== import
-    def import_model(self, filepath: str, import_as: str = "solid", units: str = "mm", merge_faces: bool = True) -> Dict:
-        """Apre STEP/IGES/Parasolid/STL (anche SAT, 3MF se supportato) come PEZZO e restituisce i corpi importati con volume e box.
-        import_as (solo STL/VRML): solid | surface | graphics; units (STL): mm|cm|m|inch."""
+    _NEUTRAL_EXT = ("step", "stp", "iges", "igs", "x_t", "x_b", "xmt_txt", "xmt_bin")
+
+    def _import_part_stats(self, doc) -> Dict:
+        """Corpi solidi/superficie, facce e volume (mm3) di un pezzo importato."""
+        st = {"solid_bodies": 0, "surface_bodies": 0, "faces": 0, "volume_mm3": 0.0}
+        for kind, key in ((0, "solid_bodies"), (1, "surface_bodies")):
+            try:
+                for b in (doc.GetBodies2(kind, False) or ()):
+                    st[key] += 1
+                    try:
+                        st["faces"] += int(b.GetFaceCount)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         try:
+            st["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 4)
+        except Exception:
+            pass
+        return st
+
+    def _import_part_bodies(self, doc) -> List[Dict]:
+        """Elenco dei corpi (solidi e superfici) di un pezzo: nome, tipo, volume (mm3), facce."""
+        out = []
+        for kind, label in ((0, "solid"), (1, "surface")):
+            for b in (doc.GetBodies2(kind, False) or ()):
+                info = {"name": str(b.Name), "type": label}
+                try:
+                    mpv = b.GetMassProperties(1.0)
+                    info["volume_mm3"] = round(float(mpv[3]) * 1e9, 4)
+                except Exception:
+                    pass
+                try:
+                    info["faces"] = int(b.GetFaceCount)
+                except Exception:
+                    pass
+                out.append(info)
+        return out
+
+    def import_model(self, filepath: str, import_as: str = "solid", units: str = "mm", step_as: str = None,
+                     interconnect: bool = None, diagnose: bool = False) -> Dict:
+        """Apre STEP/IGES/Parasolid/STL (anche SAT, 3MF se supportato) e restituisce i corpi (o i componenti) importati con volume e box.
+        import_as (solo STL/VRML): solid | surface | graphics; units (STL): mm|cm|m|inch.
+        step_as (STEP/IGES/Parasolid): None = preferenza attuale | "assembly" (preferenza 579 = 0) | "part" (579 = 2, pezzo multicorpo).
+        interconnect: None = lascia | True/False -> toggle 691 (3D Interconnect: l'assieme resta collegato al file sorgente / viene convertito).
+        diagnose: per i pezzi importati, IPartDoc.ImportDiagnosis(CloseAllGaps=True, RemoveFaces=False, FixFaces=True, Options=0).
+        Le preferenze (globali) toccate vengono lette, impostate e ripristinate in un finally; il risultato riporta options_used e,
+        in notes, ogni valore che dopo il ripristino non coincide con l'originale."""
+        try:
+            step_key = None if step_as is None else str(step_as).strip().lower()
+            if step_key not in (None, "assembly", "part"):
+                return self._result(False, "step_as deve essere 'assembly' o 'part'", SwErrors.swInvalidInput)
+            if interconnect is not None and not isinstance(interconnect, bool):
+                return self._result(False, "interconnect deve essere true o false", SwErrors.swInvalidInput)
             if not self.is_connected:
                 r = self.connect()
                 if not r["success"]:
@@ -1817,14 +1929,44 @@ class DataExportOperations:
                 return self._result(False, f"File non trovato: {filepath}", SwErrors.swInvalidInput)
             app = self._sw_app
             ext = os.path.splitext(filepath)[1].lower().lstrip(".")
-            saved = {}
+            notes: List[str] = []
+            options_used: Dict[str, Any] = {}
+            wanted_int: Dict[int, int] = {}
+            wanted_tog: Dict[int, bool] = {}
+            if ext in ("stl", "wrl", "obj", "3mf"):
+                wanted_int[208] = {"graphics": 0, "surface": 1, "solid": 2}.get(import_as.lower(), 2)
+                wanted_int[210] = {"mm": 0, "cm": 1, "m": 2, "inch": 3, "in": 3}.get(units.lower(), 0)
+                options_used["import_as"] = import_as.lower()
+                options_used["units"] = units.lower()
+            if step_key is not None:
+                if ext in self._NEUTRAL_EXT:
+                    wanted_int[579] = 0 if step_key == "assembly" else 2
+                    options_used["step_as"] = step_key
+                else:
+                    notes.append(f"step_as ignorato: vale solo per STEP/IGES/Parasolid (file .{ext})")
+            if interconnect is not None:
+                wanted_tog[691] = interconnect
+                options_used["interconnect"] = interconnect
+            saved_int: Dict[int, int] = {}
+            saved_tog: Dict[int, bool] = {}
+            doc = None
+            e = _byref_i4()
             try:
-                if ext in ("stl", "wrl", "obj", "3mf"):
-                    mt = {"graphics": 0, "surface": 1, "solid": 2}.get(import_as.lower(), 2)
-                    un = {"mm": 0, "cm": 1, "m": 2, "inch": 3, "in": 3}.get(units.lower(), 0)
-                    for k, v in ((208, mt), (210, un)):
-                        saved[k] = app.GetUserPreferenceIntegerValue(k)
-                        app.SetUserPreferenceIntegerValue(k, v)
+                for k, v in wanted_int.items():
+                    saved_int[k] = int(app.GetUserPreferenceIntegerValue(k))
+                    app.SetUserPreferenceIntegerValue(k, v)
+                    got = int(app.GetUserPreferenceIntegerValue(k))
+                    if k == 579:
+                        options_used["pref_579_applied"] = got
+                    if got != v:
+                        notes.append(f"preferenza {k}: impostato {v}, riletto {got}")
+                for k, v in wanted_tog.items():
+                    saved_tog[k] = bool(app.GetUserPreferenceToggle(k))
+                    app.SetUserPreferenceToggle(k, v)
+                    got = bool(app.GetUserPreferenceToggle(k))
+                    options_used["pref_691_applied"] = got
+                    if got != v:
+                        notes.append(f"preferenza {k}: impostato {v}, riletto {got}")
                 idat = None
                 try:
                     idat = app.GetImportFileData(filepath)
@@ -1835,14 +1977,35 @@ class DataExportOperations:
                         idat.MapConfigurationData = False
                     except Exception:
                         pass
-                e = _byref_i4()
                 doc = app.LoadFile4(filepath, "r", idat if idat is not None else null_variant(), e)
             finally:
-                for k, v in saved.items():
+                for k, v in saved_int.items():
                     try:
                         app.SetUserPreferenceIntegerValue(k, v)
                     except Exception:
                         pass
+                for k, v in saved_tog.items():
+                    try:
+                        app.SetUserPreferenceToggle(k, v)
+                    except Exception:
+                        pass
+            prefs_after: Dict[str, Any] = {}
+            for k, v in saved_int.items():
+                try:
+                    now = int(app.GetUserPreferenceIntegerValue(k))
+                    prefs_after[str(k)] = now
+                    if now != v:
+                        notes.append(f"preferenza {k} NON ripristinata: originale {v}, ora {now}")
+                except Exception:
+                    pass
+            for k, v in saved_tog.items():
+                try:
+                    now = bool(app.GetUserPreferenceToggle(k))
+                    prefs_after[str(k)] = now
+                    if now != v:
+                        notes.append(f"preferenza {k} NON ripristinata: originale {v}, ora {now}")
+                except Exception:
+                    pass
             if doc is None:
                 return self._result(False, f"Import fallito (errore {int(e.value)})", SwErrors.swUnknownError)
             title = self._get_doc_title(doc)
@@ -1850,31 +2013,59 @@ class DataExportOperations:
                 app.ActivateDoc3(title, False, 0, _byref_i4())
             except Exception:
                 pass
+            doc_type = int(doc.GetType)
             bodies = []
-            if int(doc.GetType) == 2:
+            comps_top = comps_all = None
+            if doc_type == 2:
                 # assieme: niente corpi diretti, si elencano i componenti di primo livello (il volume e' la somma)
-                for c in (doc.GetComponents(True) or ()):
+                top = doc.GetComponents(True) or ()
+                comps_top = len(top)
+                try:
+                    comps_all = len(doc.GetComponents(False) or ())
+                except Exception:
+                    pass
+                for c in top:
                     try:
                         bodies.append({"name": str(c.Name2), "type": "component"})
                     except Exception:
                         pass
-            for kind, label in (() if int(doc.GetType) == 2 else ((0, "solid"), (1, "surface"))):
-                for b in (doc.GetBodies2(kind, False) or ()):
-                    info = {"name": str(b.Name), "type": label}
+            else:
+                bodies = self._import_part_bodies(doc)
+            diagnosis = None
+            if diagnose:
+                if doc_type != 1:
+                    diagnosis = {"skipped": "la diagnosi vale solo per i pezzi (il documento importato e' un assieme)"}
+                else:
+                    before = self._import_part_stats(doc)
+                    diagnosis = {"bodies_before": {"solid": before["solid_bodies"], "surface": before["surface_bodies"]},
+                                 "faces_before": before["faces"], "volume_before_mm3": before["volume_mm3"]}
                     try:
-                        mpv = b.GetMassProperties(1.0)
-                        info["volume_mm3"] = round(float(mpv[3]) * 1e9, 4)
-                    except Exception:
-                        pass
-                    try:
-                        info["faces"] = int(b.GetFaceCount)
-                    except Exception:
-                        pass
-                    bodies.append(info)
+                        diagnosis["return_code"] = int(doc.ImportDiagnosis(True, False, True, 0))
+                    except Exception as ex:
+                        diagnosis["error"] = str(ex)[:300]
+                    after = self._import_part_stats(doc)
+                    diagnosis["bodies_after"] = {"solid": after["solid_bodies"], "surface": after["surface_bodies"]}
+                    diagnosis["faces_after"] = after["faces"]
+                    diagnosis["volume_after_mm3"] = after["volume_mm3"]
+                    bodies = self._import_part_bodies(doc)
             box = self._dx_box_m(doc)
             vol = self._volume_m3(doc) * 1e9
-            data = {"title": title, "document_type": int(doc.GetType), "bodies": bodies, "volume_mm3": round(vol, 4),
-                    "source": filepath}
+            data = {"title": title, "document_type": doc_type, "bodies": bodies, "volume_mm3": round(vol, 4),
+                    "source": filepath, "options_used": options_used}
+            if prefs_after:
+                data["preferences_after_restore"] = prefs_after
+            if comps_top is not None:
+                data["components_top"] = comps_top
+                data["components_all"] = comps_all
+            if interconnect is not None:
+                data["interconnect_note"] = (
+                    "3D Interconnect attivo: il documento resta collegato al file sorgente (titolo senza estensione SolidWorks)"
+                    if interconnect else
+                    "3D Interconnect spento: il file e' stato convertito in documenti SolidWorks (.SLDPRT/.SLDASM), senza collegamento alla sorgente")
+            if diagnosis is not None:
+                data["diagnosis"] = diagnosis
+            if notes:
+                data["notes"] = notes
             if box:
                 data["bbox_min_mm"] = [round(v * 1000, 4) for v in box[:3]]
                 data["bbox_max_mm"] = [round(v * 1000, 4) for v in box[3:]]

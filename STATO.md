@@ -10,7 +10,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Server registrato come `solidworks` in `~/.claude.json` e in `%APPDATA%\Claude\claude_desktop_config.json`.
 
 ## Cosa c'e'
-196 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 30 dati/export, 18 simulazione statica.
+197 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 18 simulazione statica.
 
 | Area | Stato | Test live (ultima regressione, 2026-10-17) |
 |---|---|---|
@@ -30,11 +30,13 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Prima di cercare un'API, leggere le trappole gia' note in `STATO_STORICO.md` e nei docstring dei moduli `automation/`.
 
 ## Aperto
-- **Gruppo D** (dati ed export) e **gruppo E** (simulazione): tutto da fare, piano in `PIANO_D_E.md`.
+- **Gruppo D** chiuso (fase 3, 2026-10-17): tutto `[x]` tranne D2 `[~]` (AP242 non scrivibile). **Gruppo E** (simulazione): da fare, piano in `PIANO_D_E.md`.
 - Parziale: C3 (rotazione nei passi di traslazione dell'esploso: solo attorno alla direzione radiale, con un passo radiale di distanza 0).
 - Residuo visivo non bloccante: nella tavola del cuneo la vista ausiliaria non sta sulla perpendicolare allo spigolo.
 - Preferenze di SolidWorks cambiate durante lo sviluppo di cui non si conosce il valore originale: qualita' STL (int 78 = 2 fine)
   e tipo di import STL (int 208 = 2 solido). Controllare in Opzioni > Esporta/Importa se si notano differenze.
+- 2026-10-17 (sonda D4): le preferenze della cattura TIFF/stampa valevano DPI (int 9) = 1 e carta (double 8/9) = 0,1 m, valori che
+  SolidWorks non riaccetta: ora sono 300 DPI e Letter (0,2794 x 0,2159 m). Contano solo per "Salva come TIFF/immagine" in modalita' stampa.
 - `_dx_inspect_step` ha due contatori nuovi (struttura d'assieme) non ancora provati su uno STEP scritto da SolidWorks:
   rieseguire `test_data_live.py`.
 - Preferenze anti-finestre di dialogo (toggle 10, 96, 100, 101): fino al 2026-10-12 restavano cambiate per sempre (anche sull'istanza
@@ -102,7 +104,9 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   Test C5 82/82: B/A = -2,0000, vite 0,5000 mm per 90 gradi, blocco fermo sotto un angolo imposto.
 - **C3 resta `[~]`**: `RotationAngle` non scrivibile; un passo radiale con distanza 0 ruota di 45,0000 gradi ma solo attorno alla direzione
   radiale (il `rotation_note` del tool ora lo suggerisce). Prove in `scripts_tmp/c3p1..4.py`.
-- Regressione completa `testsun_all.py`, exit 0, tutto verde (`test_output/regressione_20261017_1604.md`, log `%TEMP%egr_f2.log`):
+- Regressione completa `tests
+un_all.py`, exit 0, tutto verde (`test_output/regressione_20261017_1604.md`, log `%TEMP%
+egr_f2.log`):
   offline 83/83, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113,
   assembly_extra 214/214, data 159/159, simulation 120/120. 0 processi SolidWorks rimasti.
 
@@ -157,7 +161,7 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
 - **FASE 5 CHIUSA** (criterio del piano: 1-4 provati dal vivo, 5-9 coperti dal test offline). Rinviato, facoltativo: 5.10 risorse e
   prompt MCP (si puo' fare durante la fase 6, se le prove d'uso lo chiedono).
 
-## Fase 3 (2026-10-17, gruppo D) — IN CORSO
+## Fase 3 (2026-10-17, gruppo D) — CHIUSA (regressione completa: vedi sotto)
 - **D5 `[x]`**: `export_model_image(hide_reference=true)` sugli assiemi nasconde anche i riferimenti dei componenti (toggle di documento
   198, salvato e ripristinato). `test_data_live` 168/168 (sez. 11: 1596 / 0 / 1596 pixel azzurri). Trappola: nell'assieme la
   visualizzazione dei piani e' spenta di default (dettagli in `STATO_STORICO.md`).
@@ -168,6 +172,12 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   135456,7664 contro 135456,8204 mm3. Da fare: il messaggio del per-componente mostra "0 byte" per il file base (cosmetico).
   Regressione completa non rifatta dopo queste modifiche: offline 103/103 (OK); `test_data_live` completo sì.
 
+- **Fase 3, resto del gruppo D** (2026-10-17): nuovo file `tests/test_data_extra_live.py` (sezioni D7 D8 D1 D10 D4 D9 D2 D3, anche in
+  `run_all.py` come `data_extra`). Codice scritto da sotto-agenti in worktree, riportato su main e provato dal vivo sezione per sezione:
+  D7 (convenzione: GetMomentOfInertia da' i PRODOTTI d'inerzia), D8, D1 (nuovo tool `apply_configuration_table`: 197 tool), D10,
+  D2 `[~]`, D3 (verifica strutturale; eDrawings non automatizzabile), D4 (cattura di stampa + ricentratura, prospettiva), D9
+  (step_as/interconnect/diagnose). Numeri in `LIMITI.md`, trappole in `STATO_STORICO.md`. Offline 147/147.
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2 e 5 chiuse. Fase 3 in corso: D5 e D6 chiuse; prossima D7
-(proprietà di massa nel sistema di coordinate utente), poi D8, D1, D10, D4, D9, D2, D3.
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2, 3 e 5 chiuse. Prossima: fase 4 (gruppo E, simulazione:
+E3 -> E5 -> E1 -> E4 -> E2), poi 6 (prove d'uso reali) e 7 (rilascio).

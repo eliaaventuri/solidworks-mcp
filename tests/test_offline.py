@@ -354,6 +354,23 @@ def test_png(tmp):
     record("D4 DPI: 3840x2160 -> 350, 900x600 -> 100 (minimo), 20000x10000 -> 600 (tetto)",
            (dx._print_dpi(3840, 2160), dx._print_dpi(900, 600), dx._print_dpi(20000, 10000)) == (350, 100, 600),
            f"{dx._print_dpi(3840, 2160)} {dx._print_dpi(900, 600)} {dx._print_dpi(20000, 10000)}")
+    # D4: ricentratura sul contenuto (sfondo bianco, quadrato nero 20x20 spostato a destra in un'immagine 200x100)
+    cp = os.path.join(tmp, "offc.png")
+    crow = [bytes((255, 255, 255)) * 140 + bytes((0, 0, 0)) * 20 + bytes((255, 255, 255)) * 40 if 40 <= y < 60
+            else bytes((255, 255, 255)) * 200 for y in range(100)]
+    dx._write_png(cp, 200, 100, crow)
+    record("D4 _png_dims legge 200x100 dall'intestazione", dx._png_dims(cp) == (200, 100), str(dx._png_dims(cp)))
+    co = os.path.join(tmp, "offc_out.png")
+    dx._resize_png(cp, co, 80, 40, recenter=True)
+    cw, chh, cb, crows = dx._read_png(co)
+    blk = [(x, y) for y in range(chh) for x in range(cw) if crows[y][x * cb] < 128]
+    cx = (min(p[0] for p in blk) + max(p[0] for p in blk)) / 2 if blk else -1
+    cy = (min(p[1] for p in blk) + max(p[1] for p in blk)) / 2 if blk else -1
+    record("D4 recenter: quadrato fuori centro -> centrato (entro 1 px) nell'immagine 80x40", (cw, chh) == (80, 40) and abs(cx - 39.5) <= 1
+           and abs(cy - 19.5) <= 1, f"{cw}x{chh} centro ({cx}, {cy})")
+    sp = os.path.join(tmp, "grad.png")
+    dx._write_png(sp, 4, 4, [bytes((y * 60, 0, 0)) * 4 for y in range(4)])
+    record("D4 recenter: sfondo non uniforme -> nessun ritaglio", dx._recenter_box(dx._read_png(sp)[3], 4, 4, 3, 2, 2) is None)
     record("D4 DPI: la Letter a quei DPI copre WxH", all(11 * dx._print_dpi(a, b) >= a and 8.5 * dx._print_dpi(a, b) >= b
                                                          for a, b in ((3840, 2160), (2100, 2000), (1000, 3000), (2500, 1500))))
 

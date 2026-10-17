@@ -1,6 +1,6 @@
 # CLAUDE.md — istruzioni per lavorare su SolidWorks MCP
 
-Server MCP (Python, COM via pywin32) che espone 196 tool per SolidWorks 2026 (interfaccia italiana o inglese). Si lavora in italiano.
+Server MCP (Python, COM via pywin32) che espone 197 tool per SolidWorks 2026 (interfaccia italiana o inglese). Si lavora in italiano.
 Lo sviluppo vero avviene sul PC di Elia (Windows 11 ARM64, SolidWorks 2026 SP4.1 Student, Python x64 in `.venv`).
 
 ## Da leggere all'inizio di ogni sessione

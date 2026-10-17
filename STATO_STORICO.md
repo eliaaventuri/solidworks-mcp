@@ -524,3 +524,29 @@ Prossimo passo, sul PC con SolidWorks: seguire l'ordine indicato in `PIANO_D_E.m
   - Il test leggeva "il blocco" dopo aver aperto il cilindro senza chiuderlo (`open_document` non cambia il documento attivo):
     misurava il cilindro due volte. Ora il cilindro viene chiuso dopo il salvataggio.
   - Il test per componente contava solo i file, ignorando `ok`: ora conta anche l'esito.
+
+## Gruppo D, resto (D7 D8 D1 D10 D4 D9 D2 D3) — 2026-10-17
+- Metodo: sotto-agenti in git worktree (codice + test offline + sezione live scritta), riporto su main con `git diff` + `git apply --3way`.
+  Trappola: i worktree degli agenti partono dal commit di `origin` (vecchio), non da HEAD -> far fare `git reset --hard <sha>` come primo passo.
+- D7: `GetMomentOfInertia(0/1)` restituisce i termini fuori diagonale come PRODOTTI d'inerzia (segno opposto al tensore): misurato con un
+  prisma ruotato di 30 gradi e baricentro fuori dagli assi. `IMassProperty2.SetCoordinateSystem(transform)` + `Recalculate` funziona e
+  coincide col calcolo in Python (3,8e-17). `GetCoordinateSystemTransformByName(...).ArrayData`: righe della rotazione = assi del sistema.
+- D8: `swFileLocationsMaterialDatabases` = 28 e' una preferenza STRINGA (`GetUserPreferenceStringValue`); sul PC contiene gia' 4 cartelle
+  (Materiali personalizzati, Custom Materials, ...). Un `.sldmat` minimo (UTF-16 con BOM, struttura copiata da un materiale vero) viene
+  accettato da `SetMaterialPropertyName2`.
+- D1: `InsertDesignTable` non esiste nella type library (solo `GetDesignTable`/`IDesignTable`); Excel non installato.
+- D4: la cattura a schermo dell'istanza nascosta e' 2389 x 1662. Con `swTiffScreenOrPrintCapture` (int 6) = 1 il SaveAs PNG/JPG/TIF usa la
+  stampa: carta `swTiffPrintPaperSize` (int 10) 0 = Letter orizzontale (3300 x 2550 a 300 DPI), 11 = A0 (14043 x 9933); le double 8/9
+  (larghezza/altezza carta) non contano. Valori originali 9 = 1 DPI e 8/9 = 0,1 m NON riaccettati (ora 300 e Letter). SolidWorks non
+  centra il modello nella cattura (centro a +12 % in X, -3 % in Y): ritaglio sul contenuto con soglia 40 per canale (i bordi quasi bianchi
+  spostavano il centro). `AddPerspective`/`RemovePerspective`/`HasPerspective` su `ActiveView` funzionano; RealView non si attiva
+  (`Extension.ViewDisplayRealView` resta False), occlusione ambientale toggle 485 = False. Sonda: `scripts_tmp/dprobe.py`.
+- D2: `swStepAP` = 75 accetta 242 (riletto) ma il file e' `CONFIG_CONTROL_DESIGN` (AP203); `swStepExportPreference` = 142 a 0..2 non
+  cambia nulla (3 rifiutato). AP214 funziona.
+- D9: `swImportNeutralAssemblyStructureMapping` = 579: 0/1 assieme, 2 pezzo multicorpo (3 rifiutato). `swMultiCAD_Enable3DInterconnect` = 691
+  True: assieme collegato allo STEP (1 componente di primo livello, 4 in tutto); False: convertito (3 componenti). Toggle 701 e 220 senza
+  effetto su questo file. `IPartDoc.ImportDiagnosis(True, False, True, 0)` ripara uno STEP senza una faccia: da 1 superficie a 1 solido
+  di 120000 mm3 (codice 1). Nei file STEP di SolidWorks la sintassi e' `#12 = ADVANCED_FACE ( ...` (spazi prima della parentesi).
+- D3: `.eprt`/`.easm` sono ZIP (`eModel` HSF V20.90, `preview.jpg`, `materials.xml` con un `<Entity>` per CORPO DISTINTO: assieme con
+  3 istanze di 2 pezzi -> 2). `EModelView.EModelViewApp` (in-process) resta non inizializzato anche dopo `Init(False)`: `OpenFile` E_FAIL e
+  poi crash di Python; `eDrawings.exe <file>` mostra sempre il titolo "eDrawings". Verifica quindi strutturale.

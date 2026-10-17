@@ -117,8 +117,15 @@ _TOOLS = {
         "Read and verify an exported file: STL (triangles, bounding box), 3MF, STEP (schema, MANIFOLD_SOLID_BREP), IGES, Parasolid, 3D PDF.",
         {"filepath": (S, "Path of the file to inspect")}, ["filepath"]),
     "import_model": ("import_model",
-        "Open STEP/IGES/Parasolid/STL as a part and return the imported bodies (volume, box). STL: import_as solid|surface|graphics, units.",
-        {"filepath": (S, "Path of the file to import"), "import_as": (S, "solid | surface | graphics (STL)"), "units": (S, "mm | cm | m | inch (STL)")}, ["filepath"]),
+        "Open STEP/IGES/Parasolid/STL and return the imported bodies (or, for an assembly, the components) with volume and box. "
+        "STL: import_as solid|surface|graphics, units. STEP/IGES/Parasolid: step_as assembly|part chooses an assembly with components or a "
+        "multibody part; interconnect true|false chooses whether the document stays linked to the source file (3D Interconnect) or is converted; "
+        "diagnose=true runs the import diagnosis/repair on imported parts and reports bodies, faces and volume before/after. "
+        "The global import preferences are restored after the call (options_used lists what was applied).",
+        {"filepath": (S, "Path of the file to import"), "import_as": (S, "solid | surface | graphics (STL)"), "units": (S, "mm | cm | m | inch (STL)"),
+         "step_as": (S, "assembly | part (STEP/IGES/Parasolid): keep the structure as an assembly of components, or merge it into one multibody part; default = current SolidWorks setting"),
+         "interconnect": (B, "3D Interconnect: true = assembly stays linked to the source file, false = converted to SolidWorks documents; default = current setting"),
+         "diagnose": (B, "Run import diagnosis and repair (close gaps, fix faces) on an imported part; result.diagnosis has before/after numbers (default false)")}, ["filepath"]),
     "export_model_image": ("export_model_image",
         "PNG/JPG/BMP image of the part/assembly. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
         "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height in pixels (PNG only, both needed); hide_reference=true (default) "

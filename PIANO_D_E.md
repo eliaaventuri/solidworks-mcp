@@ -334,7 +334,7 @@ dell'utente). Le trascrizioni utili vanno in `docs/esempi/` come esempi per il R
   traslazione + un passo di sola rotazione sullo stesso componente. Verifica: angolo letto dalla matrice esplosa (come per il radiale).
 
 ## Problemi noti ancora aperti nel codice
-- `import_model(merge_faces=...)`: parametro del metodo mai usato, non esposto nello schema (si sistema con D9).
+- ~~`import_model(merge_faces=...)`~~: tolto con D9 (2026-10-17).
 - `create_static_study(analysis=...)`: parametro del metodo ignorato, non esposto nello schema; lo studio e' sempre statico (si sistema con E5).
 - `_as_collapse` (assiemi) chiude la PRIMA vista esplosa della configurazione, non necessariamente quella attiva: con piu' viste
   esplose potrebbe non richiudere quella mostrata (da verificare quando capita; basso impatto).

@@ -31,6 +31,8 @@ solidworks_mcp/
   utils/config_table.py       D1: lettura/controllo della tabella delle configurazioni (CSV/JSON) e piano delle modifiche (puro)
   utils/inertia.py            D7: baricentro e tensore d'inerzia in un sistema di coordinate utente (puro)
   utils/pdf3d.py              D10: lettura della struttura 3D di un PDF (stream PRC/U3D, viste), usata da inspect_export_file
+  utils/matlib.py             D8: cartelle delle librerie dei materiali (preferenza 28), firma per la cache, duplicati, .sldmat minimo (puro)
+  utils/edrawings.py          D3: verifica strutturale dei file eDrawings (ZIP, eModel HSF, corpi distinti, anteprima) (puro)
   utils/sw_lang.py            G1: tutto cio' che dipende dalla lingua di SolidWorks (piani standard, grafici, testi delle tavole, cartelle lang)
   automation/                 un mixin per area, riuniti in SolidWorksAutomation (__init__.py)
     base.py                   connessione COM (istanza dell'utente o dedicata con SW_MCP_INSTANCE=dedicated), helper _com, template, piani standard
@@ -69,6 +71,7 @@ tests/test_drawing_quality_live.py qualita' delle tavole (sovrapposizioni, dupli
 tests/test_assembly_live.py        assiemi (perno-staffa-boccola-viti, esploso, tavola, interferenze)
 tests/test_assembly_extra_live.py  gruppo C (sotto-assiemi, specchiatura, esplosi, accoppiamenti avanzati, DOF); argomenti C1 C5 ..., CX_REUSE=1
 tests/test_data_live.py            dati ed export (materiali, massa, equazioni, configurazioni, export/import, misure, immagini)
+tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3), argomenti per sezione: test_data_extra_live.py D7 D1
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
 tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
