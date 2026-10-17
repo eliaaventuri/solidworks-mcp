@@ -9,8 +9,12 @@ Due sessioni del server, ognuna con la sua istanza dedicata (SW_MCP_TOOL_TIMEOUT
   B. blocco fuori da COM: execute_python con time.sleep(40).
      Atteso: errore dopo ~15 s; un tool chiamato subito dopo viene rifiutato (tool precedente ancora in corso) senza aspettare;
      finito lo sleep il server risponde di nuovo.
+  C. ripresa (5.2, SW_MCP_AUTORESTART=1): connect chiamato due volte con l'istanza viva -> successo; PID dedicato ucciso a meta'
+     -> il tool seguente rilancia l'istanza (PID nuovo) e avverte che i documenti sono persi; il lavoro riprende.
 L'istanza di SolidWorks dell'utente non viene toccata; alla fine 0 processi orfani.
 """
+
+import subprocess
 
 import os
 import sys
@@ -31,13 +35,16 @@ def record(name, ok, note=""):
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  -- {note}" if note else ""))
 
 
-async def session_run(label, scenario, elia_pids):
+async def session_run(label, scenario, elia_pids, extra_env=None):
     env = dict(os.environ)
     env["SW_MCP_INSTANCE"] = "dedicated"
     env["SW_MCP_TOOL_TIMEOUT"] = str(TIMEOUT_S)
     env["SW_MCP_ALLOW_PYTHON"] = "1"
+    env.pop("SW_MCP_AUTORESTART", None)
+    env.update(extra_env or {})
     params = StdioServerParameters(command=str(PYTHON), args=[str(SERVER)], env=env, cwd=str(ROOT))
     my_pid = None
+    extra_pids = []
     try:
         async with stdio_client(params) as (rd, wr):
             async with ClientSession(rd, wr, read_timeout_seconds=timedelta(seconds=600)) as session:
@@ -50,12 +57,36 @@ async def session_run(label, scenario, elia_pids):
                     record(f"{label}: istanza dedicata avviata", False, text[:150])
                     return
                 record(f"{label}: istanza dedicata avviata", True, f"PID {my_pid}")
-                await scenario(c, my_pid)
+                extra_pids = await scenario(c, my_pid, elia_pids) or []
     finally:
+        for pid in extra_pids:                            # istanze rilanciate dal server durante il test (mai quelle dell'utente)
+            if pid and pid not in elia_pids and pid in sw_pids():
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
         cleanup(my_pid, elia_pids)
 
 
-async def scenario_com_block(c, pid):
+async def scenario_restart(c, pid, elia_pids):
+    ok, text, data = await c.call("connect_solidworks")
+    record("C: connect una seconda volta con l'istanza viva -> successo, stesso PID", ok and data.get("pid") == pid, text[:100])
+    ok, text, _ = await c.call("create_new_part")
+    record("C: pezzo creato prima del crash", ok, text[:60])
+    subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+    time.sleep(3)
+    record("C: PID dedicato ucciso a meta' test", pid not in sw_pids(), f"PID {pid}")
+    before = sw_pids()
+    t0 = time.time()
+    ok, text, _ = await c.call("create_new_part")
+    dt = time.time() - t0
+    new = sorted(sw_pids() - before - elia_pids)
+    record("C: il tool seguente rilancia l'istanza e riesce", ok and len(new) == 1 and new[0] != pid, f"{dt:.0f} s, nuovi PID {new}: {text[:80]}")
+    record("C: il risultato avverte del rilancio e dei documenti persi",
+           "ATTENZIONE" in text and str(pid) in text and "persi" in text, text[:160])
+    ok2, text2, _ = await c.call("create_sketch", plane="Piano frontale")
+    record("C: il lavoro riprende sulla nuova istanza (schizzo creato), avviso non ripetuto", ok2 and "ATTENZIONE" not in text2, text2[:80])
+    return new
+
+
+async def scenario_com_block(c, pid, elia_pids):
     ok, text, _ = await c.call("create_new_part")
     record("A: tool normale eseguito sul thread COM", ok, text[:80])
     t0 = time.time()
@@ -75,7 +106,7 @@ async def scenario_com_block(c, pid):
     record("A: connect spiega che l'istanza e' persa e il server va riavviato", (not ok) and "riavvia" in text.lower(), text[:160])
 
 
-async def scenario_sleep(c, pid):
+async def scenario_sleep(c, pid, elia_pids):
     t0 = time.time()
     ok, text, _ = await c.call("execute_python", code="import time\ntime.sleep(40)\nprint('fine')")
     dt = time.time() - t0
@@ -96,6 +127,7 @@ async def run():
     print(f"Istanze SolidWorks gia' presenti (da non toccare): {sorted(elia_pids)}")
     await session_run("A", scenario_com_block, elia_pids)
     await session_run("B", scenario_sleep, elia_pids)
+    await session_run("C", scenario_restart, elia_pids, {"SW_MCP_AUTORESTART": "1"})
     left = sw_pids() - elia_pids
     record("0 processi SolidWorks orfani, istanza utente intatta", not left and elia_pids <= sw_pids(), f"orfani {sorted(left)}")
 

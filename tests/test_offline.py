@@ -775,6 +775,50 @@ def test_worker_timeout():
         srv.sw_automation = real
 
 
+# ============================================================================ 5.2 ripresa dell'istanza dedicata
+def test_autorestart():
+    saved_env = {k: os.environ.get(k) for k in ("SW_MCP_INSTANCE", "SW_MCP_AUTORESTART")}
+    real_srv = srv.sw_automation
+    try:
+        os.environ["SW_MCP_INSTANCE"] = "dedicated"
+        os.environ.pop("SW_MCP_AUTORESTART", None)
+        a = SolidWorksAutomation()
+        a._ui_language = lambda: "italian"
+        launches = []
+
+        def fake_launch():
+            launches.append(1)
+            a._dedicated_pid = 456
+            return a._result(True, "Connected to dedicated SolidWorks (PID 456)", data={"pid": 456, "dedicated": True})
+        a._connect_dedicated = fake_launch
+
+        a._dedicated_pid, a._sw_app, a._connected = 123, types.SimpleNamespace(RevisionNumber="34.4.1"), True
+        r = a.connect()
+        record("connect con istanza dedicata viva: successo, nessun rilancio", r["success"] and not launches and a._dedicated_pid == 123,
+               r["message"][:70])
+
+        a._sw_app, a._connected = None, False
+        r = a.connect()
+        record("istanza persa senza SW_MCP_AUTORESTART: errore che lo nomina, nessun rilancio",
+               not r["success"] and "SW_MCP_AUTORESTART" in r["message"] and not launches, r["message"][:90])
+
+        os.environ["SW_MCP_AUTORESTART"] = "1"
+        srv.sw_automation = a
+        text = asyncio.run(srv.call_tool("connect_solidworks", {}))[0].text
+        record("istanza persa con SW_MCP_AUTORESTART=1: rilanciata, avviso dei documenti persi nel risultato del tool",
+               launches == [1] and a._dedicated_pid == 456 and text.startswith("[SUCCESS] ATTENZIONE") and "123" in text
+               and "persi" in text, text[:110])
+        text = asyncio.run(srv.call_tool("get_solidworks_info", {}))[0].text
+        record("l'avviso compare una volta sola", "ATTENZIONE" not in text, text[:60])
+    finally:
+        srv.sw_automation = real_srv
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -786,7 +830,8 @@ def main():
                          ("configurazione", lambda: test_config(tmp)), ("lingua", test_language),
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units),
-                         ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout)):
+                         ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
+                         ("ripresa", test_autorestart)):
             try:
                 fn()
             except Exception as e:

@@ -450,7 +450,9 @@ def _timeout_message(name: str, timeout: float) -> str:
             sw_automation._sw_app = None
             sw_automation._connected = False
             return (f"il tool '{name}' ha superato {timeout:.0f} s. L'istanza dedicata di SolidWorks (PID {pid}) e' stata chiusa "
-                    "perche' bloccata; i documenti non salvati sono persi. Il server andra' riavviato per riprendere.")
+                    "perche' bloccata; i documenti non salvati sono persi. "
+                    + ("Il prossimo tool la rilancia (SW_MCP_AUTORESTART=1)." if sw_automation.autorestart_enabled()
+                       else "Per riprendere: riavviare il server MCP, oppure impostare SW_MCP_AUTORESTART=1."))
         return (f"il tool '{name}' ha superato {timeout:.0f} s e l'istanza dedicata (PID {pid}) non si e' chiusa: "
                 "terminarla da Gestione attivita'.")
     return (f"il tool '{name}' ha superato {timeout:.0f} s. SolidWorks potrebbe essere bloccato da una finestra di dialogo: "
@@ -462,14 +464,23 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
     try:
         if sw_automation._sw_app is not None:
             sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
+        result = None
         if name in SPECIAL_HANDLERS:
-            return SPECIAL_HANDLERS[name](arguments)
-        for table in DISPATCH_TABLES:
-            if name in table:
-                method, allowed = table[name]
-                kwargs = {k: v for k, v in arguments.items() if k in allowed}
-                return getattr(sw_automation, method)(**kwargs)
-        return sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+            result = SPECIAL_HANDLERS[name](arguments)
+        else:
+            for table in DISPATCH_TABLES:
+                if name in table:
+                    method, allowed = table[name]
+                    kwargs = {k: v for k, v in arguments.items() if k in allowed}
+                    result = getattr(sw_automation, method)(**kwargs)
+                    break
+            else:
+                result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+        notice = sw_automation.__dict__.pop("_restart_notice", None)    # istanza dedicata rilanciata durante questo tool
+        if notice and isinstance(result, dict):
+            result["message"] = f"{notice} {result.get('message', '')}"
+            result.setdefault("data", {})["instance_restarted"] = True
+        return result
     finally:
         try:
             sw_automation._restore_prefs()      # preferenze anti-finestre di dialogo: valori originali dopo ogni tool

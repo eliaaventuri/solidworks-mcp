@@ -67,12 +67,20 @@ claude mcp add solidworks -- C:\percorso\solidworks-mcp\.venv\Scripts\python.exe
 Avviare SolidWorks, riavviare il client e chiedere *"collegati a SolidWorks"*.
 
 ## Configurazione
-- `solidworks_mcp/config.json`: percorso di `SLDWORKS.exe` (`auto` = ricerca automatica), timeout di avvio, unita' predefinita, livello e file di log.
+- `solidworks_mcp/config.json`: percorso di `SLDWORKS.exe` (`auto` = ricerca automatica), timeout di avvio, tempo massimo di un tool
+  (`tool_timeout`, default 300 s), unita' predefinita, livello e file di log (in `%LOCALAPPDATA%\solidworks-mcp\`, 5 file da 5 MB).
   I template di pezzo/assieme/disegno sono quelli predefiniti di SolidWorks (Opzioni > Modelli predefiniti).
 - Variabili d'ambiente:
   - `SW_MCP_INSTANCE=dedicated`: invece di usare il SolidWorks aperto dall'utente, il server avvia una **propria istanza nascosta** e
     alla fine chiude solo quella (e' la modalita' dei test).
   - `SW_MCP_EXE`, `SW_MCP_ARGS` (default `/r`), `SW_MCP_STARTUP_TIMEOUT` (default 240 s): avvio dell'istanza dedicata.
+  - `SW_MCP_TOOL_TIMEOUT`: tempo massimo di un tool in secondi (sostituisce `tool_timeout`). Allo scadere il server risponde con un
+    errore; con l'istanza dedicata la chiude, con quella dell'utente non la tocca.
+  - `SW_MCP_AUTORESTART=1`: se l'istanza dedicata muore o viene chiusa per timeout, il tool seguente la rilancia e avverte che i
+    documenti aperti sono persi (senza: errore che chiede di riavviare il server).
+  - `SW_MCP_TOOLSETS`: gruppi di tool esposti al client, es. `base,modeling,drawings` (gruppi: `base` sempre attivo, `modeling`,
+    `drawings`, `assembly`, `data`, `simulation`; default tutti). Riduce le descrizioni inviate al modello.
+  - `SW_MCP_ALLOW_PYTHON=1`: attiva `execute_python` (esegue codice arbitrario; disattivato di default).
 
 ## Test
 ```bash

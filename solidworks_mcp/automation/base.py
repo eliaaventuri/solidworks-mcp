@@ -191,6 +191,35 @@ class SolidWorksAutomation:
             except Exception:
                 pass
 
+    @staticmethod
+    def autorestart_enabled() -> bool:
+        """SW_MCP_AUTORESTART=1: se l'istanza dedicata e' persa, il tool seguente la rilancia (documenti aperti persi)."""
+        return os.environ.get("SW_MCP_AUTORESTART", "").strip() == "1"
+
+    def _restart_dedicated(self, lost_pid: int) -> Dict:
+        """Rilancia l'istanza dedicata persa. Chiude prima il SUO processo se e' ancora vivo (mai altri PID).
+        L'avviso resta in `_restart_notice`: il server lo aggiunge al risultato del tool che ha causato il rilancio."""
+        proc = self._dedicated_proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(timeout=30)
+            except Exception as e:
+                logger.warning(f"chiusura dell'istanza dedicata persa (PID {lost_pid}): {e}")
+        self._sw_app = None
+        self._connected = False
+        self._dedicated_pid = None
+        self._dedicated_proc = None
+        self.__dict__.pop("_saved_prefs", None)
+        logger.warning(f"istanza dedicata PID {lost_pid} persa: rilancio (SW_MCP_AUTORESTART=1)")
+        r = self._connect_dedicated()
+        if r["success"]:
+            notice = (f"ATTENZIONE: l'istanza dedicata di SolidWorks (PID {lost_pid}) era persa ed e' stata rilanciata "
+                      f"(nuovo PID {self._dedicated_pid}); i documenti aperti e non salvati in quella istanza sono persi.")
+            self._restart_notice = notice
+            r.setdefault("data", {})["restarted_after_loss_of_pid"] = lost_pid
+        return r
+
     def shutdown_dedicated(self) -> Dict:
         """Close ONLY the dedicated instance (ExitApp, then kill of its exact PID if needed)."""
         pid = self._dedicated_pid
@@ -274,10 +303,19 @@ class SolidWorksAutomation:
             
             if self.is_dedicated_mode():
                 if self._dedicated_pid:
-                    # never relaunch silently: the private instance was lost (crash/closed)
-                    return self._result(False,
-                        f"L'istanza dedicata SolidWorks (PID {self._dedicated_pid}) non risponde piu': "
-                        "riavvia il server MCP.", SwErrors.swConnectionError)
+                    pid = self._dedicated_pid
+                    if self.is_connected:           # istanza viva: niente rilancio
+                        version = self._com(self._sw_app, "RevisionNumber")
+                        return self._result(True, f"Already connected to dedicated SolidWorks {version} (PID {pid})",
+                                            SwErrors.swSuccess,
+                                            {"version": str(version), "launched": False, "pid": pid, "dedicated": True,
+                                             "ui_language": self._ui_language()})
+                    if not self.autorestart_enabled():
+                        # mai rilanciare senza permesso: l'istanza privata e' persa (crash, chiusa o bloccata)
+                        return self._result(False,
+                            f"L'istanza dedicata SolidWorks (PID {pid}) non risponde piu': riavvia il server MCP "
+                            "(oppure imposta SW_MCP_AUTORESTART=1 per rilanciarla da sola).", SwErrors.swConnectionError)
+                    return self._restart_dedicated(pid)
                 return self._connect_dedicated()
             
             # Step 1: Try connecting to running instance

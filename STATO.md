@@ -136,10 +136,15 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   log `%TEMP%\regr_f5.log`): offline 95/95, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139,
   assembly 113/113, assembly_extra 214/214, data 159/159, simulation 120/120, timeout 11/11. 0 processi SolidWorks rimasti.
   Barra di avanzamento della regressione: `scripts_tmp/regr.ps1` (non versionato). 5.1 FATTO.
-- **Non ancora fatti**: 5.2 ripresa dopo crash (riavvio automatico dell'istanza dedicata, da provare dal vivo),
-  5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).
+- **5.2 ripresa (2026-10-17) FATTO**: `SW_MCP_AUTORESTART=1` -> se l'istanza dedicata e' persa (crash, chiusa, uccisa dal timeout)
+  il tool seguente la rilancia (`base._restart_dedicated`: chiude solo il SUO processo se ancora vivo) e il risultato di quel tool
+  comincia con "ATTENZIONE: ... rilanciata (nuovo PID ...); i documenti aperti ... sono persi" (una volta sola). Senza la variabile:
+  errore che la nomina. Corretto anche il bug di `connect_solidworks` chiamato due volte con l'istanza viva (ora successo, stesso PID).
+  Offline 99/99; dal vivo `test_timeout_live.py` **18/18** (C: PID ucciso, tool seguente riparte in 15 s con PID nuovo, schizzo creato
+  sulla nuova istanza, 0 orfani); `run_all.py data` 159/159. Regressione completa non rifatta: il percorso di connessione dei test
+  (primo `connect`) non e' cambiato. README: variabili d'ambiente nuove documentate.
+- **Non ancora fatti**: 5.6 descrizioni in inglese, CI pyflakes stretto, 5.10 risorse/prompt MCP (facoltativo).
 
 ## Prossimo passo
 Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Fase 5 parziale (vedi sopra): prossimo passo
-5.2 (riavvio automatico dell'istanza dedicata dopo crash/timeout, insieme al bug di `connect` chiamato due volte), poi 5.6
-(descrizioni in inglese) e CI pyflakes. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
+5.6 (descrizioni in inglese) e CI pyflakes. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
