@@ -20,7 +20,7 @@ from typing import Optional, Dict
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwEndConditions
+from ..constants import SwErrors
 
 logger = logging.getLogger(__name__)
 

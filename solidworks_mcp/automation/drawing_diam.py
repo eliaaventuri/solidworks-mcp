@@ -558,7 +558,7 @@ class DrawingDiamMixin:
                             placed: List[Tuple]) -> int:
         """Porta il testo delle quote di diametro dei cerchi FUORI dal contorno della vista, lungo raggi diversi
         (linea di quota radiale con freccia sul cerchio). Sceglie fra gli angoli candidati il primo libero."""
-        from .drawing_dims import _grow, _inter, KIND_DIA, KIND_RAD
+        from .drawing_dims import _inter, KIND_DIA, KIND_RAD
         scale = float(v.ScaleDecimal) or 1.0
         items = []
         for dd in self._dq_view_dims(v):

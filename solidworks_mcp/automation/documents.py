@@ -7,12 +7,12 @@ Create, open, save, and manage SolidWorks documents.
 import os
 import logging
 import traceback
-from typing import Optional, Dict
+from typing import Dict
 
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwDocumentTypes, SwFileTypes
+from ..constants import SwErrors, SwDocumentTypes
 from ..utils import find_template
 
 logger = logging.getLogger(__name__)

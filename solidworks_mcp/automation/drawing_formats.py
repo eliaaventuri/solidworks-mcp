@@ -17,10 +17,9 @@ Geometria (mm): cornice con margine di rilegatura di 20 mm a sinistra e 10 mm su
 dentro la cornice (contenuto in `_title_rect`, che e' 195 x 80 dall'angolo del foglio).
 """
 
-import os
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 from ..utils.sw_lang import drawing_text, format_suffix
 

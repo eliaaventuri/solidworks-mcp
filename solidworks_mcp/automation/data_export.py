@@ -44,13 +44,11 @@ Trappole API scoperte (SW 2026 italiano, late binding) — dettagli anche in STA
 
 import os
 import re
-import io
 import math
 import struct
 import zipfile
 import zlib
 import logging
-import tempfile
 import traceback
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple, Any
@@ -59,7 +57,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
-from .modeling_base import null_variant, r8_array
+from .modeling_base import null_variant
 from ..utils.pdf3d import inspect_pdf3d
 from ..utils.sw_lang import lang_folders
 
@@ -1127,7 +1125,6 @@ class DataExportOperations:
             info["encoding"] = "binary"
             info["triangles"] = n
             if n:
-                import array
                 lo = [1e30] * 3
                 hi = [-1e30] * 3
                 for i in range(n):

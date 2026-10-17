@@ -19,7 +19,7 @@ SelectByID2 su SKETCHSEGMENT fallisce spesso -> si seleziona con ISketchSegment.
 import math
 import logging
 import traceback
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Tuple
 
 import win32com.client
 import pythoncom

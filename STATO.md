@@ -106,6 +106,21 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   offline 83/83, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113,
   assembly_extra 214/214, data 159/159, simulation 120/120. 0 processi SolidWorks rimasti.
 
+## Fase 5 (2026-10-17, parziale, offline) — IN CORSO
+- **5.7 `execute_python`**: disattivato di default; si attiva con `SW_MCP_ALLOW_PYTHON=1` (letto a ogni chiamata). Non esposto nell'elenco
+  e rifiutato con messaggio che spiega come attivarlo. I test live lo attivano da soli (`tests/live_common.py`), quindi contano 196 tool.
+  Offline: 195 tool di default. Da confermare con Elia (la proposta del piano e' questa).
+- **5.5 `SW_MCP_TOOLSETS`**: gruppi `base` (sempre attivo), `modeling`, `drawings`, `assembly`, `data`, `simulation`; default tutti.
+  Un tool di un gruppo non scelto risponde con errore che nomina il gruppo da aggiungere.
+- **5.9 log**: in `%LOCALAPPDATA%\solidworks-mcp\` con rotazione (5 file da 5 MB). `log_file` in config.json puo' essere un percorso assoluto.
+  Il vecchio `solidworks_mcp.log` nella cartella del pacchetto non viene piu' scritto (si puo' cancellare).
+- **5.8 pyflakes**: tolti 46 import non usati e 1 f-string senza segnaposto nel pacchetto (verificato a mano: `git diff --stat`, py_compile).
+  Restano 21 "assegnata ma mai usata" e 5 import di `win32com.client`/`pythoncom` (lasciati di proposito). Il CI NON e' ancora
+  cambiato: controlla ancora solo i nomi non definiti. Va fatto dopo aver sistemato le variabili inutilizzate (richiede giudizio).
+- Test offline **91/91** (con `.venv`), nuovi controlli: gating di execute_python, gruppi di SW_MCP_TOOLSETS, gruppo sconosciuto.
+- **Non ancora fatti** (servono SolidWorks o altra decisione): 5.1 timeout generale, 5.2 ripresa dopo crash (entrambi da provare dal vivo),
+  5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Prossima: fase 5 (robustezza; parti offline delegabili),
-poi fasi 3-4 (gruppi D ed E), fase 6 (prove d'uso reali), fase 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Fase 5 parziale (vedi sopra): prossimo passo
+le variabili inutilizzate (pyflakes), poi il timeout dei tool (5.1) da provare dal vivo. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).

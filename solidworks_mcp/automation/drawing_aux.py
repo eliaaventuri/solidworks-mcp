@@ -20,7 +20,7 @@ Convenzione della matrice (verificata): colonne = assi X,Y,Z della vista espress
 import re
 import math
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import win32com.client
 import pythoncom

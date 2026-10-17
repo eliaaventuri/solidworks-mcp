@@ -16,9 +16,9 @@ from typing import Optional, Dict, Any, Tuple
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwPlanes, SwDocumentTypes, SwViews
+from ..constants import SwErrors
 from ..config import get_config
-from ..utils import UnitConverter, find_solidworks, find_template
+from ..utils import UnitConverter, find_solidworks
 from ..utils.sw_lang import std_plane_index, is_origin_name
 
 logger = logging.getLogger(__name__)
@@ -300,7 +300,7 @@ class SolidWorksAutomation:
             
             if not self._sw_exe_path or not os.path.exists(self._sw_exe_path):
                 return self._result(False,
-                    f"SolidWorks not found. Set exe_path in config or install SolidWorks.",
+                    "SolidWorks not found. Set exe_path in config or install SolidWorks.",
                     SwErrors.swSolidWorksNotFound)
             
             # Step 3: Launch SolidWorks

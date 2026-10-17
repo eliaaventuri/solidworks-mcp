@@ -6,8 +6,7 @@ Auto-detect SolidWorks installation on Windows.
 
 import os
 import logging
-from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 

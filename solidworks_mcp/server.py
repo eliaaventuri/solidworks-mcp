@@ -4,12 +4,14 @@ I tool delle altre aree sono definiti in *_tools.py; la guardia di sovrascrittur
 """
 
 import io
+import os
 import sys
 import json
 import logging
 import traceback
 from typing import Dict
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 # MCP imports
 from mcp.server import Server
@@ -29,14 +31,16 @@ from .data_tools import DATA_TOOLS, DATA_DISPATCH
 from .simulation_tools import SIMULATION_TOOLS, SIMULATION_DISPATCH
 from .safety import decorate_tools, check_call
 
-# Configure logging
+# Configure logging: %LOCALAPPDATA%\solidworks-mcp\ (o la cartella di Home fuori da Windows), 5 file da 5 MB
 config = get_config()
-LOG_FILE = Path(__file__).parent / config.log_file
+LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "solidworks-mcp"
+LOG_FILE = Path(config.log_file) if Path(config.log_file).is_absolute() else LOG_DIR / config.log_file
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=config.get_log_level_int(),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler(LOG_FILE, encoding='utf-8')]
+    handlers=[RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8')]
 )
 logger = logging.getLogger("SolidWorksMCP")
 
@@ -342,7 +346,7 @@ async def list_tools() -> list[Tool]:
             }
         ),
     ] + DRAWING_TOOLS + MODELING_TOOLS + ASSEMBLY_TOOLS + DATA_TOOLS + SIMULATION_TOOLS
-    return decorate_tools(tools)
+    return decorate_tools([t for t in tools if _tool_blocked_reason(t.name) is None])
 
 
 # ============================================================================
@@ -372,6 +376,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle MCP tool calls"""
     try:
         logger.info(f"Tool: {name}, Args: {arguments}")
+
+        blocked = _tool_blocked_reason(name)            # tool disattivato (execute_python) o gruppo non scelto in SW_MCP_TOOLSETS
+        if blocked:
+            return [TextContent(type="text", text=f"[ERROR] {blocked}")]
 
         refusal = check_call(name, arguments)          # salvataggio/esportazione su file esistente senza overwrite
         if refusal:
@@ -812,6 +820,57 @@ SPECIAL_HANDLERS = {
 
 # ordine di ricerca (come la vecchia catena di elif)
 DISPATCH_TABLES = (BASE_DISPATCH, MODELING_DISPATCH, SIMULATION_DISPATCH, DATA_DISPATCH, ASSEMBLY_DISPATCH, DRAWING_DISPATCH)
+
+# gruppi di tool scelti con SW_MCP_TOOLSETS (es. "base,modeling,drawings"); "base" e' sempre attivo, default: tutti
+TOOLSET_TABLES = {
+    "modeling": MODELING_DISPATCH,
+    "drawings": DRAWING_DISPATCH,
+    "assembly": ASSEMBLY_DISPATCH,
+    "data": DATA_DISPATCH,
+    "simulation": SIMULATION_DISPATCH,
+}
+TOOLSET_NAMES = ("base",) + tuple(TOOLSET_TABLES)
+
+
+def _python_enabled() -> bool:
+    """execute_python esegue codice arbitrario: attivo solo con SW_MCP_ALLOW_PYTHON=1 (letto a ogni chiamata)."""
+    return os.environ.get("SW_MCP_ALLOW_PYTHON", "").strip() == "1"
+
+
+def _enabled_toolsets() -> set:
+    """Gruppi attivi da SW_MCP_TOOLSETS; vuoto o 'all' = tutti. Nomi sconosciuti: avviso nel log e ignorati."""
+    raw = os.environ.get("SW_MCP_TOOLSETS", "").strip().lower()
+    if not raw or raw == "all":
+        return set(TOOLSET_NAMES)
+    wanted = {x.strip() for x in raw.split(",") if x.strip()}
+    unknown = sorted(wanted - set(TOOLSET_NAMES))
+    if unknown:
+        logger.warning(f"SW_MCP_TOOLSETS: gruppi sconosciuti {unknown} (validi: {', '.join(TOOLSET_NAMES)})")
+    return (wanted & set(TOOLSET_NAMES)) | {"base"}
+
+
+def _tool_group(name: str):
+    """Gruppo di un tool, o None se il tool non esiste."""
+    if name in BASE_DISPATCH or name in SPECIAL_HANDLERS or name == "execute_python":
+        return "base"
+    for group, table in TOOLSET_TABLES.items():
+        if name in table:
+            return group
+    return None
+
+
+def _tool_blocked_reason(name: str):
+    """Motivo per cui il tool non va esposto ne' eseguito, o None se e' attivo. Tool sconosciuti: None (errore 'Unknown tool')."""
+    if name == "execute_python":
+        if _python_enabled():
+            return None
+        return ("execute_python e' disattivato: esegue codice arbitrario sul PC. Per attivarlo impostare SW_MCP_ALLOW_PYTHON=1 "
+                "nella configurazione del server MCP e riavviare il client.")
+    group = _tool_group(name)
+    if group is None or group in _enabled_toolsets():
+        return None
+    return (f"il tool '{name}' appartiene al gruppo '{group}', che non e' attivo. Aggiungere '{group}' a SW_MCP_TOOLSETS "
+            f"(es. base,{group}) nella configurazione del server MCP e riavviare il client.")
 
 
 # ============================================================================

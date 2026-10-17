@@ -15,7 +15,7 @@ rotazione = angolo attorno agli assi liberi) e SOLO quella posa, raggiungibile, 
 
 import math
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from ..constants import SwErrors
 

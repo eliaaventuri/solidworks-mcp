@@ -67,7 +67,9 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 196
+EXPECTED_TOOLS = 195                       # 196 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
+    os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
 
 def record(name, ok, note=""):
@@ -77,10 +79,19 @@ def record(name, ok, note=""):
 
 # ============================================================================ registro dei tool
 def test_registry():
+    # con execute_python attivo: il registro completo (196) va controllato anche per il suo smistamento
+    os.environ["SW_MCP_ALLOW_PYTHON"] = "1"
+    try:
+        _test_registry_full(EXPECTED_TOOLS + 1)
+    finally:
+        os.environ.pop("SW_MCP_ALLOW_PYTHON", None)
+
+
+def _test_registry_full(expected):
     tools = asyncio.run(srv.list_tools())
     names = [t.name for t in tools]
     dups = sorted({n for n in names if names.count(n) > 1})
-    record(f"{EXPECTED_TOOLS} tool esposti, nessun duplicato", len(names) == EXPECTED_TOOLS and not dups,
+    record(f"{expected} tool esposti, nessun duplicato", len(names) == expected and not dups,
            f"{len(names)} tool, duplicati {dups}")
 
     dispatch = {}
@@ -664,6 +675,62 @@ def test_units():
     record("unita': mm/inch/ft andata e ritorno", ok)
 
 
+# ============================================================================ tool attivi: execute_python e SW_MCP_TOOLSETS
+def _names():
+    return {t.name for t in asyncio.run(srv.list_tools())}
+
+
+def test_toolsets(tmp):
+    real = srv.sw_automation
+    fake = _FakeAutomation()
+    srv.sw_automation = fake
+    try:
+        def call(name, args=None):
+            fake.calls.clear()
+            out = asyncio.run(srv.call_tool(name, args or {}))
+            return out[0].text, list(fake.calls)
+
+        names = _names()
+        record("execute_python nascosto di default", "execute_python" not in names and len(names) == EXPECTED_TOOLS)
+        text, calls = call("execute_python", {"code": "print(1)"})
+        record("execute_python rifiutato di default, nessun codice eseguito",
+               text.startswith("[ERROR]") and "SW_MCP_ALLOW_PYTHON" in text and not calls, text[:80])
+
+        os.environ["SW_MCP_ALLOW_PYTHON"] = "1"
+        try:
+            record("SW_MCP_ALLOW_PYTHON=1 riattiva execute_python", "execute_python" in _names() and len(_names()) == EXPECTED_TOOLS + 1)
+        finally:
+            os.environ.pop("SW_MCP_ALLOW_PYTHON", None)
+
+        os.environ["SW_MCP_TOOLSETS"] = "base,drawings"
+        try:
+            names = _names()
+            groups_ok = all(n in names for n in srv.BASE_DISPATCH) and all(n in names for n in srv.DRAWING_DISPATCH)
+            none_other = not (set(srv.MODELING_DISPATCH) | set(srv.DATA_DISPATCH)) & names
+            record("SW_MCP_TOOLSETS=base,drawings: solo base e disegni esposti", groups_ok and none_other,
+                   f"{len(names)} tool")
+            text, calls = call("create_sketch", {"plane": "Front"})
+            record("tool base attivo con il gruppo scelto", not text.startswith("[ERROR]") or "gruppo" not in text, text[:60])
+            mod = next(n for n in srv.MODELING_DISPATCH)
+            text, calls = call(mod, {})
+            record("tool di un gruppo non scelto: errore che nomina il gruppo, nessuna chiamata",
+                   text.startswith("[ERROR]") and "'modeling'" in text and not calls, text[:120])
+            text, calls = call("tool_inesistente", {})
+            record("tool sconosciuto con gruppi limitati -> 'Unknown tool'", "Unknown tool" in text, text[:60])
+        finally:
+            os.environ.pop("SW_MCP_TOOLSETS", None)
+
+        os.environ["SW_MCP_TOOLSETS"] = "bogus"
+        try:
+            base = (set(srv.BASE_DISPATCH) | set(srv.SPECIAL_HANDLERS)) - {"execute_python"}
+            record("gruppo sconosciuto: solo base attivo (execute_python resta nascosto)", _names() == base,
+                   f"{len(_names())} tool, attesi {len(base)}")
+        finally:
+            os.environ.pop("SW_MCP_TOOLSETS", None)
+    finally:
+        srv.sw_automation = real
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -674,7 +741,8 @@ def main():
                          ("materiali", lambda: test_materials(tmp)),
                          ("configurazione", lambda: test_config(tmp)), ("lingua", test_language),
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
-                         ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units)):
+                         ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units),
+                         ("toolset", lambda: test_toolsets(tmp))):
             try:
                 fn()
             except Exception as e:

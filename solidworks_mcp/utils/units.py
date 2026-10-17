@@ -5,7 +5,7 @@ Handle unit conversions for SolidWorks API (which uses meters internally).
 """
 
 from enum import Enum
-from typing import Union, Tuple
+from typing import Union
 import logging
 
 logger = logging.getLogger(__name__)

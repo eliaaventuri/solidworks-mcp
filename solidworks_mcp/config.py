@@ -22,7 +22,7 @@ class SolidWorksConfig:
         connection_retry_interval: secondi fra due tentativi di connessione durante l'avvio
         default_unit: unita' predefinita delle quote (mm, cm, m, inch, ft)
         log_level: DEBUG, INFO, WARNING, ERROR
-        log_file: nome del file di log (nella cartella del pacchetto)
+        log_file: nome del file di log in %LOCALAPPDATA%/solidworks-mcp/ (o percorso assoluto); rotazione 5 x 5 MB
     I template di pezzo/assieme/disegno non si configurano: li chiede a SolidWorks (Opzioni > Modelli predefiniti).
     """
 

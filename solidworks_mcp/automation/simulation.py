@@ -26,7 +26,6 @@ Trappole scoperte (SW 2026 SP4.1, late binding, istanza dedicata e NASCOSTA: tut
 """
 
 import os
-import re
 import time
 import logging
 import threading

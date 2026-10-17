@@ -16,8 +16,6 @@ Convenzioni:
 
 import os
 import re
-import glob
-import math
 import logging
 import traceback
 from typing import Dict, List, Optional, Tuple, Any
@@ -32,8 +30,8 @@ from .drawing_annot import DrawingAnnotMixin
 from .drawing_formats import DrawingFormatsMixin
 from .drawing_aux import DrawingAuxMixin
 from .drawing_pos import DrawingPosMixin
-from .drawing_layout import (DrawingLayoutMixin, STD_SCALES, VIEW_PAD, GAP_X, GAP_Y,
-                             MARGIN_L, MARGIN_R, MARGIN_T, MARGIN_B)
+from .drawing_layout import (DrawingLayoutMixin, STD_SCALES, VIEW_PAD, GAP_X,
+                             MARGIN_R, MARGIN_T)
 from ..utils.sw_lang import lang_folders
 
 logger = logging.getLogger(__name__)

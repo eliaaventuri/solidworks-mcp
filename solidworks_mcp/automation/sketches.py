@@ -7,7 +7,7 @@ Create sketches and draw 2D geometry.
 import math
 import logging
 import traceback
-from typing import Optional, Dict, List, Tuple
+from typing import Dict
 
 import win32com.client
 import pythoncom

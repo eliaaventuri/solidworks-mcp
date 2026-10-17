@@ -28,7 +28,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
-from .modeling_base import ModelingBase, null_variant, r8_array
+from .modeling_base import ModelingBase, r8_array
 from .sketch_constraints import SketchConstraintOperations
 from ..utils.sw_lang import lang_folders
 

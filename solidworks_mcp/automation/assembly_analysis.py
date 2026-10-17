@@ -19,7 +19,6 @@ Trappole SW 2026 (late binding):
 import os
 import math
 import logging
-import traceback
 from typing import Dict, List, Optional
 
 import win32com.client
