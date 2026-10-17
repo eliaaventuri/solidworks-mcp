@@ -121,12 +121,16 @@ _TOOLS = {
         {"filepath": (S, "Path of the file to import"), "import_as": (S, "solid | surface | graphics (STL)"), "units": (S, "mm | cm | m | inch (STL)")}, ["filepath"]),
     "export_model_image": ("export_model_image",
         "PNG/JPG/BMP image of the part/assembly. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
-        "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height in pixels (PNG/BMP); hide_reference=true (default) "
-        "hides planes, axes, origins, points and sketches; white_background for a white backdrop.",
+        "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height in pixels (PNG only, both needed); hide_reference=true (default) "
+        "hides planes, axes, origins, points and sketches; white_background for a white backdrop; perspective=true shoots in perspective. "
+        "Up to about 2000x1400 the screen capture is used; larger sizes use SolidWorks' print capture (up to 6600x5100 px), so images can be "
+        "bigger than the window (e.g. 3840x2160); the result reports capture (screen|print) and capture_dpi. RealView and ambient occlusion "
+        "cannot be enabled through the API on this installation.",
         {"filepath": (S, "Output image path (.png, .jpg or .bmp)"), "view": (S, "Named view (default isometric)"), "style": (S, "Display style (default shaded_edges)"),
          "width": (N, "Image width in pixels"), "height": (N, "Image height in pixels"),
          "hide_reference": (B, "Hide planes, axes, origins, points and sketches, also inside assembly components (default true)"), "white_background": (B, "White backdrop"),
-         "zoom_to_fit": (B, "Zoom to fit before capture (default true)")}, ["filepath"]),
+         "zoom_to_fit": (B, "Zoom to fit before capture (default true)"),
+         "perspective": (B, "Shoot in perspective view (added before the capture and removed after; default false)")}, ["filepath"]),
     # ---------------------------------------------------------------- misure
     "measure_entities": ("measure_entities",
         "Measure between two entities given by coordinates (or one alone): distance, normal distance, XYZ delta, angle (degrees), parallel/perpendicular; "

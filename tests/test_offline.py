@@ -348,6 +348,14 @@ def test_png(tmp):
     record("riduzione PNG 40x30 -> 20x15", shrunk and (W, H) == (20, 15) == (sw, sh), f"{W}x{H} letto {sw}x{sh}")
     W2, H2, shrunk2 = dx._resize_png(p, os.path.join(tmp, "big.png"), 400, 300)
     record("PNG mai ingrandito oltre il nativo", not shrunk2 and (W2, H2) == (w, h), f"{W2}x{H2}")
+    # D4: criterio della cattura di stampa e DPI (Letter orizzontale 11 x 8,5 pollici)
+    record("D4 cattura di stampa: solo oltre 2000 x 1400", dx._wants_print_capture(3840, 2160) and dx._wants_print_capture(2001, 100)
+           and dx._wants_print_capture(100, 1401) and not dx._wants_print_capture(900, 600) and not dx._wants_print_capture(2000, 1400))
+    record("D4 DPI: 3840x2160 -> 350, 900x600 -> 100 (minimo), 20000x10000 -> 600 (tetto)",
+           (dx._print_dpi(3840, 2160), dx._print_dpi(900, 600), dx._print_dpi(20000, 10000)) == (350, 100, 600),
+           f"{dx._print_dpi(3840, 2160)} {dx._print_dpi(900, 600)} {dx._print_dpi(20000, 10000)}")
+    record("D4 DPI: la Letter a quei DPI copre WxH", all(11 * dx._print_dpi(a, b) >= a and 8.5 * dx._print_dpi(a, b) >= b
+                                                         for a, b in ((3840, 2160), (2100, 2000), (1000, 3000), (2500, 1500))))
 
 
 # ============================================================================ lettori dei file esportati
@@ -780,6 +788,54 @@ def test_pdf3d(tmp):
     record("D10: inspect_export_file riporta pdf3d senza cambiare has_3d", r.get("has_3d") and r.get("pdf3d", {}).get("prc_ok"), str(r.get("pdf3d", {}).get("notes")))
 
 
+# ============================================================================ D3 eDrawings
+def _edrw_zip(entries):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_edrawings(tmp):
+    from solidworks_mcp.utils.edrawings import inspect_edrawings
+    hsf = b";; HSF V20.90 " + bytes(range(256)) * 4
+    mats = (b'<?xml version="1.0"?><Materials version="1"><Entity name="shared/body0"><Material/></Entity>'
+            b'<Entity name="shared/body1"><Material/></Entity></Materials>')
+    jpg = b"\xff\xd8\xff\xe0" + b"\x00" * 20 + b"\xff\xd9"
+    good = _edrw_zip({"eModel": hsf, "preview.jpg": jpg, "materials.xml": mats, "scene.xml": b"<scene/>", "OLE": b"\x00\x01"})
+    d = inspect_edrawings(good)
+    record("D3: ZIP eDrawings sintetico -> valido, HSF V20.90, 2 corpi, anteprima JPEG",
+           d["valid"] and d["zip_ok"] and d["hsf_ok"] and d["hsf_version"] == "V20.90" and d["bodies"] == 2
+           and d["entities"] == ["shared/body0", "shared/body1"] and d["preview_ok"] and "eModel" in d["entries"], str(d["notes"]))
+    d = inspect_edrawings(_edrw_zip({"preview.jpg": jpg, "materials.xml": mats}))
+    record("D3: ZIP senza eModel -> hsf_ok falso, non valido", d["zip_ok"] and not d["hsf_ok"] and not d["valid"], str(d["notes"]))
+    d = inspect_edrawings(_edrw_zip({"eModel": b"niente HSF qui", "materials.xml": mats}))
+    record("D3: eModel senza firma ;; HSF -> non valido", d["zip_ok"] and not d["hsf_ok"] and not d["valid"], str(d["notes"]))
+    d = inspect_edrawings(_edrw_zip({"eModel": hsf}))
+    record("D3: senza materials.xml ne' anteprima -> valido, bodies None, preview_ok falso",
+           d["valid"] and d["bodies"] is None and not d["preview_ok"], str(d["notes"]))
+    d = inspect_edrawings(b"ciao, non sono uno zip")
+    record("D3: byte qualunque -> zip_ok falso, nota, nessuna eccezione", not d["zip_ok"] and not d["valid"] and d["notes"])
+    d = inspect_edrawings(good[:len(good) // 3])
+    record("D3: ZIP troncato a 1/3 -> non valido, nessuna eccezione", not d["valid"] and d["notes"])
+    d = inspect_edrawings(b"")
+    record("D3: file vuoto -> non valido", not d["valid"])
+    path = os.path.join(tmp, "m.eprt")
+    with open(path, "wb") as f:
+        f.write(good)
+    r = SolidWorksAutomation().inspect_export_file(path)["data"]
+    record("D3: inspect_export_file(.eprt) riporta edrawings e valid", r.get("valid") is True and r.get("edrawings", {}).get("bodies") == 2,
+           str(r.get("edrawings", {}).get("notes")))
+    path = os.path.join(tmp, "rotto.easm")
+    with open(path, "wb") as f:
+        f.write(good[:len(good) // 3])
+    r = SolidWorksAutomation().inspect_export_file(path)["data"]
+    record("D3: inspect_export_file(.easm troncato) -> valid falso", r.get("valid") is False and r.get("edrawings", {}).get("valid") is False)
+
+
 # ============================================================================ lingua di SolidWorks (italiano / inglese)
 class _Feat:
     def __init__(self, name, typ):
@@ -1034,7 +1090,8 @@ def main():
                          ("materiali", lambda: test_materials(tmp)),
                          ("configurazione", lambda: test_config(tmp)), ("lingua", test_language),
                          ("D1 tabella", lambda: test_config_table(tmp)), ("D7 inerzia", test_inertia),
-                         ("D10 PDF 3D", lambda: test_pdf3d(tmp)), ("unita'", test_units),
+                         ("D10 PDF 3D", lambda: test_pdf3d(tmp)),
+                         ("D3 eDrawings", lambda: test_edrawings(tmp)),("unita'", test_units),
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions)):
             try:

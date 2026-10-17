@@ -60,6 +60,7 @@ import pythoncom
 from ..constants import SwErrors
 from .modeling_base import null_variant
 from ..utils.pdf3d import inspect_pdf3d
+from ..utils.edrawings import inspect_edrawings
 from ..utils.sw_lang import lang_folders
 from ..utils.matlib import (SW_FILE_LOCATIONS_MATERIAL_DATABASES, merge_material_dirs, list_sldmat_files,
                             libraries_signature, dedupe_materials)
@@ -193,6 +194,24 @@ def _expand32(b: bytes) -> int:
     e = bytearray(4 * len(b))
     e[0::4] = b
     return int.from_bytes(e, "little")
+
+
+# D4: cattura di stampa (SaveAs usa la "cattura di stampa" con le preferenze 6 = 1, 10 = carta, 9 = DPI)
+_SCREEN_MAX_W, _SCREEN_MAX_H = 2000, 1400      # oltre queste dimensioni richieste non si usa la cattura a schermo (nativa ~2389x1662)
+_PRINT_DPI_MIN, _PRINT_DPI_MAX = 100, 600
+_PRINT_PAPER_IN = (11.0, 8.5)                  # carta Letter orizzontale (preferenza 10 = 0)
+
+
+def _wants_print_capture(W, H) -> bool:
+    """True se l'immagine richiesta e' piu' grande di quanto la cattura a schermo (finestra) puo' dare in modo affidabile."""
+    return int(W) > _SCREEN_MAX_W or int(H) > _SCREEN_MAX_H
+
+
+def _print_dpi(W, H) -> int:
+    """DPI della cattura di stampa (Letter orizzontale 11 x 8,5 pollici) perche' l'immagine copra W x H: ceil(max(W/11, H/8.5)),
+    limitato a 100..600 (a 600 DPI: 6600 x 5100 px)."""
+    d = math.ceil(max(int(W) / _PRINT_PAPER_IN[0], int(H) / _PRINT_PAPER_IN[1]))
+    return max(_PRINT_DPI_MIN, min(_PRINT_DPI_MAX, d))
 
 
 def _resize_png(src: str, dst: str, W: int, H: int) -> Tuple[int, int, bool]:
@@ -1421,6 +1440,14 @@ class DataExportOperations:
                     info["pdf3d"] = inspect_pdf3d(b)
                 except Exception as e:
                     info["pdf3d"] = {"parsed": False, "notes": [f"errore di lettura: {e}"]}
+            elif ext in ("eprt", "easm", "edrw"):
+                b = open(filepath, "rb").read()
+                info = {"format": ext, "size_bytes": len(b)}
+                try:                        # D3: verifica strutturale (ZIP + eModel HSF); l'automazione di eDrawings non e' usabile
+                    info["edrawings"] = inspect_edrawings(b)
+                except Exception as e:
+                    info["edrawings"] = {"valid": False, "notes": [f"errore di lettura: {e}"]}
+                info["valid"] = bool(info["edrawings"].get("valid"))
             else:
                 info = {"format": ext, "size_bytes": os.path.getsize(filepath)}
             return self._result(True, f"{ext.upper()}: " + ", ".join(f"{k}={v}" for k, v in info.items() if k in
@@ -1539,7 +1566,7 @@ class DataExportOperations:
             if not exists:
                 return self._result(False, f"Export NON riuscito (errori {int(e.value)})", SwErrors.swExportError, data)
             good = True
-            if verify and fmt in ("stl", "3mf", "step", "pdf3d", "iges", "x_t", "x_b") and not per_comp:
+            if verify and fmt in ("stl", "3mf", "step", "pdf3d", "iges", "x_t", "x_b", "edrawings") and not per_comp:
                 chk = self.inspect_export_file(filepath)
                 data["verify"] = chk.get("data", {})
                 v = data["verify"]
@@ -1560,6 +1587,8 @@ class DataExportOperations:
                                            f"AP{int(step_ap)} richiesto ma il file e' {v.get('application_protocol')}")
                 elif fmt == "pdf3d":
                     good = bool(v.get("has_3d"))
+                elif fmt == "edrawings":
+                    good = bool(v.get("edrawings", {}).get("valid"))
             return self._result(good, f"Esportato {fmt.upper()} ({data['size_bytes']} byte): {filepath}"
                                 + (f" ATTENZIONE: {data['warning']}" if data.get("warning") else ""),
                                 SwErrors.swSuccess if good else SwErrors.swExportError, data)
@@ -1608,10 +1637,17 @@ class DataExportOperations:
 
     def export_model_image(self, filepath: str, view: str = "isometric", style: str = "shaded_edges", width: int = None,
                            height: int = None, hide_reference: bool = True, white_background: bool = False,
-                           zoom_to_fit: bool = True) -> Dict:
+                           zoom_to_fit: bool = True, perspective: bool = False) -> Dict:
         """Immagine PNG/JPG/BMP del pezzo o assieme attivo. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric;
-        style: shaded_edges | shaded | hidden_lines | hidden_gray | wireframe; width/height in pixel (solo PNG, ridotto dal nativo ~2400x1700); hide_reference=true nasconde piani, assi, origini, punti e schizzi (poi li ripristina);
-        white_background=true sfondo bianco. Lo stato della vista viene ripristinato."""
+        style: shaded_edges | shaded | hidden_lines | hidden_gray | wireframe; hide_reference=true nasconde piani, assi, origini, punti e schizzi (poi li ripristina);
+        white_background=true sfondo bianco; perspective=true scatta in prospettiva (se la vista non lo e' gia': la aggiunge e la toglie dopo).
+        width/height in pixel (solo PNG, entrambi). Criterio della cattura: se width > 2000 o height > 1400 si usa la "cattura di stampa"
+        di SolidWorks (preferenze 6 = 1, carta Letter orizzontale, DPI = ceil(max(W/11, H/8.5)) tra 100 e 600), che non dipende dalla
+        finestra (fino a 6600x5100 px) e poi si porta al formato esatto WxH con bordi del colore di sfondo; sotto quelle soglie si usa la
+        cattura a schermo (~2389x1662 nella finestra nascosta) e, se risulta piu' piccola del richiesto, si rifa' con la cattura di stampa.
+        JPG/BMP: risoluzione nativa (a schermo). RealView e occlusione ambientale non sono impostabili via API su questa installazione.
+        Le preferenze 6/9/10 vengono rimesse come prima e rilette; SolidWorks rifiuta di rimettere alcuni valori (DPI 1): se non tornano
+        lo dice in notes. Lo stato della vista viene ripristinato."""
         try:
             doc, err = self.get_active_doc()
             if err:
@@ -1640,6 +1676,9 @@ class DataExportOperations:
                 pass
             items = self._dx_collect_ref(doc) if hide_reference else []
             saved_prefs = {}
+            print_orig = {}                    # D4: valori originali delle preferenze della cattura di stampa (6, 10, 9)
+            capture, capture_dpi = "screen", None
+            persp_added = persp_on = False
             # D5: nell'assieme i riferimenti DEI COMPONENTI non stanno nel suo albero: toggle di documento "Nascondi tutti i tipi"
             # (swViewDisplayHideAllTypes = 198), salvato e rimesso com'era
             hide_all_old = None
@@ -1668,6 +1707,18 @@ class DataExportOperations:
                     for k, v in ((305, 0), (99, 0xFFFFFF)):
                         saved_prefs[k] = app.GetUserPreferenceIntegerValue(k)
                         app.SetUserPreferenceIntegerValue(k, v)
+                persp_was = False
+                try:
+                    persp_was = bool(self._com(mv, "HasPerspective"))
+                except Exception:
+                    pass
+                if perspective and not persp_was:
+                    try:
+                        mv.AddPerspective()
+                        persp_added = True
+                    except Exception as ex:
+                        notes.append(f"prospettiva non applicata: {ex}")
+                persp_on = persp_was or persp_added
                 if zoom_to_fit:
                     doc.ViewZoomtofit2()
                 size = None
@@ -1677,9 +1728,31 @@ class DataExportOperations:
                                  "width/height solo per PNG (JPG/BMP: risoluzione nativa)")
                 e, w = _byref_i4(), _byref_i4()
                 target = os.path.join(os.path.dirname(filepath), "_native_" + os.path.basename(filepath)) if sized else filepath
-                doc.Extension.SaveAs(target, 0, 1, null_variant(), e, w)
+
+                def shoot(use_print):
+                    """Cattura in target: a schermo o di stampa (preferenze 6, 10, 9 salvate in print_orig alla prima volta)."""
+                    nonlocal capture, capture_dpi
+                    if os.path.exists(target):
+                        os.remove(target)
+                    if use_print:
+                        capture_dpi = _print_dpi(width, height)
+                        if max(int(width) / _PRINT_PAPER_IN[0], int(height) / _PRINT_PAPER_IN[1]) > _PRINT_DPI_MAX:
+                            notes.append(f"risoluzione richiesta oltre il limite della cattura di stampa ({_PRINT_DPI_MAX} DPI)")
+                        for k in (6, 10, 9):
+                            if k not in print_orig:
+                                print_orig[k] = app.GetUserPreferenceIntegerValue(k)
+                        for k, v in ((6, 1), (10, 0), (9, capture_dpi)):
+                            app.SetUserPreferenceIntegerValue(k, v)
+                        capture = "print"
+                    doc.Extension.SaveAs(target, 0, 1, null_variant(), e, w)
+
+                use_print = sized and _wants_print_capture(width, height)
+                shoot(use_print)
                 if sized and os.path.exists(target):
                     ww, hh, shrunk = _resize_png(target, filepath, int(width), int(height))
+                    if not shrunk and not use_print:      # finestra piu' piccola del richiesto: ricatturo di stampa
+                        shoot(True)
+                        ww, hh, shrunk = _resize_png(target, filepath, int(width), int(height))
                     os.remove(target)
                     size = (ww, hh)
                     if not shrunk:
@@ -1698,6 +1771,20 @@ class DataExportOperations:
                         app.SetUserPreferenceIntegerValue(k, v)
                     except Exception:
                         pass
+                if persp_added:
+                    try:
+                        mv.RemovePerspective()
+                    except Exception as ex:
+                        notes.append(f"prospettiva non rimossa: {ex}")
+                for k in (6, 10, 9):                 # D4: ripristino, rilettura e dichiarazione di cio' che SolidWorks non rimette
+                    if k in print_orig:
+                        try:
+                            app.SetUserPreferenceIntegerValue(k, print_orig[k])
+                            now = app.GetUserPreferenceIntegerValue(k)
+                            if now != print_orig[k]:
+                                notes.append(f"preferenza {k}: ripristinata a {print_orig[k]} ma SolidWorks la rilegge {now}")
+                        except Exception as ex:
+                            notes.append(f"preferenza {k} non ripristinata: {ex}")
                 if old_mode:
                     try:
                         mv.DisplayMode = old_mode
@@ -1705,7 +1792,8 @@ class DataExportOperations:
                         pass
             exists = os.path.exists(filepath) and os.path.getsize(filepath) > 0
             data = {"filepath": filepath, "view": view, "style": style, "hide_reference": hide_reference,
-                    "hidden_items": len([1 for i in items if i[2]]), "white_background": white_background}
+                    "hidden_items": len([1 for i in items if i[2]]), "white_background": white_background,
+                    "perspective": persp_on, "capture": capture, "capture_dpi": capture_dpi}
             if size:
                 data["width"], data["height"] = size
             if notes:

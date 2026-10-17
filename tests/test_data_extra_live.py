@@ -24,6 +24,18 @@ PI = math.pi
 TOOLS = []                                   # nomi dei tool esposti dal server (riempito in run)
 
 
+async def make_block(c: Client, name: str):
+    """Blocco 30x80x50 (X 0..30, Y +-40, Z +-25) come in test_data_live, salvato come test_output/<name>.SLDPRT."""
+    part = F(name)
+    rm(part)
+    await c.call("create_new_part")
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_rectangle", x1=-B / 2, y1=-C / 2, x2=B / 2, y2=C / 2)
+    await T(c, "extrude_boss", f"{name}: blocco 80x50x30", depth=A)
+    await T(c, "save_document", f"salva {name}", filepath=part)
+    return part
+
+
 # ============================================================================================ D7
 async def sec_d7(c: Client):
     """D7: proprieta' di massa rispetto a un sistema di coordinate utente.
@@ -123,7 +135,8 @@ async def sec_d7(c: Client):
         ok, text, mp = await c.call("get_part_mass_properties", coordinate_system=name)
         ic = mp.get("in_coordinate_system", {})
         record("get_part_mass_properties: coordinate_system -> in_coordinate_system presente, chiavi esistenti invariate",
-               ok and bool(ic) and mp.get("mass_kg") == m and "inertia_tensor_at_origin_kg_m2" in mp, text.split("\n")[0][:120])
+               ok and bool(ic) and rel(mp.get("mass_kg", 0), m) < 1e-6 and "inertia_tensor_at_origin_kg_m2" in mp,
+               f"massa {mp.get('mass_kg')} / {m}; " + text.split("\n")[0][:100])
         if not ic:
             return
         exp_c = [x * 1e3 for x in d]                                         # mm
@@ -330,12 +343,119 @@ async def sec_d1(c: Client):
 async def sec_d10(c: Client):
     """D10: PDF 3D letto a fondo (pdf3d)."""
     print("\n== D10 PDF 3D")
+    await make_block(c, "dxe_d10")
+    pdf = F("dxe_d10", "pdf")
+    rm(pdf)
+    ok, text, d = await c.call("export_model", filepath=pdf)
+    p3 = d.get("verify", {}).get("pdf3d", {})
+    record("D10: PDF 3D scritto e letto (parsed)", ok and p3.get("parsed") is True, f"{text[:60]} pagine {p3.get('pages')}")
+    s = (p3.get("streams_3d") or [{}])[0]
+    record("D10: stream PRC decompresso con magic 'PRC' (prc_ok)", p3.get("prc_ok") is True,
+           f"{s.get('subtype')} {s.get('filter')} {s.get('size')} -> {s.get('decoded_size')} byte, magic {s.get('magic_ok')}")
+    record("D10: almeno un'annotazione 3D nella pagina", (p3.get("annotations_3d") or 0) >= 1, f"{p3.get('annotations_3d')}")
+    record("D10: viste 3D lette (informativo)", "views" in p3, f"{p3.get('views')}"[:150])
+    await c.call("close_document", discard=True)
 
 
 # ============================================================================================ D4
 async def sec_d4(c: Client):
     """D4: immagini oltre la risoluzione nativa, prospettiva."""
     print("\n== D4 immagini")
+    from pathlib import Path
+    from solidworks_mcp.automation.data_export import _read_png
+
+    def nonwhite_box(path, step=4):
+        """Riquadro dei pixel non bianchi (min(R,G,B) < 200), campionando ogni `step` pixel: (w, h, x0, y0, x1, y1, n) o None."""
+        w, h, bpp, rows = _read_png(str(path))
+        x0 = y0 = 10 ** 9
+        x1 = y1 = -1
+        n = 0
+        for y in range(0, h, step):
+            r = rows[y]
+            for x in range(0, w, step):
+                if min(r[x * bpp:x * bpp + 3]) < 200:
+                    n += 1
+                    x0, x1 = min(x0, x), max(x1, x)
+                    y0, y1 = min(y0, y), max(y1, y)
+        return (w, h, x0, y0, x1, y1, n) if n else (w, h, None, None, None, None, 0)
+
+    def diff_pixels(p1, p2, step=2, thr=30):
+        """Pixel (campionati ogni `step`) che differiscono di piu' di `thr` su almeno un canale tra due PNG della stessa dimensione."""
+        w1, h1, bpp1, r1 = _read_png(str(p1))
+        w2, h2, bpp2, r2 = _read_png(str(p2))
+        if (w1, h1) != (w2, h2):
+            return -1
+        n = 0
+        for y in range(0, h1, step):
+            a, b = r1[y], r2[y]
+            for x in range(0, w1, step):
+                i = x * 3
+                if abs(a[i] - b[i]) > thr or abs(a[i + 1] - b[i + 1]) > thr or abs(a[i + 2] - b[i + 2]) > thr:
+                    n += 1
+        return n * step * step
+
+    async def prefs():
+        """Preferenze d'applicazione 6 (cattura schermo/stampa), 9 (DPI) e 10 (carta), lette con execute_python (`sw` = ISldWorks)."""
+        ok, _t, d = await c.call("execute_python", code="result = str([sw.GetUserPreferenceIntegerValue(k) for k in (6, 9, 10)])")
+        return d.get("result") if ok else None
+
+    async def has_persp():
+        ok, _t, d = await c.call("execute_python", code="result = str(bool(sw.ActiveDoc.ActiveView.HasPerspective))")
+        return d.get("result") if ok else None
+
+    part = F("dxe_d4_blocco")
+    rm(part)
+    await c.call("create_new_part")
+    try:
+        await c.call("create_sketch", plane="Front")
+        await c.call("draw_rectangle", x1=-B / 2, y1=-C / 2, x2=B / 2, y2=C / 2)
+        await T(c, "extrude_boss", "D4: blocco 80x50x30", depth=A)
+        big, small, pers, flat = F("dxe_d4_grande", "png"), F("dxe_d4_piccola", "png"), F("dxe_d4_prosp", "png"), F("dxe_d4_piana", "png")
+        for p in (big, small, pers, flat):
+            rm(p)
+
+        # --- 3840x2160: cattura di stampa, dimensioni esatte, pezzo centrato e grande, preferenze rimesse come prima
+        before = await prefs()
+        ok, text, d = await c.call("export_model_image", filepath=big, white_background=True, width=3840, height=2160)
+        after = await prefs()
+        record("D4: PNG 3840x2160 con la cattura di stampa (capture=print, dpi riportato)",
+               ok and d.get("capture") == "print" and d.get("width") == 3840 and d.get("height") == 2160 and d.get("capture_dpi", 0) >= 350,
+               f"{d.get('capture')} {d.get('capture_dpi')} dpi {d.get('width')}x{d.get('height')} {d.get('notes')}")
+        if Path(big).exists():
+            w, h, x0, y0, x1, y1, n = nonwhite_box(big)
+            if x0 is None:
+                record("D4: 3840x2160 contiene il pezzo (pixel non bianchi)", False, "immagine bianca")
+            else:
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                record("D4: dimensioni esatte 3840x2160 del file", (w, h) == (3840, 2160), f"{w}x{h}")
+                record("D4: pezzo centrato (centro del riquadro entro il 3 % dal centro) e alto almeno il 30 % dell'immagine",
+                       abs(cx - w / 2) <= 0.03 * w and abs(cy - h / 2) <= 0.03 * h and (y1 - y0) >= 0.30 * h,
+                       f"riquadro x {x0}-{x1} y {y0}-{y1}; centro ({cx:.0f},{cy:.0f}) vs ({w / 2:.0f},{h / 2:.0f}); altezza {(y1 - y0) / h:.1%}; {n} campioni")
+        else:
+            record("D4: file 3840x2160 scritto", False, text[:100])
+        record("D4: preferenze 6, 9, 10 uguali prima e dopo l'export grande", before is not None and before == after, f"prima {before} dopo {after}")
+
+        # --- piccolo: cattura a schermo come prima
+        ok, text, d = await c.call("export_model_image", filepath=small, white_background=True, width=900, height=600)
+        record("D4: PNG 900x600 con la cattura a schermo (capture=screen, 900x600)",
+               ok and d.get("capture") == "screen" and d.get("width") == 900 and d.get("height") == 600,
+               f"{d.get('capture')} {d.get('width')}x{d.get('height')} {d.get('notes')}")
+        record("D4: preferenze 6, 9, 10 invariate anche dopo l'export piccolo", await prefs() == before, f"{await prefs()} atteso {before}")
+
+        # --- prospettiva: immagine diversa dalla parallela, vista rimessa com'era
+        persp_before = await has_persp()
+        ok1, _t1, d1 = await c.call("export_model_image", filepath=pers, white_background=True, width=900, height=600, perspective=True)
+        persp_after = await has_persp()
+        ok2, _t2, d2 = await c.call("export_model_image", filepath=flat, white_background=True, width=900, height=600, perspective=False)
+        nd = diff_pixels(pers, flat) if Path(pers).exists() and Path(flat).exists() else -1
+        record("D4: prospettiva = True differisce dalla parallela (> 1000 pixel con differenza > 30)",
+               ok1 and ok2 and d1.get("perspective") is True and d2.get("perspective") is False and nd > 1000,
+               f"{nd} pixel; perspective {d1.get('perspective')}/{d2.get('perspective')}")
+        record("D4: dopo l'export la vista non e' in prospettiva (HasPerspective come prima)",
+               persp_before == "False" and persp_after == "False" and await has_persp() == "False",
+               f"prima {persp_before}, dopo il 1o export {persp_after}, dopo il 2o {await has_persp()}")
+    finally:
+        await c.call("close_document", discard=True)
 
 
 # ============================================================================================ D9
@@ -346,14 +466,76 @@ async def sec_d9(c: Client):
 
 # ============================================================================================ D2
 async def sec_d2(c: Client):
-    """D2: STEP AP242."""
+    """D2: STEP AP242. Misura: il protocollo scritto nel file (FILE_SCHEMA)."""
     print("\n== D2 STEP AP242")
+    await make_block(c, "dxe_d2")
+    for ap in (214, 242):
+        p = F(f"dxe_d2_ap{ap}", "step")
+        rm(p)
+        ok, text, d = await c.call("export_model", filepath=p, step_ap=ap)
+        v = d.get("verify", {})
+        record(f"D2: STEP richiesto AP{ap} -> file {v.get('application_protocol')} ({v.get('schema')})", ok and v.get("valid_solid"),
+               f"{d.get('warning', 'protocollo come richiesto')}"[:160])
+    # AP242: con questa edizione il file resta AP203; il tool deve dirlo (warning) invece di fingere
+    record("D2: con AP242 non disponibile il risultato lo dichiara (warning)",
+           v.get("application_protocol") == "AP242" or "AP242" in d.get("warning", ""), f"{v.get('application_protocol')}")
+    await c.call("close_document", discard=True)
 
 
 # ============================================================================================ D3
 async def sec_d3(c: Client):
     """D3: eDrawings verificato."""
     print("\n== D3 eDrawings")
+    # Verifica strutturale (ZIP + eModel con firma HSF + materials.xml): l'automazione di eDrawings non e' utilizzabile.
+    # Attese: blocco -> 1 corpo; assieme blocco + 2 cilindri -> `bodies` informativo (da confrontare con 3 = un corpo per componente).
+    part, cyl, asm = F("dxe_d3_blocco"), F("dxe_d3_cil"), F("dxe_d3_asm", "SLDASM")
+    ep, ea, et = F("dxe_d3_blocco", "eprt"), F("dxe_d3_asm", "easm"), F("dxe_d3_troncato", "eprt")
+    rm(part, cyl, asm, ep, ea, et)
+    try:
+        await c.call("create_new_part")
+        await c.call("create_sketch", plane="Front")
+        await c.call("draw_rectangle", x1=-B / 2, y1=-C / 2, x2=B / 2, y2=C / 2)
+        await T(c, "extrude_boss", "blocco 80x50x30", depth=A)
+        await T(c, "save_document", "salva blocco D3", filepath=part)
+        d = await T(c, "export_model", "blocco -> .eprt, verify eDrawings valido", filepath=ep,
+                    check=lambda d: d.get("verify", {}).get("edrawings", {}).get("valid") is True)
+        e = d.get("verify", {}).get("edrawings", {})
+        record("D3: .eprt del blocco: 1 corpo, firma HSF e anteprima JPEG", e.get("valid") is True and e.get("bodies") == 1 and e.get("hsf_ok")
+               and e.get("preview_ok"), f"bodies {e.get('bodies')}, HSF {e.get('hsf_version')}, voci {e.get('entries')}, note {e.get('notes')}")
+        # copia troncata a 1/3: non e' uno ZIP valido
+        if os.path.exists(ep):
+            with open(ep, "rb") as f:
+                raw = f.read()
+            with open(et, "wb") as f:
+                f.write(raw[:len(raw) // 3])
+            ok, text, v = await c.call("inspect_export_file", filepath=et)
+            record("D3: .eprt troncato a 1/3 -> edrawings.valid falso", ok and v.get("edrawings", {}).get("valid") is False
+                   and v.get("valid") is False, f"{v.get('edrawings', {}).get('notes')}")
+        else:
+            record("D3: .eprt troncato a 1/3 -> edrawings.valid falso", False, "il .eprt del blocco non esiste")
+        await c.call("close_document", discard=True)
+
+        # cilindro e assieme
+        await c.call("create_new_part")
+        await c.call("create_sketch", plane="Front")
+        await c.call("draw_circle", x=0, y=0, radius=10)
+        await T(c, "extrude_boss", "cilindro R10 x 30", depth=30)
+        await T(c, "save_document", "salva cilindro D3", filepath=cyl)
+        await c.call("close_document", discard=True)
+        await T(c, "create_new_assembly", "assieme D3: blocco + 2 cilindri")
+        for path, (x, y, z) in ((part, (0, 0, 0)), (cyl, (200, 0, 0)), (cyl, (0, 150, 0))):
+            await T(c, "insert_component", f"{os.path.splitext(os.path.basename(path))[0]} in ({x},{y},{z})", file_path=path, x=x, y=y, z=z, fixed=True)
+        await T(c, "save_document", "salva assieme D3", filepath=asm)
+        d = await T(c, "export_model", "assieme -> .easm, verify eDrawings valido", filepath=ea,
+                    check=lambda d: d.get("verify", {}).get("edrawings", {}).get("valid") is True)
+        e = d.get("verify", {}).get("edrawings", {})
+        n = e.get("bodies")
+        record(f"D3: .easm dell'assieme valido, bodies={n} (atteso 3 = un corpo per componente; informativo)",
+               e.get("valid") is True and isinstance(n, int) and n >= 1,
+               f"bodies {n} (confronto con 3), entita' {e.get('entities')}, voci {e.get('entries')}, note {e.get('notes')}")
+    finally:
+        await c.call("close_document", discard=True)
+        rm(part, cyl, asm, ep, ea, et)
 
 
 SECTIONS = {"D7": sec_d7, "D8": sec_d8, "D1": sec_d1, "D10": sec_d10, "D4": sec_d4, "D9": sec_d9, "D2": sec_d2, "D3": sec_d3}
