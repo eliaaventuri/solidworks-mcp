@@ -132,10 +132,14 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   aggiungono SW_MCP_STARTUP_TIMEOUT + 60 s; (2) `SendMsgToUser2` NON blocca un'istanza nascosta (ritorna subito);
   (3) `connect_solidworks` chiamato una seconda volta in modalita' dedicata risponde "non risponde piu', riavvia" anche con l'istanza
   viva (`base.py`, `connect`: controlla `_dedicated_pid` prima di `_connected`) -> da sistemare con 5.2.
-  Regressione completa con il thread COM: vedi sotto.
+  **Regressione completa con il thread COM (2026-10-17, italiano), exit 0, tutto verde** (`test_output/regressione_20261017_1811.md`,
+  log `%TEMP%\regr_f5.log`): offline 95/95, modeling 175/175, modeling_extra 259/259, drawings 65/65, drawing_quality 139/139,
+  assembly 113/113, assembly_extra 214/214, data 159/159, simulation 120/120, timeout 11/11. 0 processi SolidWorks rimasti.
+  Barra di avanzamento della regressione: `scripts_tmp/regr.ps1` (non versionato). 5.1 FATTO.
 - **Non ancora fatti**: 5.2 ripresa dopo crash (riavvio automatico dell'istanza dedicata, da provare dal vivo),
   5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).
 
 ## Prossimo passo
 Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1 e 2 chiuse. Fase 5 parziale (vedi sopra): prossimo passo
-le variabili inutilizzate (pyflakes), poi il timeout dei tool (5.1) da provare dal vivo. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
+5.2 (riavvio automatico dell'istanza dedicata dopo crash/timeout, insieme al bug di `connect` chiamato due volte), poi 5.6
+(descrizioni in inglese) e CI pyflakes. Poi fasi 3-4 (gruppi D ed E), 6 (prove d'uso reali), 7 (rilascio).
