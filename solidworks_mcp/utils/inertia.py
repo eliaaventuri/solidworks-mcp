@@ -10,7 +10,8 @@ Convenzione fuori diagonale (parametro `offdiag`):
   "tensor"   tensore vero: J_xy = -integrale(x*y dm)   -> Steiner aggiunge -m*dx*dy, la rotazione e' R^T J R
   "products" prodotti d'inerzia: P_xy = +integrale(x*y dm) (come nella finestra Proprieta' di massa di SolidWorks)
 Internamente si lavora sempre col tensore vero; l'uscita usa la stessa convenzione dell'ingresso.
-NON e' ancora verificato quale convenzione usi `IMassProperty2.GetMomentOfInertia`: il test di B3 aveva prodotti nulli.
+Quale convenzione usi `IMassProperty2.GetMomentOfInertia` non e' noto a priori (il test di B3 aveva prodotti nulli): la decide
+a runtime `detect_offdiag_convention` (confronto fra tensore nel baricentro e all'origine, entrambi letti da SolidWorks).
 Verifica sul PC (D7): blocco con baricentro in (15, 10, 0) mm -> all'origine il termine xy vale -m*0,015*0,010 (tensor)
 oppure +m*0,015*0,010 (products).
 
@@ -92,6 +93,34 @@ def principal_moments(i: Mat) -> Vec:
 def flip_offdiag(i: Mat) -> Mat:
     """Passa da tensore vero a prodotti d'inerzia e viceversa (cambia segno ai termini fuori diagonale)."""
     return [[i[r][c] if r == c else -i[r][c] for c in range(3)] for r in range(3)]
+
+
+def detect_offdiag_convention(i_com: Sequence, mass: float, com: Sequence[float], i_origin: Sequence,
+                              tol: float = 1e-4) -> str:
+    """Decide a runtime la convenzione dei termini fuori diagonale di `GetMomentOfInertia`, confrontando il tensore
+    all'origine letto da SolidWorks con Huygens-Steiner applicato a quello nel baricentro (entrambi nel sistema del modello,
+    com in m). Nelle due convenzioni i termini fuori diagonale all'origine differiscono di 2*m*d_i*d_j:
+      "tensor"        i_origin = steiner(i_com)                          (J_xy = -integrale(x*y dm))
+      "products"      i_origin = flip_offdiag(steiner(flip_offdiag(i_com)))  (P_xy = +integrale(x*y dm))
+      "indeterminate" segnale m*d_i*d_j troppo piccolo (baricentro su un asse o su un piano coordinato): non si distingue;
+                      oppure nessuna delle due convenzioni riproduce i dati. Chi chiama usa "tensor" e lo dichiara.
+    `tol`: soglia relativa (rispetto al massimo termine diagonale all'origine)."""
+    j_c, j_o = as_matrix(i_com), as_matrix(i_origin)
+    scale = max(abs(j_o[k][k]) for k in range(3)) or 1.0
+    floor = tol * scale
+    cand_t = steiner(j_c, mass, com)
+    cand_p = flip_offdiag(steiner(flip_offdiag(j_c), mass, com))
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    signal = max(abs(mass * com[a] * com[b]) for a, b in pairs)
+    if signal < 4 * floor:
+        return "indeterminate"
+    err_t = max(abs(j_o[a][b] - cand_t[a][b]) for a, b in pairs)
+    err_p = max(abs(j_o[a][b] - cand_p[a][b]) for a, b in pairs)
+    if err_t <= floor + 0.25 * signal and err_t < err_p:
+        return "tensor"
+    if err_p <= floor + 0.25 * signal and err_p < err_t:
+        return "products"
+    return "indeterminate"
 
 
 def mass_properties_in_frame(mass: float, com: Sequence[float], inertia_com: Sequence, r: Mat,

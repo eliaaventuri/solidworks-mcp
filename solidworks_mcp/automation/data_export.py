@@ -61,6 +61,9 @@ from ..constants import SwErrors
 from .modeling_base import null_variant
 from ..utils.pdf3d import inspect_pdf3d
 from ..utils.sw_lang import lang_folders
+from ..utils.matlib import (SW_FILE_LOCATIONS_MATERIAL_DATABASES, merge_material_dirs, list_sldmat_files,
+                            libraries_signature, dedupe_materials)
+from ..utils import inertia as _inertia
 
 logger = logging.getLogger(__name__)
 
@@ -402,49 +405,72 @@ class DataExportOperations:
                 return p
         return None
 
+    def _dx_material_pref(self) -> str:
+        """Cartelle dei database dei materiali configurate in SolidWorks (Opzioni > Percorsi dei file), separate da ';'."""
+        try:
+            return str(self._sw_app.GetUserPreferenceStringValue(SW_FILE_LOCATIONS_MATERIAL_DATABASES) or "")
+        except Exception as e:
+            logger.debug(f"Percorsi dei database materiali non leggibili: {e}")
+            return ""
+
+    def _dx_material_dirs(self) -> List[str]:
+        """Cartelle delle librerie da leggere: prima quelle configurate in SolidWorks (preferenza 28), poi la standard;
+        senza doppioni, solo cartelle esistenti."""
+        std = None
+        try:
+            std = self._dx_material_dir()
+        except Exception:
+            pass
+        return merge_material_dirs(self._dx_material_pref(), [std])
+
     def _dx_load_materials(self) -> List[Dict]:
-        """[{name, category, density, database(path), file, props}] da tutti i .sldmat della libreria."""
+        """[{name, category, density, database(path), file, props}] da tutti i .sldmat di tutte le librerie configurate.
+        `database` = percorso del .sldmat (come lo vuole SetMaterialPropertyName2), `file` = nome senza estensione (come lo vuole
+        Body2.SetMaterialProperty e il cartiglio). Stesso nome in due librerie: vale la prima (le altre in `_dx_mat_duplicates`).
+        La cache vale finche' non cambia la firma (cartelle + percorso/data/dimensione di ogni .sldmat)."""
+        dirs = self._dx_material_dirs()
+        files = list_sldmat_files(dirs, MATERIAL_FILES)
+        sig = libraries_signature(dirs, files)
         cache = getattr(self, "_dx_mat_cache", None)
-        if cache is not None:
-            return cache
-        d = self._dx_material_dir()
+        if cache is not None and cache[0] == sig:
+            return cache[1]
         out = []
-        if d:
-            files = [f for f in MATERIAL_FILES if os.path.exists(os.path.join(d, f))]
-            files += [f for f in os.listdir(d) if f.lower().endswith(".sldmat") and f not in files]
-            for fn in files:
-                path = os.path.join(d, fn)
-                try:
-                    txt = open(path, "rb").read().decode("utf-16", errors="ignore")
-                    txt = re.sub(r"^<\?xml[^>]*\?>", "", txt.lstrip("\ufeff").strip())
-                    root = ET.fromstring(txt)
-                except Exception as e:
-                    logger.warning(f"sldmat {fn}: {e}")
+        for d, fn in files:
+            path = os.path.join(d, fn)
+            try:
+                with open(path, "rb") as fh:
+                    txt = fh.read().decode("utf-16", errors="ignore")
+                txt = re.sub(r"^<\?xml[^>]*\?>", "", txt.lstrip("\ufeff").strip())
+                root = ET.fromstring(txt)
+            except Exception as e:
+                logger.warning(f"sldmat {fn}: {e}")
+                continue
+            for cl in root.iter():
+                if not cl.tag.endswith("classification"):
                     continue
-                for cl in root.iter():
-                    if not cl.tag.endswith("classification"):
+                for m in cl:
+                    if not m.tag.endswith("material"):
                         continue
-                    for m in cl:
-                        if not m.tag.endswith("material"):
-                            continue
-                        props = {}
-                        for pp in m.iter():
-                            if pp.tag == "DENS":
-                                props["density_kg_m3"] = float(pp.get("value", "0") or 0)
-                            elif pp.tag == "EX":
-                                props["elastic_modulus_Pa"] = float(pp.get("value", "0") or 0)
-                            elif pp.tag == "NUXY":
-                                props["poisson"] = float(pp.get("value", "0") or 0)
-                            elif pp.tag == "SIGYLD":
-                                props["yield_strength_Pa"] = float(pp.get("value", "0") or 0)
-                            elif pp.tag == "SIGXT":
-                                props["tensile_strength_Pa"] = float(pp.get("value", "0") or 0)
-                            elif pp.tag == "KX":
-                                props["thermal_conductivity"] = float(pp.get("value", "0") or 0)
-                        out.append({"name": m.get("name"), "category": cl.get("name"),
-                                    "density": props.get("density_kg_m3", 0.0), "database": path,
-                                    "file": os.path.splitext(fn)[0], "props": props})
-        self._dx_mat_cache = out
+                    props = {}
+                    for pp in m.iter():
+                        if pp.tag == "DENS":
+                            props["density_kg_m3"] = float(pp.get("value", "0") or 0)
+                        elif pp.tag == "EX":
+                            props["elastic_modulus_Pa"] = float(pp.get("value", "0") or 0)
+                        elif pp.tag == "NUXY":
+                            props["poisson"] = float(pp.get("value", "0") or 0)
+                        elif pp.tag == "SIGYLD":
+                            props["yield_strength_Pa"] = float(pp.get("value", "0") or 0)
+                        elif pp.tag == "SIGXT":
+                            props["tensile_strength_Pa"] = float(pp.get("value", "0") or 0)
+                        elif pp.tag == "KX":
+                            props["thermal_conductivity"] = float(pp.get("value", "0") or 0)
+                    out.append({"name": m.get("name"), "category": cl.get("name"),
+                                "density": props.get("density_kg_m3", 0.0), "database": path,
+                                "file": os.path.splitext(fn)[0], "props": props})
+        out, self._dx_mat_duplicates = dedupe_materials(out)
+        self._dx_mat_libraries = {"folders": list(dirs), "files": [os.path.join(d, f) for d, f in files]}
+        self._dx_mat_cache = (sig, out)
         return out
 
     def _dx_find_material(self, material: str, category: str = None):
@@ -468,8 +494,10 @@ class DataExportOperations:
 
     def list_materials(self, category: str = None, query: str = None, include_properties: bool = False,
                        limit: int = 400) -> Dict:
-        """Elenco dei materiali della libreria SolidWorks (file .sldmat) per categoria: nome, densita' kg/m3.
-        Senza `category` restituisce l'elenco delle categorie con il numero di materiali."""
+        """Elenco dei materiali delle librerie SolidWorks (file .sldmat) per categoria: nome, densita' kg/m3. Sono incluse le
+        librerie personalizzate configurate in SolidWorks (Opzioni > Percorsi dei file > Database dei materiali), non solo quella
+        standard. Senza `category` restituisce l'elenco delle categorie con il numero di materiali; `libraries` elenca cartelle e
+        file letti, `duplicates` i nomi presenti in piu' librerie (vale il primo)."""
         try:
             mats = self._dx_load_materials()
             if not mats:
@@ -482,7 +510,9 @@ class DataExportOperations:
                 sel = [m for m in sel if category.lower() in m["category"].lower()]
             if query:
                 sel = [m for m in sel if query.lower() in m["name"].lower()]
-            data: Dict[str, Any] = {"categories": cats, "total": len(mats), "matching": len(sel)}
+            data: Dict[str, Any] = {"categories": cats, "total": len(mats), "matching": len(sel),
+                                    "libraries": dict(getattr(self, "_dx_mat_libraries", {})),
+                                    "duplicates": list(getattr(self, "_dx_mat_duplicates", []))}
             if category or query:
                 items = []
                 for m in sel[:int(limit)]:
@@ -498,8 +528,8 @@ class DataExportOperations:
 
     def assign_material(self, material: str, category: str = None, body: str = None, configuration: str = None,
                         link_title_block: bool = True) -> Dict:
-        """Assegna un materiale della libreria (nome italiano, es. 'AISI 304', 'Lega 6061', 'ABS generico') al pezzo
-        o a un corpo (`body`). `configuration`: nome | 'all' (default l'attiva). Con link_title_block (solo pezzo intero) imposta la
+        """Assegna un materiale delle librerie (anche quelle personalizzate configurate in SolidWorks; nome italiano, es.
+        'AISI 304', 'Lega 6061', 'ABS generico') al pezzo o a un corpo (`body`). `configuration`: nome | 'all' (default l'attiva). Con link_title_block (solo pezzo intero) imposta la
         proprieta' personalizzata Material = "SW-Material@file" cosi' il cartiglio dei disegni mostra il materiale."""
         try:
             doc, err = self._dx_doc((1,))
@@ -614,9 +644,12 @@ class DataExportOperations:
             return self._dx_fail("link_material_to_title_block", e)
 
     # ====================================================================== massa
-    def get_part_mass_properties(self, body: str = None, configuration: str = None, unit: str = None) -> Dict:
+    def get_part_mass_properties(self, body: str = None, configuration: str = None, unit: str = None,
+                                 coordinate_system: str = None) -> Dict:
         """Proprieta' di massa complete di pezzo (o di un corpo): massa, volume, area, densita' usata, baricentro,
-        momenti principali + assi principali, tensore d'inerzia nel baricentro e nell'origine [kg*m2 e kg*mm2]."""
+        momenti principali + assi principali, tensore d'inerzia nel baricentro e nell'origine [kg*m2 e kg*mm2].
+        `coordinate_system` (nome di una feature sistema di coordinate): in piu' `in_coordinate_system` con baricentro e
+        tensori nell'origine e negli assi di quel sistema (D7, calcolo in Python + controllo con IMassProperty2.SetCoordinateSystem)."""
         try:
             doc, err = self._dx_doc((1,))
             if err:
@@ -634,18 +667,23 @@ class DataExportOperations:
                 prev = self._dx_cfg_name(doc)
                 doc.ShowConfiguration2(configuration)
             try:
-                return self._dx_mass_props_body(doc, bd, body_name, unit)
+                return self._dx_mass_props_body(doc, bd, body_name, unit, coordinate_system)
             finally:
                 if prev:                            # la configurazione di partenza torna attiva anche in caso di errore
                     doc.ShowConfiguration2(prev)
         except Exception as e:
             return self._dx_fail("get_part_mass_properties", e)
 
-    def _dx_mass_props_body(self, doc, bd, body_name, unit) -> Dict:
+    def _dx_mass_props_body(self, doc, bd, body_name, unit, coordinate_system=None) -> Dict:
         """Corpo di get_part_mass_properties con la configurazione richiesta gia' attiva."""
         self._dx_rebuild(doc)
         if bd is not None:                      # dopo la ricostruzione i puntatori ai corpi sono vecchi: si cerca di nuovo
             bd, err = self._dx_body(doc, body_name)
+            if err:
+                return err
+        tf = None
+        if coordinate_system:
+            tf, err = self._dx_cs_transform(doc, coordinate_system)
             if err:
                 return err
         mp = self._com(doc.Extension, "CreateMassProperty2")
@@ -688,8 +726,96 @@ class DataExportOperations:
             data["material"] = doc.GetMaterialPropertyName2(cfg, _byref_bstr()) or None
         except Exception:
             pass
+        if tf is not None:
+            data["in_coordinate_system"] = self._dx_in_coordinate_system(
+                doc, bd, tf, coordinate_system, mass, com, Ic, Io, u)
         return self._result(True, f"Massa {mass:.6f} kg, volume {vol * 1e9:.3f} mm3, densita' {dens:.1f} kg/m3",
                             SwErrors.swSuccess, data)
+
+    def _dx_cs_names(self, doc) -> List[str]:
+        """Nomi dei sistemi di coordinate (feature di tipo CoordSys) del pezzo."""
+        return [n for n, t, _f in self._features(doc) if t == "CoordSys"]
+
+    def _dx_cs_transform(self, doc, name):
+        """(MathTransform del sistema di coordinate `name`, errore). Errore con l'elenco dei sistemi presenti."""
+        names = self._dx_cs_names(doc)
+        elenco = f"Sistemi di coordinate presenti: {names}" if names else "Il pezzo non ha sistemi di coordinate (create_coordinate_system)"
+        tf = None
+        try:
+            tf = doc.Extension.GetCoordinateSystemTransformByName(name)
+        except Exception:
+            pass
+        if tf is None:
+            return None, self._result(False, f"Sistema di coordinate '{name}' non trovato. {elenco}", SwErrors.swInvalidInput,
+                                      {"coordinate_systems": names})
+        return tf, None
+
+    def _dx_in_coordinate_system(self, doc, bd, tf, name, mass, com, Ic, Io, u) -> Dict:
+        """Baricentro e tensori d'inerzia nel sistema di coordinate utente (D7).
+        Calcolo in Python (utils/inertia.py) da massa, baricentro e tensore nel baricentro letti nel sistema del modello;
+        la convenzione dei termini fuori diagonale e' decisa a runtime. `api_check`: stessi valori da un SECONDO oggetto
+        IMassProperty2 con SetCoordinateSystem (controllo indipendente, mai bloccante)."""
+        arr = [float(v) for v in tf.ArrayData]
+        r, o = _inertia.frame_from_sw_transform(arr, 1.0)
+        conv = _inertia.detect_offdiag_convention(Ic, mass, com, Io)
+        used = "products" if conv == "products" else "tensor"
+        res = _inertia.mass_properties_in_frame(mass, com, Ic, r, o, offdiag=used)
+        issues = list(res["frame_issues"])
+        if len(arr) > 12 and arr[12] and abs(arr[12] - 1.0) > 1e-9:
+            issues.append(f"scala del sistema di coordinate {arr[12]} (ignorata)")
+        if conv == "indeterminate":
+            jc = _inertia.as_matrix(Ic)
+            if max(abs(jc[a][b]) for a in range(3) for b in range(3) if a != b) > 1e-9 * max(abs(jc[k][k]) for k in range(3)):
+                issues.append("convenzione dei termini fuori diagonale non determinabile (baricentro su un asse o piano "
+                              "del modello): assunto 'tensor', il segno dei termini fuori diagonale puo' essere opposto")
+        mm2 = 1e6
+
+        def t(m, k=1.0):
+            return [[round(m[i][j] * k, 12) for j in range(3)] for i in range(3)]
+        out = {
+            "name": name, "unit": u,
+            "center_of_mass": [round(self._from_m(c, u), 6) for c in res["center_of_mass"]],
+            "origin": [round(self._from_m(c, u), 6) for c in o],
+            "axes_in_model": {"x": [round(r[i][0], 9) for i in range(3)], "y": [round(r[i][1], 9) for i in range(3)],
+                              "z": [round(r[i][2], 9) for i in range(3)]},
+            "inertia_tensor_at_center_of_mass_kg_m2": t(res["inertia_at_center_of_mass"]),
+            "inertia_tensor_at_center_of_mass_kg_mm2": t(res["inertia_at_center_of_mass"], mm2),
+            "inertia_tensor_at_origin_kg_m2": t(res["inertia_at_origin"]),
+            "inertia_tensor_at_origin_kg_mm2": t(res["inertia_at_origin"], mm2),
+            "principal_moments_kg_m2": res["principal_moments"],
+            "frame_issues": issues, "offdiag_convention": conv,
+        }
+        try:
+            mp2 = self._com(doc.Extension, "CreateMassProperty2")
+            if bd is not None:
+                mp2.SelectedItems = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, (bd,))
+            try:
+                mp2.SetCoordinateSystem(tf)
+            except Exception:
+                mp2.SetCoordinateSystem(win32com.client.VARIANT(pythoncom.VT_DISPATCH, tf))
+            try:
+                self._com(mp2, "Recalculate")
+            except Exception:
+                pass
+            c2 = [float(x) for x in self._com(mp2, "CenterOfMass")]
+            i2 = [float(x) for x in mp2.GetMomentOfInertia(1)]
+            exp_c = res["center_of_mass"]
+            exp_i = _inertia.as_matrix([x for row in res["inertia_at_origin"] for x in row])
+            got_i = _inertia.as_matrix(i2)
+            dc = max(abs(c2[k] - exp_c[k]) for k in range(3))
+            di = max(abs(got_i[a][b] - exp_i[a][b]) for a in range(3) for b in range(3))
+            sc_i = max(abs(exp_i[a][b]) for a in range(3) for b in range(3)) or 1.0
+            sc_c = max(abs(x) for x in exp_c) or 1.0
+            out["api_check"] = {
+                "center_of_mass": [round(self._from_m(x, u), 6) for x in c2],
+                "inertia_at_origin_kg_m2": [[round(x, 12) for x in row] for row in got_i],
+                "max_diff_center_of_mass": round(self._from_m(dc, u), 9),
+                "max_rel_diff_center_of_mass": dc / sc_c,
+                "max_diff_inertia_kg_m2": di, "max_rel_diff_inertia": di / sc_i,
+            }
+        except Exception as e:
+            out["api_check"] = {"error": str(e)[:300]}
+        return out
 
     def set_mass_override(self, mass: float = None, center_of_mass: List[float] = None, unit: str = None,
                           configuration: str = None) -> Dict:
@@ -1123,6 +1249,77 @@ class DataExportOperations:
                                  "volume_active_mm3": round(self._volume_m3(doc) * 1e9, 4)})
         except Exception as e:
             return self._dx_fail("set_configuration_suppression", e)
+
+    def apply_configuration_table(self, table: Any, create_missing: bool = True, dry_run: bool = False, unit: str = None) -> Dict:
+        """D1: crea/aggiorna le configurazioni di un PEZZO da una tabella (percorso CSV/JSON, testo CSV/JSON o righe inline) con le
+        stesse intestazioni delle design table: 'D1@Schizzo1' (quota), '$STATO@Foro1' (S/R), '$PRP@Codice', '$MATERIALE', '$COMMENTO'.
+        dry_run=true restituisce il piano senza toccare il modello. Le azioni sono la composizione di metodi gia' verificati; dopo
+        un errore si continua e `success` e' true solo se tutte riescono. La configurazione attiva di partenza torna attiva alla fine.
+        Una design table vera (Excel) NON viene creata: InsertDesignTable non esiste nella type library di questa versione."""
+        from ..utils.config_table import parse_configuration_table, plan_configuration_changes
+        try:
+            doc, err = self._dx_doc((1,))
+            if err:
+                return err
+            parsed = parse_configuration_table(table)
+            if parsed["errors"]:
+                return self._result(False, "Tabella non valida: " + " | ".join(parsed["errors"]), SwErrors.swInvalidInput,
+                                    {"errors": parsed["errors"], "warnings": parsed["warnings"]})
+            existing = self._dx_cfg_names(doc)
+            plan = plan_configuration_changes(parsed, existing, create_missing)
+            if plan["errors"]:
+                return self._result(False, "Piano non applicabile: " + " | ".join(plan["errors"]), SwErrors.swInvalidInput,
+                                    {"errors": plan["errors"], "warnings": parsed["warnings"]})
+            excel = False
+            try:
+                import winreg
+                winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "Excel.Application"))
+                excel = True
+            except Exception:
+                excel = False
+            info = {"excel_available": excel,
+                    "design_table": "La design table vera non viene creata (InsertDesignTable non esiste nella type library di questa "
+                                    "versione di SolidWorks); le configurazioni sono applicate con le API di SolidWorks. La tabella usa "
+                                    "le stesse intestazioni delle design table, quindi si puo' riusare in Excel."}
+            data = {"actions": plan["actions"], "warnings": parsed["warnings"], "design_table": info,
+                    "configurations": [c["name"] for c in parsed["configurations"]]}
+            if dry_run:
+                data["dry_run"] = True
+                return self._result(True, f"Piano: {len(plan['actions'])} azioni su {len(parsed['configurations'])} configurazioni "
+                                          f"(dry_run, modello invariato)", SwErrors.swSuccess, data)
+            start = self._dx_cfg_name(doc)
+            results = []
+            try:
+                for a in plan["actions"]:
+                    kind = a["action"]
+                    cfg = a["configuration"]
+                    if kind == "add_configuration":
+                        r = self.add_part_configuration(cfg, a.get("comment") or "", activate=False)
+                    elif kind == "set_dimension":
+                        r = self.set_configuration_dimension(a["dimension"], a["value"], configuration=cfg, unit=unit)
+                    elif kind == "set_suppression":
+                        r = self.set_configuration_suppression(a["feature"], a["suppressed"], configuration=cfg)
+                    elif kind == "set_property":
+                        r = self.set_custom_property(a["name"], a["value"], configuration=cfg)
+                    elif kind == "assign_material":
+                        r = self.assign_material(a["material"], configuration=cfg)
+                    else:
+                        r = self._result(False, f"azione sconosciuta '{kind}'", SwErrors.swInvalidInput)
+                    results.append({**a, "ok": bool(r.get("success")), "message": r.get("message")})
+            finally:                                # la configurazione attiva di partenza torna attiva anche in caso di errore
+                try:
+                    if self._dx_cfg_name(doc) != start:
+                        doc.ShowConfiguration2(start)
+                        self._dx_rebuild(doc)
+                except Exception as e:
+                    logger.error(f"apply_configuration_table: ripristino configurazione '{start}' fallito: {e}")
+            failed = [r for r in results if not r["ok"]]
+            data.update({"results": results, "failed": len(failed), "active": self._dx_cfg_name(doc),
+                         "configurations_in_model": self._dx_cfg_names(doc)})
+            return self._result(not failed, f"{len(results) - len(failed)}/{len(results)} azioni riuscite (attiva: {data['active']})",
+                                SwErrors.swSuccess if not failed else SwErrors.swFeatureError, data)
+        except Exception as e:
+            return self._dx_fail("apply_configuration_table", e)
 
     # ====================================================================== export
     def _dx_inspect_stl(self, path: str) -> Dict:

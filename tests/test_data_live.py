@@ -127,8 +127,8 @@ async def scenario(c: Client, tools):
     record("tutti i tool del blocco 3 esposti dal server", not missing, f"{len(DATA_DISPATCH)} tool, mancanti {missing}")
     # blocco 4: +5 tool di tavola (arrange_drawing_dimensions, get_drawing_layout, set_dimension_tolerance, add_hole_table,
     # add_general_roughness) -> 172 + 5 = 177 (il controllo dell'esatto numero e' stato aggiornato per questo motivo)
-    # gruppo A (limiti dei disegni): +1 tool, add_explode_lines (linee di esplosione) -> 195 + 1 = 196
-    record("177 tool precedenti + 18 del blocco 5 (simulazione) + 1 del gruppo A (add_explode_lines) = 196, senza duplicati", len(tools) == len(set(tools)) and len(tools) >= 143 + len(DATA_DISPATCH) - 1 and len(tools) == 196,
+    # gruppo A (limiti dei disegni): +1 tool, add_explode_lines (linee di esplosione) -> 195 + 1 = 196; gruppo D (D1): +1, apply_configuration_table -> 197
+    record("177 tool precedenti + 18 del blocco 5 (simulazione) + 1 del gruppo A (add_explode_lines) + 1 del gruppo D (apply_configuration_table) = 197, senza duplicati", len(tools) == len(set(tools)) and len(tools) >= 143 + len(DATA_DISPATCH) - 1 and len(tools) == 197,
            f"{len(tools)} tool")
 
     # ------------------------------------------------------------------ 1. pezzo

@@ -18,13 +18,14 @@ _TOOLS = {
     # ---------------------------------------------------------------- materiali
     "list_materials": ("list_materials",
         "SolidWorks material library (.sldmat files; names follow the SolidWorks UI language: 'Lega 6061' in Italian, '6061 Alloy' in English). No arguments: categories with counts; "
-        "with `category` (e.g. 'Steel', 'Plastics') or `query` (e.g. '304', 'ABS'): matching materials with density in kg/m3.",
+        "with `category` (e.g. 'Steel', 'Plastics') or `query` (e.g. '304', 'ABS'): matching materials with density in kg/m3. Reads every material library configured in SolidWorks (Options > File Locations > "
+        "Material Databases), custom ones included; `libraries` lists the folders and files read, `duplicates` the repeated names (the first wins).",
         {"category": (S, "Category name (partial match)"), "query": (S, "Text contained in the material name"),
          "include_properties": (B, "Also return elastic modulus, yield strength, etc."),
          "limit": (N, "Maximum number of materials returned (count, default 400)")}, []),
     "assign_material": ("assign_material",
         "Assign a library material to the part (or to one body with `body`): 'AISI 304', 'Lega 6061' ('6061 Alloy' in English SolidWorks). Also sets the model's "
-        "Material property (\"SW-Material@file\") so the drawing title block shows it.",
+        "Material property (\"SW-Material@file\") so the drawing title block shows it. Materials of custom libraries configured in SolidWorks are included.",
         {"material": (S, "Material name (partial match accepted if unique)"), "category": (S, "Narrows the search to this category"),
          "body": (S, "Body name (default the whole part)"), "configuration": _CFGS,
          "link_title_block": (B, "Link Material to the title block (default true)")}, ["material"]),
@@ -35,8 +36,11 @@ _TOOLS = {
     # ---------------------------------------------------------------- massa
     "get_part_mass_properties": ("get_part_mass_properties",
         "Full mass properties of a part or body: mass, volume, surface area, density used, center of mass, principal moments and axes, "
-        "inertia tensor at the center of mass and at the origin (kg*m2 and kg*mm2), override status.",
-        {"body": (S, "Body name (default the whole part)"), "configuration": _CFG, "unit": _UNIT}, []),
+        "inertia tensor at the center of mass and at the origin (kg*m2 and kg*mm2), override status. With `coordinate_system` it also returns the center of mass and the inertia tensors "
+        "in the origin and axes of that user coordinate system (in_coordinate_system).",
+        {"body": (S, "Body name (default the whole part)"), "configuration": _CFG, "unit": _UNIT,
+         "coordinate_system": (S, "Name of a coordinate system feature of the part (see create_coordinate_system): adds "
+                               "in_coordinate_system with the center of mass and the inertia tensors expressed in that system's origin and axes")}, []),
     "set_mass_override": ("set_mass_override",
         "Override the mass (kg) with an optional center of mass. Without `mass` the override is removed.",
         {"mass": (N, "Mass in kg"), "center_of_mass": (A, "[x,y,z] in `unit` (default mm; default the computed center of mass)"), "unit": _UNIT,
@@ -87,6 +91,18 @@ _TOOLS = {
     "set_configuration_suppression": ("set_configuration_suppression",
         "Suppress/unsuppress a feature in the given configurations only (name | list | 'all'; default the active one).",
         {"feature": (S, "Feature name"), "suppressed": (B, "True to suppress, false to unsuppress (default true)"), "configuration": _CFGS}, ["feature"]),
+    "apply_configuration_table": ("apply_configuration_table",
+        "Create or update the configurations of a PART from a table (no Excel needed): a CSV/JSON file path, CSV/JSON text, or inline rows. "
+        "First column = configuration name; other columns use the design-table headers: 'D1@Sketch1' (dimension value, mm or degrees), "
+        "'$STATE@Cut-Extrude1' (S = suppressed, R = active), '$PRP@PartNumber' (configuration custom property), '$MATERIAL', '$COMMENT'. "
+        "Empty cell = leave unchanged. Example rows: [{\"Configuration\":\"Long\",\"D1@Sketch1\":60,\"$STATE@Cut-Extrude1\":\"R\","
+        "\"$PRP@PartNumber\":\"A-002\"}]. Missing configurations are created (create_missing); the active configuration is restored at the "
+        "end; dry_run=true only returns the plan. A real Excel design table is NOT created (InsertDesignTable is not available): the "
+        "result reports whether Excel is installed.",
+        {"table": (None, "File path (.csv/.json), CSV/JSON text, or array of row objects / object {configuration: {header: value}}"),
+         "create_missing": (B, "Create configurations that do not exist (default true)"),
+         "dry_run": (B, "Return the plan without changing the model (default false)"),
+         "unit": _UNIT}, ["table"]),
     # ---------------------------------------------------------------- export / import
     "export_model": ("export_model",
         "Export the active part/assembly: stl | 3mf (3D printing) | step | iges | x_t | x_b | sat | pdf (3D PDF) | eprt/easm (eDrawings); format from the file extension. "

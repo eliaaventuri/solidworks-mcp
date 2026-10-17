@@ -2,7 +2,7 @@
 Test OFFLINE: girano senza SolidWorks e senza Windows (pywin32 assente -> moduli COM finti).
 
 Coprono solo cio' che non tocca l'API di SolidWorks:
-  - registro dei tool: 196 tool, nomi unici, ogni tool smistato (elif in server.py o *_DISPATCH), ogni metodo esistente,
+  - registro dei tool: 197 tool, nomi unici, ogni tool smistato (elif in server.py o *_DISPATCH), ogni metodo esistente,
     parametri dello schema = parametri passati al metodo = parametri accettati dal metodo (nessun argomento perso o in piu'),
     `required` dello schema contenuti nelle proprieta' e uguali ai parametri obbligatori del metodo;
   - sicurezza (safety.py): rifiuto della sovrascrittura senza overwrite=true, annotazioni dei tool distruttivi;
@@ -68,7 +68,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 195                       # 196 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 196                       # 197 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -475,6 +475,82 @@ def test_materials(tmp):
     record("ricerca materiale: inesistente -> errore", hit is None and bool(err), err)
 
 
+    # ---- D8: librerie da tutte le cartelle configurate (preferenza 28 + standard), cache legata alla firma
+    from solidworks_mcp.utils.matlib import (split_path_list, merge_material_dirs, dedupe_materials, build_sldmat,
+                                             list_sldmat_files)
+    record("D8 split: ';', spazi, virgolette, voci vuote",
+           split_path_list(' C:\\a ; ;"C:\\b c";;C:\\d;') == ["C:\\a", "C:\\b c", "C:\\d"] and split_path_list(None) == [] and split_path_list("") == [],
+           str(split_path_list(' C:\\a ; ;"C:\\b c";;C:\\d;')))
+    ex = lambda p: p not in ("C:\\inesistente",)
+    mm = merge_material_dirs("C:\\Lib\\A;c:\\lib\\a\\;C:\\inesistente;C:\\Lib\\B", ["C:\\Std", "C:\\LIB\\B", None], exists=ex)
+    record("D8 cartelle: prima la preferenza, poi la standard, senza doppioni (maiuscole/barra finale), solo esistenti",
+           mm == ["C:\\Lib\\A", "C:\\Lib\\B", "C:\\Std"], str(mm))
+    record("D8 cartelle: preferenza vuota -> solo la standard", merge_material_dirs("", ["C:\\Std"], exists=lambda p: True) == ["C:\\Std"])
+    mk = lambda n, db: {"name": n, "database": db}
+    kept, dups = dedupe_materials([mk("Alfa", "C:\\a\\x.sldmat"), mk("Beta", "C:\\a\\x.sldmat"), mk("alfa", "C:\\b\\y.sldmat"),
+                                   mk("Beta", "C:\\a\\x.sldmat"), mk("Gamma", "C:\\b\\y.sldmat")])
+    record("D8 duplicati: si tiene il primo, il secondo e' segnalato; stesso file non e' duplicato",
+           [m["name"] for m in kept] == ["Alfa", "Beta", "Beta", "Gamma"]
+           and dups == [{"name": "alfa", "kept_database": "C:\\a\\x.sldmat", "other_database": "C:\\b\\y.sldmat"}], str(dups))
+
+    lib1 = os.path.join(tmp, "lib1")
+    lib2 = os.path.join(tmp, "lib2")
+    os.makedirs(lib1)
+    os.makedirs(lib2)
+    with open(os.path.join(lib2, "dxe_prova.sldmat"), "wb") as f:
+        f.write(build_sldmat([{"name": "DXE Prova 1234", "density": 1234.0}, {"name": "AISI 304", "density": 1.0}]))
+    with open(os.path.join(lib2, "altro.sldmat"), "wb") as f:
+        f.write(build_sldmat([{"name": "Altro Materiale", "density": 500.0}], classification="Mie"))
+    ff = list_sldmat_files([d, lib2], ("solidworks materials.sldmat",))
+    record(".sldmat: elenco file, standard per primi, poi alfabetico",
+           [n for _, n in ff] == ["solidworks materials.sldmat", "altro.sldmat", "dxe_prova.sldmat"], str([n for _, n in ff]))
+
+    sw = SolidWorksAutomation()
+    pref = {"v": ""}
+    sw._dx_material_dir = lambda: d
+    sw._dx_material_pref = lambda: pref["v"]
+    n0 = len(sw._dx_load_materials())
+    record("D8 senza preferenza: solo la cartella standard (4 materiali)", n0 == 4 and sw._dx_mat_duplicates == [], f"{n0}")
+    pref["v"] = f"{lib2};{os.path.join(tmp, 'non_esiste')};{lib1};{lib2.upper()}"
+    mats = sw._dx_load_materials()
+    mine = next((m for m in mats if m["name"] == "DXE Prova 1234"), None)
+    record("D8 libreria personalizzata letta: database = percorso del file, file = nome senza estensione, densita' 1234",
+           mine is not None and mine["density"] == 1234.0 and mine["file"] == "dxe_prova"
+           and mine["database"] == os.path.join(lib2, "dxe_prova.sldmat") and mine["category"] == "Personalizzati"
+           and mine["props"].get("elastic_modulus_Pa") == 2.0e9, str(mine and (mine["file"], mine["density"], mine["database"])))
+    record("D8 cache invalidata dal cambio di cartelle: 4 + 2 + 1 materiali, cartelle senza doppioni e inesistenti",
+           len(mats) == 4 + 1 + 1 and sw._dx_mat_libraries["folders"] == [os.path.normpath(lib2), os.path.normpath(lib1), os.path.normpath(d)],
+           f"{len(mats)} {sw._dx_mat_libraries['folders']}")
+    # la libreria personalizzata viene PRIMA di quella standard: 'AISI 304' vale quello di lib2, il standard e' duplicato
+    a304 = [m for m in mats if m["name"] == "AISI 304"]
+    record("D8 duplicato fra librerie: vale la prima (preferenza), l'altra e' segnalata",
+           len(a304) == 1 and a304[0]["density"] == 1.0
+           and sw._dx_mat_duplicates == [{"name": "AISI 304", "kept_database": os.path.join(lib2, "dxe_prova.sldmat"),
+                                          "other_database": os.path.join(d, "solidworks materials.sldmat")}],
+           str(sw._dx_mat_duplicates))
+    same = sw._dx_load_materials()
+    record("D8 cache riusata se nulla cambia", same is mats)
+    sw_hit, _ = sw._dx_find_material("dxe prova")
+    record("D8 _dx_find_material trova il materiale personalizzato", sw_hit is not None and sw_hit["file"] == "dxe_prova")
+    # file riscritto (firma cambia) -> riletto
+    with open(os.path.join(lib2, "dxe_prova.sldmat"), "wb") as f:
+        f.write(build_sldmat([{"name": "DXE Prova 1234", "density": 999.0}]))
+    mats2 = sw._dx_load_materials()
+    mine2 = next((m for m in mats2 if m["name"] == "DXE Prova 1234"), None)
+    record("D8 .sldmat riscritto -> cache invalidata, densita' nuova 999 e AISI 304 torna quello standard",
+           mats2 is not mats and mine2 is not None and mine2["density"] == 999.0
+           and next(m for m in mats2 if m["name"] == "AISI 304")["density"] == 8000.0 and sw._dx_mat_duplicates == [],
+           f"{len(mats2)}")
+    # preferenza ripristinata -> la libreria sparisce (anche la lista torna come all'inizio)
+    pref["v"] = ""
+    mats3 = sw._dx_load_materials()
+    record("D8 preferenza ripristinata -> materiale personalizzato non c'e' piu'",
+           len(mats3) == 4 and not any(m["name"] == "DXE Prova 1234" for m in mats3), f"{len(mats3)}")
+    r = sw.list_materials(query="AISI")
+    record("D8 list_materials: libraries e duplicates nel risultato",
+           r["success"] and r["data"]["libraries"]["folders"] == [os.path.normpath(d)] and r["data"]["duplicates"] == [], str(r["data"].get("libraries")))
+
+
 # ============================================================================ D1 tabella delle configurazioni
 def test_config_table(tmp):
     from solidworks_mcp.utils.config_table import parse_configuration_table, plan_configuration_changes, classify_column
@@ -510,6 +586,82 @@ def test_config_table(tmp):
     p2 = plan_configuration_changes(t, ["Default"], create_missing=False)
     record("D1: create_missing=false -> errore per le configurazioni assenti", len(p2["errors"]) == 2, str(p2["errors"]))
     record("D1: tabella con errori -> nessuna azione", plan_configuration_changes(bad, [])["actions"] == [])
+    en = [classify_column(h)[0] for h in ("$STATE@Cut-Extrude1", "$PRP@PartNumber", "$PROPERTY@PartNumber", "$MATERIAL", "$COMMENT",
+                                          "D1@Sketch1")]
+    record("D1: intestazioni inglesi ($STATE, $PROPERTY, $MATERIAL, $COMMENT) riconosciute",
+           en == ["suppression", "property", "property", "material", "comment", "dimension"], str(en))
+    te = parse_configuration_table([{"Configuration": "Long", "D1@Sketch1": 60, "$STATE@Cut-Extrude1": "S", "$PRP@PartNumber": "A-2"}])
+    record("D1: tabella inline con intestazioni inglesi",
+           not te["errors"] and te["configurations"][0]["name"] == "Long" and te["configurations"][0]["dimensions"] == {"D1@Sketch1": 60.0}
+           and te["configurations"][0]["suppression"] == {"Cut-Extrude1": True}
+           and te["configurations"][0]["properties"] == {"PartNumber": "A-2"}, str(te))
+    test_apply_configuration_table()
+
+
+def test_apply_configuration_table():
+    """apply_configuration_table con i metodi di SolidWorks sostituiti da registratori (nessuna chiamata COM)."""
+    sw = SolidWorksAutomation()
+    state = {"cfgs": ["Default"], "active": "Default", "calls": [], "shown": []}
+    doc = types.SimpleNamespace(ShowConfiguration2=lambda n: (state["shown"].append(n), state.update(active=n))[1])
+
+    def ok(msg="ok"):
+        return sw._result(True, msg)
+
+    def add(name, comment="", activate=True):
+        state["calls"].append(("add", name, comment, activate))
+        state["cfgs"].append(name)
+        state["active"] = name                          # come AddConfiguration2: la nuova diventa attiva (il metodo vero la rimette a posto)
+        return ok()
+
+    sw._dx_doc = lambda kinds=(1, 2, 3): (doc, None)
+    sw._dx_cfg_names = lambda d: list(state["cfgs"])
+    sw._dx_cfg_name = lambda d: state["active"]
+    sw._dx_rebuild = lambda d: None
+    sw.add_part_configuration = add
+    sw.set_configuration_dimension = lambda dim, v, configuration=None, unit=None: (state["calls"].append(("dim", dim, v, configuration, unit)), ok())[1]
+    sw.set_configuration_suppression = lambda f, s=True, configuration=None: (state["calls"].append(("sup", f, s, configuration)), ok())[1]
+    sw.set_custom_property = lambda n, v, configuration=None, type="text": (state["calls"].append(("prp", n, v, configuration)), ok())[1]
+    sw.assign_material = lambda m, category=None, body=None, configuration=None, link_title_block=True: \
+        (state["calls"].append(("mat", m, configuration)), ok())[1]
+
+    rows = [{"Configurazione": "Default", "$PRP@Codice": "A-1"},
+            {"Configurazione": "Lunga", "D1@Schizzo1": "60,5", "$MATERIALE": "AISI 304"},
+            {"Configurazione": "Pieno", "$STATO@Foro1": "S"}]
+    r = sw.apply_configuration_table(rows, dry_run=True)
+    d = r["data"]
+    record("D1 tool: dry_run -> piano di 6 azioni e nessuna chiamata a SolidWorks",
+           r["success"] and not state["calls"] and d.get("dry_run") is True and len(d["actions"]) == 6
+           and "excel_available" in d["design_table"] and "InsertDesignTable" in d["design_table"]["design_table"], str(r["message"]))
+    r = sw.apply_configuration_table(rows, unit="inch")
+    record("D1 tool: esecuzione -> metodi giusti in ordine, add_configuration con activate=False, unita' passata",
+           r["success"] and r["data"]["failed"] == 0 and state["calls"] == [
+               ("prp", "Codice", "A-1", "Default"), ("add", "Lunga", "", False), ("dim", "D1@Schizzo1", 60.5, "Lunga", "inch"),
+               ("mat", "AISI 304", "Lunga"), ("add", "Pieno", "", False), ("sup", "Foro1", True, "Pieno")], str(state["calls"]))
+    record("D1 tool: la configurazione attiva di partenza torna attiva", r["data"]["active"] == "Default" and state["active"] == "Default"
+           and state["shown"] == ["Default"], f"{state['active']} {state['shown']}")
+    # un'azione che fallisce: si continua, success=false, la configurazione attiva torna comunque quella di partenza
+    state.update(cfgs=["Default"], active="Default", calls=[], shown=[])
+    sw.set_configuration_dimension = lambda dim, v, configuration=None, unit=None: sw._result(False, "quota guidata da equazione")
+    r = sw.apply_configuration_table(rows)
+    oks = [a["ok"] for a in r["data"]["results"]]
+    record("D1 tool: errore in un'azione -> prosegue, success=false, attiva ripristinata",
+           not r["success"] and r["data"]["failed"] == 1 and oks == [True, True, False, True, True, True] and state["active"] == "Default",
+           str(oks))
+    # eccezione a meta': la configurazione attiva torna comunque quella di partenza
+    state.update(cfgs=["Default"], active="Default", calls=[], shown=[])
+
+    def boom(*a, **k):
+        raise RuntimeError("COM")
+    sw.set_custom_property = boom
+    r = sw.apply_configuration_table(rows)
+    record("D1 tool: eccezione durante l'applicazione -> risultato di errore e attiva ripristinata",
+           not r["success"] and state["active"] == "Default", str(r["message"])[:80])
+    # tabella o piano non validi: nessuna modifica
+    state.update(cfgs=["Default"], active="Default", calls=[], shown=[])
+    r1 = sw.apply_configuration_table([{"Configurazione": "X", "Boh": 1}])
+    r2 = sw.apply_configuration_table(rows, create_missing=False)
+    record("D1 tool: colonna sconosciuta / configurazioni assenti con create_missing=false -> errore e nessuna chiamata",
+           not r1["success"] and not r2["success"] and not state["calls"], f"{r1['message'][:50]} | {r2['message'][:50]}")
 
 
 # ============================================================================ D7 massa in un sistema utente
@@ -559,6 +711,25 @@ def test_inertia():
     record("D7: MathTransform di SolidWorks -> righe = assi (X utente = Y modello)",
            [Rsw[k][0] for k in range(3)] == [0, 1, 0] and osw == [0.01, 0.02, 0.03])
     record("D7: sistema sinistrorso segnalato", I.check_rotation([[1, 0, 0], [0, 1, 0], [0, 0, -1]]) != [])
+    # convenzione dei termini fuori diagonale decisa a runtime (confronto baricentro / origine)
+    io_t, io_p = tensor(pts), tensor(pts, "products")
+    record("D7: detect_offdiag_convention riconosce 'tensor' (masse puntiformi, baricentro fuori asse)",
+           I.detect_offdiag_convention(j_com, M, com, io_t) == "tensor")
+    record("D7: detect_offdiag_convention riconosce 'products' (termini fuori diagonale di segno opposto)",
+           I.detect_offdiag_convention(I.flip_offdiag(j_com), M, com, io_p) == "products")
+    # parallelepipedo 80x50x30 mm, 0,96 kg, spigolo in (10, 20, 5) mm, ruotato di 30 gradi attorno a Z
+    Rb = I.rotation_about("z", 30)
+    cb = [0.010 + 0.015, 0.020 + 0.040, 0.005 + 0.025]
+    jb = I.mat_mul(I.mat_mul(Rb, box), I.mat_t(Rb))
+    io_b = I.steiner(jb, m, cb)
+    record("D7: parallelepipedo traslato e ruotato -> 'tensor'", I.detect_offdiag_convention(jb, m, cb, io_b) == "tensor")
+    record("D7: parallelepipedo traslato e ruotato, prodotti d'inerzia -> 'products'",
+           I.detect_offdiag_convention(I.flip_offdiag(jb), m, cb, I.flip_offdiag(io_b)) == "products")
+    record("D7: baricentro sull'asse X, tensore diagonale -> 'indeterminate'",
+           I.detect_offdiag_convention(box, m, [0.015, 0, 0], I.steiner(box, m, [0.015, 0, 0])) == "indeterminate")
+    record("D7: baricentro nell'origine -> 'indeterminate'", I.detect_offdiag_convention(box, m, [0, 0, 0], box) == "indeterminate")
+    record("D7: dati incoerenti con entrambe le convenzioni -> 'indeterminate'",
+           I.detect_offdiag_convention(jb, m, cb, [[io_b[a][b] * (1.0 if a == b else 0.3) for b in range(3)] for a in range(3)]) == "indeterminate")
 
 
 # ============================================================================ D10 PDF 3D
