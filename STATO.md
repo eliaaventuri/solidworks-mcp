@@ -10,7 +10,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Server registrato come `solidworks` in `~/.claude.json` e in `%APPDATA%\Claude\claude_desktop_config.json`.
 
 ## Cosa c'e'
-197 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 18 simulazione statica.
+202 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione (statica, frequenze, buckling, termico).
 
 | Area | Stato | Test live (ultima regressione, 2026-10-17/18) |
 |---|---|---|
@@ -18,7 +18,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 |
 | Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
 | Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 |
-| Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
+| Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` (2026-10-18, per sezione) E3 42, E5 36, E1 53, E4 37, E2 25 |
 | Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 147/147 (anche su GitHub Actions); `test_timeout_live` 18/18 |
 
 ## Regole di lavoro
@@ -30,7 +30,9 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Prima di cercare un'API, leggere le trappole gia' note in `STATO_STORICO.md` e nei docstring dei moduli `automation/`.
 
 ## Aperto
-- **Gruppo D** chiuso (fase 3, 2026-10-17): tutto `[x]` tranne D2 `[~]` (AP242 non scrivibile). **Gruppo E** (simulazione): da fare, piano in `PIANO_D_E.md`.
+- **Gruppo D** chiuso (fase 3, 2026-10-17): tutto `[x]` tranne D2 `[~]` (AP242 non scrivibile). **Gruppo E** chiuso (fase 4, 2026-10-18): tutto `[x]`.
+- Simulazione: un contatto locale senza compenetrazione che si apre (pezzo tirato e tenuto solo dal contatto) puo' bloccare il solutore
+  fino al timeout (una prova ha finito, una no): avviso nella descrizione di `add_simulation_contact`, caso facoltativo nel test (`SX_E1_TRAZIONE=1`).
 - Parziale: C3 (rotazione nei passi di traslazione dell'esploso: solo attorno alla direzione radiale, con un passo radiale di distanza 0).
 - Residuo visivo non bloccante: nella tavola del cuneo la vista ausiliaria non sta sulla perpendicolare allo spigolo.
 - Preferenze di SolidWorks cambiate durante lo sviluppo di cui non si conosce il valore originale: qualita' STL (int 78 = 2 fine)
@@ -183,6 +185,17 @@ egr_f2.log`):
   simulation 120/120, timeout 18/18; modeling_extra 258/259 e assembly_extra 213/214 per il solo conteggio fisso dei tool (196 -> 197,
   corretto nei test), rilanciati: 259/259 e 214/214 (`regressione_20261018_0003.md`). 0 processi SolidWorks rimasti.
 
+## Fase 4 (2026-10-18, gruppo E) — CHIUSA (regressione completa: alla fine del lavoro, fase 7)
+- Sonde dal vivo in `scripts_tmp/eprobe.py` (nomi, argomenti e trappole in `STATO_STORICO.md`, "Fase 4"); codice e test scritti da due
+  sotto-agenti in worktree, riportati su main e provati sezione per sezione con `tests/test_simulation_extra_live.py E3|E5|E1|E4|E2`.
+- 5 tool nuovi (202): `add_temperature`, `add_remote_load`, `add_bearing_load`, `add_simulation_contact`, `add_mesh_control`;
+  `create_static_study(analysis, modes)` crea anche studi di frequenze, buckling e termici; `get_simulation_results` risponde per tipo
+  di studio, con posizione e corpo del FOS minimo (E3) e momento delle reazioni (E4). Numeri in `LIMITI.md`, gruppo E.
+- Corretto dal vivo: le opzioni dello studio (`NoOfFrequencies`, `BucklingModes`) vanno lette da un oggetto tenuto in una variabile.
+- Offline 147/147. I test live contano i tool da `tests/live_common.py` (`EXPECTED_TOOLS = 202`).
+
 ## Prossimo passo
-Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2, 3 e 5 chiuse. Prossima: fase 4 (gruppo E, simulazione:
-E3 -> E5 -> E1 -> E4 -> E2), poi 6 (prove d'uso reali) e 7 (rilascio).
+Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0-5 chiuse. Prossime: 6 (prove d'uso reali, S1-S7) e 7 (rilascio),
+poi regressione completa in italiano.
+Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
+di Elia. Per le prove d'uso serve un server con l'istanza dedicata (vedi la sezione Fase 6 quando c'e').

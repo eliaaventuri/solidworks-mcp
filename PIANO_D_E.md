@@ -335,6 +335,6 @@ dell'utente). Le trascrizioni utili vanno in `docs/esempi/` come esempi per il R
 
 ## Problemi noti ancora aperti nel codice
 - ~~`import_model(merge_faces=...)`~~: tolto con D9 (2026-10-17).
-- `create_static_study(analysis=...)`: parametro del metodo ignorato, non esposto nello schema; lo studio e' sempre statico (si sistema con E5).
+- ~~`create_static_study(analysis=...)`~~: sistemato con E5 (2026-10-18).
 - `_as_collapse` (assiemi) chiude la PRIMA vista esplosa della configurazione, non necessariamente quella attiva: con piu' viste
   esplose potrebbe non richiudere quella mostrata (da verificare quando capita; basso impatto).

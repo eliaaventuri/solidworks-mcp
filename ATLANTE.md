@@ -22,7 +22,7 @@ solidworks_mcp/
   drawing_tools.py            schemi dei 38 tool di disegno -> automation/drawings.py e mixin drawing_*
   assembly_tools.py           schemi dei 35 tool di assieme -> automation/assembly*.py
   data_tools.py               schemi dei 30 tool di dati ed export -> automation/data_export.py
-  simulation_tools.py         schemi dei 18 tool di simulazione -> automation/simulation.py
+  simulation_tools.py         schemi dei 23 tool di simulazione (statica, frequenze, buckling, termico, contatti locali, carichi remoti/cuscinetto, controllo mesh) -> automation/simulation.py
   safety.py                   tool distruttivi (destructiveHint + nota [DESTRUCTIVE]), parametro overwrite e rifiuto della sovrascrittura
   config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
@@ -73,6 +73,7 @@ tests/test_assembly_extra_live.py  gruppo C (sotto-assiemi, specchiatura, esplos
 tests/test_data_live.py            dati ed export (materiali, massa, equazioni, configurazioni, export/import, misure, immagini)
 tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3), argomenti per sezione: test_data_extra_live.py D7 D1
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
+tests/test_simulation_extra_live.py gruppo E (E3 FOS minimo, E5 frequenze/buckling/termico, E1 contatti locali, E4 carichi remoti/cuscinetto, E2 controllo mesh), argomenti per sezione
 tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
