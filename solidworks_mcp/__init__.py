@@ -5,7 +5,7 @@ Server Model Context Protocol per usare SolidWorks da Claude (201 tool, 202 con 
 Derivato da alisamsam/solidworks-mcp (Samsaam Ali Baig, licenza MIT) e riscritto da Elia (elo-savage).
 """
 
-__version__ = "5.0.0"
+__version__ = "6.0.0"
 __author__ = "Elia (elo-savage)"
 
 from .automation import SolidWorksAutomation

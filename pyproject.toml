@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solidworks-mcp"
+dynamic = ["version"]
+description = "MCP server for SOLIDWORKS 2026 (Windows, COM): modeling, drawings, assemblies, data/export, simulation"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Elia (elo-savage)" }]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0,<2",      # la 2.x ha tolto l'API @server.list_tools() usata qui
+    "pywin32>=306",       # COM verso SolidWorks
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.scripts]
+solidworks-mcp = "solidworks_mcp.server:run"
+
+[tool.setuptools.dynamic]
+version = { attr = "solidworks_mcp.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["solidworks_mcp*"]
+
+[tool.setuptools.package-data]
+solidworks_mcp = ["config.json"]

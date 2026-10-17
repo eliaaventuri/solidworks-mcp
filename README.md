@@ -1,10 +1,10 @@
 # SolidWorks MCP
 
 Server [MCP](https://modelcontextprotocol.io/) che permette a Claude (Claude Code, Claude Desktop) di usare **SolidWorks**:
-modellare pezzi, montare assiemi, fare messe in tavola ISO, esportare e lanciare simulazioni statiche, descrivendo il lavoro a parole.
+modellare pezzi, montare assiemi, fare messe in tavola ISO, esportare e lanciare simulazioni, descrivendo il lavoro a parole.
 
 Il progetto e' partito da [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) (22 tool di base) ed e' stato
-riscritto ed esteso fino a **197 tool**, ognuno verificato su SolidWorks con test che misurano il risultato
+riscritto ed esteso fino a **202 tool** (versione 6.0.0), ognuno verificato su SolidWorks con test che misurano il risultato
 (volumi, masse, quote, posizioni, reazioni) e lo confrontano con il valore calcolato a mano.
 
 ## Cosa sa fare
@@ -15,8 +15,8 @@ riscritto ed esteso fino a **197 tool**, ognuno verificato su SolidWorks con tes
 | Modellazione | 50 | quote e relazioni di schizzo, rivoluzione, sweep, loft, shell, nervature, sformi, ripetizioni, Hole Wizard (ISO, ANSI, DIN, BSI, JIS), piani e sistemi di coordinate |
 | Disegni | 38 | tavole ISO in primo diedro, viste standard/proiettate/sezioni/dettagli/ausiliarie/interrotte, quote automatiche pulite, tolleranze, GD&T, rugosita', tabella fori, distinta, palloncini, export PDF/DXF/DWG |
 | Assiemi | 35 | inserimento e accoppiamenti (anche avanzati e limiti), ripetizioni, specchiatura con pezzo speculare, viste esplose, interferenze, gradi di liberta' misurati |
-| Dati ed export | 30 | materiali, massa e inerzie, proprieta' personalizzate, equazioni, configurazioni, export STL/3MF/STEP/IGES/Parasolid/PDF 3D/eDrawings con verifica del file, import, immagini, misure |
-| Simulazione | 18 | studio statico lineare: vincoli, forze, coppie, pressioni, gravita', contatto, mesh, esecuzione, risultati e mappe a colori |
+| Dati ed export | 31 | materiali (anche librerie personali), massa e inerzie (anche in un sistema di coordinate), proprieta' personalizzate, equazioni, configurazioni (anche da tabella CSV/JSON), export STL/3MF/STEP/IGES/Parasolid/PDF 3D/eDrawings con verifica del file, import, immagini ad alta risoluzione, misure |
+| Simulazione | 23 | studi statici, di frequenze proprie, di buckling e termici stazionari; vincoli, forze, coppie, pressioni, gravita', temperature, carichi remoti e da cuscinetto; contatto globale e locale, mesh con controlli locali; risultati (anche posizione del fattore di sicurezza minimo e momenti di reazione) e mappe a colori |
 
 Esempi di richieste:
 - *"Crea una flangia Ø120 spessore 15 con 6 fori M8 su un diametro di 90 e fanne la messa in tavola A3"*
@@ -34,7 +34,7 @@ Esempi di richieste:
 - Windows 10/11 con SolidWorks installato e con licenza. Sviluppato e testato su **SolidWorks 2026 SP4.1** con interfaccia
   **italiana**. Il server funziona anche con SolidWorks in **inglese**: piani standard e origine si trovano per posizione nell'albero,
   template e librerie si prendono dalla lingua attuale di SolidWorks, le scritte sulle tavole seguono la lingua (italiano o inglese).
-  La prova completa in inglese non e' ancora stata fatta (vedi `STATO.md`); altre versioni non sono state provate.
+  Tutti i test sono stati ripetuti anche con SolidWorks in inglese; altre versioni di SolidWorks non sono state provate.
 - Python 3.10+ **x64** (anche su Windows ARM64: Python x64 emulato).
 - Per la simulazione: l'add-in SOLIDWORKS Simulation.
 
@@ -44,12 +44,16 @@ Esempi di richieste:
 git clone https://github.com/elo-savage/solidworks-mcp.git
 cd solidworks-mcp
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -e .
 ```
+Il venv deve essere di un Python **x64** (`python -c "import platform; print(platform.machine())"` deve dire `AMD64`; su un PC
+ARM64 installare il Python x64 da python.org). `pip install -e .` installa le dipendenze e il comando
+`.venv\Scripts\solidworks-mcp.exe`; in alternativa `pip install -r requirements.txt` e si avvia `solidworks_mcp_server.py`.
+L'installazione "modificabile" (`-e`) serve perche' il server scrive i formati dei fogli verticali nella cartella `formats/` del progetto.
 
 **Claude Code:**
 ```bash
-claude mcp add solidworks -- C:\percorso\solidworks-mcp\.venv\Scripts\python.exe C:\percorso\solidworks-mcp\solidworks_mcp_server.py
+claude mcp add solidworks -- C:\percorso\solidworks-mcp\.venv\Scripts\solidworks-mcp.exe
 ```
 
 **Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
@@ -57,12 +61,13 @@ claude mcp add solidworks -- C:\percorso\solidworks-mcp\.venv\Scripts\python.exe
 {
   "mcpServers": {
     "solidworks": {
-      "command": "C:\\percorso\\solidworks-mcp\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\percorso\\solidworks-mcp\\solidworks_mcp_server.py"]
+      "command": "C:\\percorso\\solidworks-mcp\\.venv\\Scripts\\solidworks-mcp.exe"
     }
   }
 }
 ```
+Per lavorare con un'istanza di SolidWorks nascosta e separata da quella aperta a mano, aggiungere `"env": {"SW_MCP_INSTANCE": "dedicated"}`
+(vedi Configurazione).
 
 Avviare SolidWorks, riavviare il client e chiedere *"collegati a SolidWorks"*.
 
@@ -86,13 +91,14 @@ Avviare SolidWorks, riavviare il client e chiedere *"collegati a SolidWorks"*.
 ```bash
 python tests/test_offline.py                         # senza SolidWorks, anche su Linux: registro dei tool, sicurezza, lettori dei file
 .venv\Scripts\python.exe tests\test_modeling_live.py  # con SolidWorks (istanza dedicata): uno script per area, vedi ATLANTE.md
+.venv\Scripts\python.exe tests\run_all.py            # regressione completa (circa 1 h 40), riepilogo in test_output\regressione_*.md
 ```
 I test live costruiscono i pezzi solo tramite i tool MCP e confrontano i numeri con i valori attesi; esiti in `STATO.md`.
 Il test offline gira anche su GitHub a ogni push (`.github/workflows/test-offline.yml`).
 
 ## Documentazione
 - `STATO.md`: stato attuale ed esiti dei test. `STATO_STORICO.md`: diario completo e trappole dell'API di SolidWorks.
-- `LIMITI.md`: limiti noti e avanzamento. `PIANO_D_E.md`: prossimi lavori (dati/export e simulazione).
+- `LIMITI.md`: limiti noti e avanzamento. `PIANO_D_E.md`: piano di lavoro a fasi. `CHANGELOG.md`: cosa e' cambiato per versione.
 - `ATLANTE.md`: a cosa serve ogni file.
 
 ## Licenza
