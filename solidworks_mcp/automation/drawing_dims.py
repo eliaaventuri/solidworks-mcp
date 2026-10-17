@@ -478,7 +478,7 @@ class DrawingDimsMixin:
             obstacles += self._dq_label_rects(v)
         except Exception as e:
             logger.debug(f"view label obstacle: {e}")
-        use = self._dq_usable(doc)
+        self._dq_usable(doc)
         for axis in ("H", "V"):
             items = [i for i in infos if i["kind"] == KIND_LIN and i["axis"] == axis]
             if not items:
@@ -637,7 +637,7 @@ class DrawingDimsMixin:
         if not cands:
             return False
         cands.sort(key=lambda c: -c["dist"])
-        an_old = i["dd"].GetAnnotation
+        i["dd"].GetAnnotation
         for c in cands[:3]:
             vx, vy = c["v"]
             d1, d2 = c["d1"], c["d2"]
@@ -715,7 +715,7 @@ class DrawingDimsMixin:
             return False
         a = arcs[0]
         cx, cy = a[0], a[1]
-        cur_r = math.hypot(a[5] - cx, a[6] - cy) if len(a) > 6 else 0.0
+        math.hypot(a[5] - cx, a[6] - cy) if len(a) > 6 else 0.0
         an = i["dd"].GetAnnotation
         pos = tuple(float(t) for t in an.GetPosition)
         # direzione dal vertice verso la posizione attuale del testo
@@ -1186,7 +1186,7 @@ class DrawingDimsMixin:
             return None
         axis = info["axis"]
         c = info["c"]
-        core = self._dq_core(v)
+        self._dq_core(v)
 
         def cands(a, far):
             out = []
@@ -1203,7 +1203,7 @@ class DrawingDimsMixin:
         if not self._dm_select_pair(doc, c1, c2):
             return None
         pos = tuple(float(t) for t in info["dd"].GetAnnotation.GetPosition)
-        tr = info.get("trect")
+        info.get("trect")
         tx, ty = (pos[0], pos[1])
         dd2 = doc.AddDimension2(tx, ty, 0)
         doc.ClearSelection2(True)
@@ -1254,7 +1254,6 @@ class DrawingDimsMixin:
             tt = self._TOL_TYPES.get(str(tolerance_type).lower())
             if tt is None:
                 return self._result(False, f"tolerance_type: {list(self._TOL_TYPES)}", SwErrors.swInvalidInput)
-            target = None
             vs = self._sheet_views(doc)
             if view:
                 v0, err = self._find_view(doc, view)

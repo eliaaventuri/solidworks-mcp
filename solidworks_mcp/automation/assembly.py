@@ -804,7 +804,7 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                 pp = self._com(self._com(plane_obj, "GetSurface"), "PlaneParams")  # faccia piana: normale + punto
                 n, o = list(pp[0:3]), list(pp[3:6])
             if comp_name:
-                comp, e = self._as_comp(doc, comp_name)
+                comp, _ = self._as_comp(doc, comp_name)
                 if comp is not None:
                     M, t = self._as_pose(comp)
                     n = [sum(M[j][i] * n[i] for i in range(3)) for j in range(3)]
@@ -1143,7 +1143,6 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             self._as_collapse(doc)
             n_before = len(self._as_mate_features(doc))
             doc.ClearSelection2(True)
-            sel = []
             infos = []
             ents = [entity1, entity2] + ([entity3] if entity3 is not None else [])
             marks = [1, 1, 2] if mt == 8 else [1, 1, 1]

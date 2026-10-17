@@ -721,7 +721,7 @@ class DataExportOperations:
 
     def _dx_read_prop(self, cpm, name):
         v, r = _byref_bstr(), _byref_bstr()
-        res = cpm.Get6(name, False, v, r, _byref_bool(), _byref_bool())
+        cpm.Get6(name, False, v, r, _byref_bool(), _byref_bool())
         try:
             tp = PROP_TYPE_NAMES.get(int(cpm.GetType2(name)), "unknown")
         except Exception:

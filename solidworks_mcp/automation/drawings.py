@@ -499,7 +499,6 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                                     SwErrors.swInvalidInput)
             W, H, first = self._sheet_dims(doc)
             self._layout_title = self._get_doc_title(doc)
-            ortho_dirs = (5, 6, 3, 4)
             plan_keys = list(keys)
             if 1 not in plan_keys:
                 plan_keys = [1] + plan_keys          # the front view is the projection parent
@@ -685,7 +684,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                         paper, orient = self._sheet_paper_name(doc)
                         scale_txt = f"{pr[2]:g}:{pr[3]:g}"
                         proj = "first" if bool(pr[4]) else "third"
-                        old_name = self._com(sh_old, "GetName")
+                        self._com(sh_old, "GetName")
                         self._select_view(doc, v)
                         doc.Extension.DeleteSelection2(0)
                         doc.ClearSelection2(True)
@@ -953,7 +952,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             parent, err = self._find_view(doc, parent_view)
             if err:
                 return err
-            sc = float(parent.ScaleDecimal)
+            float(parent.ScaleDecimal)
             q = [self._m(v, unit)  for v in (x1, y1, x2, y2)]
             self._select_view(doc, parent)
             doc.ActivateView(self._com(parent, "GetName2"))

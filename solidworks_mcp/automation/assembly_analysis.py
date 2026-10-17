@@ -118,7 +118,7 @@ class AssemblyAnalysisMixin:
                 return self._result(False, "Impossibile attivare la vista esplosa", SwErrors.swFeatureError)
             tol = self._mmu(float(tolerance), "mm") if tolerance else 0.0005
             comps = [c for c in self._as_top_components(doc, True) if int(self._com(c, "GetSuppression")) != 0]
-            by_name = {str(c.Name2): c for c in comps}
+            {str(c.Name2): c for c in comps}
 
             def clusters_for(dir_idx, only=None):
                 """[{'lat','items':[(comp_name, cyl)]}] con almeno 2 componenti."""
@@ -466,7 +466,7 @@ class AssemblyAnalysisMixin:
             names = [str(n) for n in (self._com(doc, "GetConfigurationNames") or ())]
             if name not in names:
                 return self._result(False, f"Configurazione '{name}' non trovata. Presenti: {names}", SwErrors.swInvalidInput)
-            ok = doc.ShowConfiguration2(str(name))
+            doc.ShowConfiguration2(str(name))
             active = str(self._ex_config(doc).Name)
             return self._result(active == name, f"Configurazione attiva: {active}",
                                 SwErrors.swSuccess if active == name else SwErrors.swFeatureError, {"active": active})

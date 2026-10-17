@@ -924,7 +924,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             fm = doc.FeatureManager
             created, fails, infos = [], [], []
             v0 = self._volume_m3(doc)
-            before_all = self._names(doc)
+            self._names(doc)
             pick_map = None         # (F, R) dal primo foro su faccia curva: punto di pick = F^T R^T p (vedi _hw_pick)
             pos_errs = []
 

@@ -213,7 +213,7 @@ class DrawingLayoutMixin:
         tit = (title[0] - 0.004, title[1], title[2], title[3] + 0.006)
         reserved = [(r[0] - 0.01, r[1] - 0.01, r[2] + 0.01, r[3] + 0.01) for r in
                     getattr(self, "_reserved", {}).get(getattr(self, "_layout_title", None), [])]
-        best_pos, best_fit = None, False
+        best_pos = None
         for factor in (1.0, 0.8, 0.64, 0.5, 0.4):
             gxx, gyy = gx * factor, gy * factor
             block_w = lw + (gxx if lw else 0) + fw + ((gxx + rw) if rw else 0) + ((gxx + bw) if bw else 0)
@@ -384,7 +384,7 @@ class DrawingLayoutMixin:
         horizontal ones above, vertical ones on the right, diameters/radii on the left (staggered)."""
         r = self._view_rect(view)
         # real geometry box: outline minus the ~6 mm padding
-        x0, y0, x1, y1 = r[0] + 0.006, r[1] + 0.006, r[2] - 0.006, r[3] - 0.006
+        y0, x1, y1 = r[1] + 0.006, r[2] - 0.006, r[3] - 0.006
         infos = [self._dim_info(d) for d in self._display_dims(view)]
         above, right, rad = [], [], []
         for i in infos:

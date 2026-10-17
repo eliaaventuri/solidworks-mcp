@@ -126,9 +126,9 @@ class SketchConstraintOperations:
         try:
             cv = self._com(seg, "GetCurve")
             # campiona la curva in modo uniforme sul parametro
-            p = cv.Evaluate2(0.0, 0)
+            cv.Evaluate2(0.0, 0)
         except Exception:
-            p = None
+            pass
         if t == 1:
             try:
                 c = seg.GetCenterPoint2
@@ -485,8 +485,6 @@ class SketchConstraintOperations:
                 dim_obj.SystemValue = si
             doc.ClearSelection2(True)   # niente EditRebuild3: chiuderebbe lo schizzo attivo
             cur = float(self._com(dim_obj, "SystemValue"))
-            is_angle = (kind == "angle") or (value is None and dd is not True and
-                                                int(self._com(dd, "GetType") if False else 0) == 5)
             shown = math.degrees(cur) if kind == "angle" else self._from_m(cur, unit)
             short = full.rsplit("@", 1)[0] if full.count("@") >= 2 else full
             status = int(self._com(sk, "GetConstrainedStatus"))
@@ -784,7 +782,7 @@ class SketchConstraintOperations:
             if not ok:
                 return self._result(False, info.get("error", "selezione fallita"), SwErrors.swSelectionError)
             n0 = len(self._segments(sk))
-            res = doc.SketchManager.SketchUseEdge3(chain, False)
+            doc.SketchManager.SketchUseEdge3(chain, False)
             doc.ClearSelection2(True)
             n1 = len(self._segments(sk))
             if n1 <= n0:

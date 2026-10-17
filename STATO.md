@@ -115,8 +115,9 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
 - **5.9 log**: in `%LOCALAPPDATA%\solidworks-mcp\` con rotazione (5 file da 5 MB). `log_file` in config.json puo' essere un percorso assoluto.
   Il vecchio `solidworks_mcp.log` nella cartella del pacchetto non viene piu' scritto (si puo' cancellare).
 - **5.8 pyflakes**: tolti 46 import non usati e 1 f-string senza segnaposto nel pacchetto (verificato a mano: `git diff --stat`, py_compile).
-  Restano 21 "assegnata ma mai usata" e 5 import di `win32com.client`/`pythoncom` (lasciati di proposito). Il CI NON e' ancora
-  cambiato: controlla ancora solo i nomi non definiti. Va fatto dopo aver sistemato le variabili inutilizzate (richiede giudizio).
+  Poi le 21 variabili "assegnata ma mai usata" sono sparite (9 file; 13 chiamate COM tenute come espressione nuda, 4 pure ancora
+  da togliere, `assembly.py` `comp, _ =`). Restano nel pacchetto solo 5 import di `win32com.client`/`pythoncom` (side-effect, da
+  verificare dal vivo prima di togliere) e nei test 17 avvisi. Il CI NON e' ancora cambiato: controlla ancora solo i nomi non definiti.
 - Test offline **91/91** (con `.venv`), nuovi controlli: gating di execute_python, gruppi di SW_MCP_TOOLSETS, gruppo sconosciuto.
 - **Non ancora fatti** (servono SolidWorks o altra decisione): 5.1 timeout generale, 5.2 ripresa dopo crash (entrambi da provare dal vivo),
   5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).

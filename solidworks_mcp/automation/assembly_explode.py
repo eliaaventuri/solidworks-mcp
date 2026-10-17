@@ -540,7 +540,7 @@ class AssemblyExplodeMixin:
             if mode not in ("axis", "native", "mates", "auto"):
                 return self._result(False, "mode: axis | native | mates | auto", SwErrors.swInvalidInput)
             if mode in ("native", "auto"):
-                had = bool(self._ex_names(doc))
+                bool(self._ex_names(doc))
                 ok, why = self._ex_native(doc)
                 if ok:
                     ov = self._ex_overlaps(doc)
