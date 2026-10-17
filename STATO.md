@@ -12,14 +12,14 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 ## Cosa c'e'
 197 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 18 simulazione statica.
 
-| Area | Stato | Test live (ultima regressione, 2026-10-17) |
+| Area | Stato | Test live (ultima regressione, 2026-10-17/18) |
 |---|---|---|
 | Modellazione 3D (blocco 1, gruppo B) | completa (UNI assente dal database di SolidWorks) | `test_modeling_live` 175/175, `test_modeling_extra_live` 259/259 |
 | Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 |
 | Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
-| Dati ed export (blocco 3) | funzionanti; gruppo D da fare | `test_data_live` 159/159 |
+| Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 |
 | Simulazione (blocco 5) | solo statica lineare; gruppo E da fare | `test_simulation_live` 120/120 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 83/83 (2026-10-17; anche su GitHub Actions) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 147/147 (anche su GitHub Actions); `test_timeout_live` 18/18 |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -161,7 +161,7 @@ egr_f2.log`):
 - **FASE 5 CHIUSA** (criterio del piano: 1-4 provati dal vivo, 5-9 coperti dal test offline). Rinviato, facoltativo: 5.10 risorse e
   prompt MCP (si puo' fare durante la fase 6, se le prove d'uso lo chiedono).
 
-## Fase 3 (2026-10-17, gruppo D) — CHIUSA (regressione completa: vedi sotto)
+## Fase 3 (2026-10-17/18, gruppo D) — CHIUSA
 - **D5 `[x]`**: `export_model_image(hide_reference=true)` sugli assiemi nasconde anche i riferimenti dei componenti (toggle di documento
   198, salvato e ripristinato). `test_data_live` 168/168 (sez. 11: 1596 / 0 / 1596 pixel azzurri). Trappola: nell'assieme la
   visualizzazione dei piani e' spenta di default (dettagli in `STATO_STORICO.md`).
@@ -177,6 +177,11 @@ egr_f2.log`):
   D7 (convenzione: GetMomentOfInertia da' i PRODOTTI d'inerzia), D8, D1 (nuovo tool `apply_configuration_table`: 197 tool), D10,
   D2 `[~]`, D3 (verifica strutturale; eDrawings non automatizzabile), D4 (cattura di stampa + ricentratura, prospettiva), D9
   (step_as/interconnect/diagnose). Numeri in `LIMITI.md`, trappole in `STATO_STORICO.md`. Offline 147/147.
+
+- **Regressione completa di chiusura del gruppo D** (2026-10-17 22:41 -> 2026-10-18, italiano, `test_output/regressione_20261017_2241.md`):
+  offline 147/147, modeling 175/175, drawings 65/65, drawing_quality 139/139, assembly 113/113, data 183/183, data_extra 110/110,
+  simulation 120/120, timeout 18/18; modeling_extra 258/259 e assembly_extra 213/214 per il solo conteggio fisso dei tool (196 -> 197,
+  corretto nei test), rilanciati: 259/259 e 214/214 (`regressione_20261018_0003.md`). 0 processi SolidWorks rimasti.
 
 ## Prossimo passo
 Piano completo fino al server finito, a fasi, in `PIANO_D_E.md`. Fasi 0, 1, 2, 3 e 5 chiuse. Prossima: fase 4 (gruppo E, simulazione:

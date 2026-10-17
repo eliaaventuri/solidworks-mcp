@@ -842,7 +842,7 @@ def tool_checks(tl):
     print("\n== 0. Tool e schemi")
     names = [x.name for x in tl]
     by = {x.name: x for x in tl}
-    record("196 tool, nessun duplicato (il gruppo C non aggiunge tool, solo parametri)", len(names) == 196 and len(set(names)) == 196, f"{len(names)} tool")
+    record("197 tool (196 + apply_configuration_table del gruppo D), nessun duplicato", len(names) == 197 and len(set(names)) == 197, f"{len(names)} tool")
     m = by["mirror_components"]
     record("mirror_components: destructiveHint, nota [DESTRUCTIVE], parametri opposite_hand/name_suffix/folder/overwrite/align_exact",
            bool(m.annotations and m.annotations.destructiveHint) and "DESTRUCTIVE" in (m.description or "")

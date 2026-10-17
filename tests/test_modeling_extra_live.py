@@ -173,7 +173,7 @@ async def scenario(c, tl):
 async def sicurezza_tool_list(c, tl):
     print("\n== 0. Elenco tool e annotazioni")
     names = [t.name for t in tl]
-    record("196 tool, nessun duplicato (il gruppo B non aggiunge tool)", len(names) == 196 and len(set(names)) == 196,
+    record("197 tool (196 + apply_configuration_table del gruppo D), nessun duplicato", len(names) == 197 and len(set(names)) == 197,
            f"{len(names)} tool")
     by = {t.name: t for t in tl}
     destr = ["close_document", "save_document", "save_drawing", "export_drawing", "export_model", "export_model_image",
