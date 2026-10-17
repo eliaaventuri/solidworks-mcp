@@ -109,7 +109,7 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
 ## Fase 5 (2026-10-17, parziale, offline) — IN CORSO
 - **5.7 `execute_python`**: disattivato di default; si attiva con `SW_MCP_ALLOW_PYTHON=1` (letto a ogni chiamata). Non esposto nell'elenco
   e rifiutato con messaggio che spiega come attivarlo. I test live lo attivano da soli (`tests/live_common.py`), quindi contano 196 tool.
-  Offline: 195 tool di default. Da confermare con Elia (la proposta del piano e' questa).
+  Offline: 195 tool di default. Confermato da Elia (2026-10-17): resta disattivato di default.
 - **5.5 `SW_MCP_TOOLSETS`**: gruppi `base` (sempre attivo), `modeling`, `drawings`, `assembly`, `data`, `simulation`; default tutti.
   Un tool di un gruppo non scelto risponde con errore che nomina il gruppo da aggiungere.
 - **5.9 log**: in `%LOCALAPPDATA%\solidworks-mcp\` con rotazione (5 file da 5 MB). `log_file` in config.json puo' essere un percorso assoluto.
