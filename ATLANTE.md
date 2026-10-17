@@ -70,6 +70,7 @@ tests/test_assembly_live.py        assiemi (perno-staffa-boccola-viti, esploso, 
 tests/test_assembly_extra_live.py  gruppo C (sotto-assiemi, specchiatura, esplosi, accoppiamenti avanzati, DOF); argomenti C1 C5 ..., CX_REUSE=1
 tests/test_data_live.py            dati ed export (materiali, massa, equazioni, configurazioni, export/import, misure, immagini)
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
+tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
 `.github/workflows/test-offline.yml`: GitHub Actions esegue `test_offline.py` e pyflakes (nomi non definiti) a ogni push.

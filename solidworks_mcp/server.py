@@ -395,6 +395,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                                                   "controllare la finestra di SolidWorks e riprovare piu' tardi.")]
         _active_job = _SW_EXECUTOR.submit(_dispatch_tool, name, arguments or {})
         timeout = _tool_timeout()
+        if sw_automation._sw_app is None:               # il tool dovra' prima avviare/collegare SolidWorks: si aggiunge il tempo di avvio
+            timeout += _startup_allowance()
         try:
             result = await asyncio.wait_for(asyncio.wrap_future(_active_job), timeout=timeout)
         except asyncio.TimeoutError:
@@ -425,8 +427,19 @@ _active_job = None      # future del tool in corso sul thread COM; None o conclu
 
 
 def _tool_timeout() -> float:
-    """Secondi massimi per un tool (config.json: tool_timeout)."""
-    return float(config.tool_timeout)
+    """Secondi massimi per un tool: SW_MCP_TOOL_TIMEOUT se impostata, altrimenti config.json (tool_timeout)."""
+    try:
+        return float(os.environ.get("SW_MCP_TOOL_TIMEOUT") or config.tool_timeout)
+    except ValueError:
+        return float(config.tool_timeout)
+
+
+def _startup_allowance() -> float:
+    """Secondi in piu' quando SolidWorks non e' ancora collegato (avvio dell'istanza dedicata: SW_MCP_STARTUP_TIMEOUT + 60)."""
+    try:
+        return float(os.environ.get("SW_MCP_STARTUP_TIMEOUT", "240")) + 60
+    except ValueError:
+        return 300.0
 
 
 def _timeout_message(name: str, timeout: float) -> str:

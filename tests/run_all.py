@@ -26,7 +26,8 @@ TESTS = ROOT / "tests"
 OUT = ROOT / "test_output"
 
 # ordine della regressione: prima il test senza SolidWorks, poi dai tool base alle aree che li usano
-ORDER = ["offline", "modeling", "modeling_extra", "drawings", "drawing_quality", "assembly", "assembly_extra", "data", "simulation"]
+ORDER = ["offline", "modeling", "modeling_extra", "drawings", "drawing_quality", "assembly", "assembly_extra", "data", "simulation",
+         "timeout"]
 PASS_RE = re.compile(r"(\d+)/(\d+) PASS")
 
 

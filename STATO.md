@@ -124,8 +124,15 @@ Da guardare a occhio (Elia): `test_output/qual_*.png` dopo la conferma in italia
   Allo scadere: in modalita' dedicata il PID viene chiuso con taskkill (documenti non salvati persi, il server va riavviato);
   con l'istanza dell'utente non viene toccata, si riceve un errore che chiede di controllare SolidWorks. Mentre il tool precedente
   e' ancora bloccato i tool successivi rispondono subito con un errore. La chiusura all'uscita passa anche dal thread COM.
-  Offline: 95/95 (thread unico, timeout, blocco dei tool successivi, ripresa). **Da provare dal vivo** sull'istanza dedicata
-  (es. execute_python con sleep) prima di chiudere la voce: non ancora fatto.
+  Offline: 95/95 (thread unico, timeout, blocco dei tool successivi, ripresa).
+  **Dal vivo `tests/test_timeout_live.py` 11/11** (SW_MCP_TOOL_TIMEOUT=15, due istanze dedicate): ciclo di chiamate COM -> errore a 15,1 s,
+  PID chiuso, thread COM liberato subito (tool seguente risponde in 0,0 s); sleep Python 40 s -> errore a 15,2 s, tool seguente
+  rifiutato in 0,0 s come "ancora in corso"; 0 processi orfani. `SW_MCP_TOOL_TIMEOUT` (env) ha la precedenza su config.json.
+  Trovati dal vivo: (1) il timeout scattava sull'AVVIO dell'istanza (connect): ora, se SolidWorks non e' collegato, al limite si
+  aggiungono SW_MCP_STARTUP_TIMEOUT + 60 s; (2) `SendMsgToUser2` NON blocca un'istanza nascosta (ritorna subito);
+  (3) `connect_solidworks` chiamato una seconda volta in modalita' dedicata risponde "non risponde piu', riavvia" anche con l'istanza
+  viva (`base.py`, `connect`: controlla `_dedicated_pid` prima di `_connected`) -> da sistemare con 5.2.
+  Regressione completa con il thread COM: vedi sotto.
 - **Non ancora fatti**: 5.2 ripresa dopo crash (riavvio automatico dell'istanza dedicata, da provare dal vivo),
   5.6 descrizioni in inglese, 5.10 risorse/prompt MCP (facoltativo).
 

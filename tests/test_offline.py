@@ -757,6 +757,7 @@ def test_worker_timeout():
             time.sleep(2.5)
             return {"success": True, "message": "tardi", "error_code": 0, "error_name": "swSuccess", "data": {}}
         fake.draw_line = slow_draw_line
+        fake._sw_app = object()                          # gia' collegato: nessun tempo di avvio aggiunto al limite
         srv.config.tool_timeout = 0.5
         t0 = time.time()
         text = call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
