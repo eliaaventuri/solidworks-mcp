@@ -242,6 +242,14 @@ egr_f2.log`):
   `taskkill`, che su Linux non esiste). Corretto: OSError -> istanza "non chiusa". Riprodotto su Windows togliendo `taskkill` con un
   `sitecustomize.py` nello scratchpad: senza correzione 147/148, con correzione 148/148; pyflakes 0.
 
+- 2026-10-18, repository reso PUBBLICO. Prima: email personale tolta da tutti i commit (filter-branch, autore/committer ->
+  `276014981+elo-savage@users.noreply.github.com`, anche `user.email` locale del repo), copia di sicurezza
+  `C:\Users\elia\Downloads\solidworks-mcp-backup-20261018.bundle`; push forzato e cancellazione dei rami remoti
+  `claude/exciting-gauss-3bao28` e `fase-0-verifica-offline` fatti da Elia; esecuzioni Actions 1-13 cancellate. Verificato da anonimo:
+  API dei commit con sole email noreply, README/immagini/badge raggiungibili, badge "passing". RESTA: i commit vecchi sono ancora
+  raggiungibili da chi conosce il loro codice (es. `/commit/c0c0252.patch` mostra l'email) finche' GitHub non li elimina; per toglierli
+  subito serve una richiesta al supporto GitHub (rimozione di dati sensibili / viste in cache).
+
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
