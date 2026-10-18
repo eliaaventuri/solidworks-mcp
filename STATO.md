@@ -321,8 +321,15 @@ egr_f2.log`):
   - costruzione: `ConstructionGeometry` scrivibile. Provato: normale -> costruzione (`construction: true` in list) -> normale.
     Con la linea di costruzione lo schizzo risulta "completamente definito" (SolidWorks conta la linea), da tenere presente.
   - Conteggi tool: 208 (207 senza `execute_python`). Offline 148/148, pyflakes 0. Non sono distruttivi.
-- **Ancora da fare**: trim (3, vedi sopra), convert_entities come costruzione (7), quote su spigoli del modello (8),
-  delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
+- **Tool 7 `convert_entities(construction=true)` e tool 8 (quote verso spigoli del modello), provati dal vivo**
+  (`scripts_tmp/probe_model.py`, blocco x 0..10, y -20..20, z -15..15, schizzo sul piano x=0):
+  - convert con `construction=true`: lo spigolo a (0,10,15) diventa `S0-2-3` di costruzione (list: `construction: true`).
+  - quota verso lo spigolo del modello: `add_sketch_dimension(kind="distance", entity1=<linea a z=5>, entity2={"edge":[0,10,15]})`
+    -> 10,0000 mm (distanza reale 15-5). Il riferimento del modello e' `{"edge"|"vertex"|"face": [x,y,z]}` (coordinate del modello,
+    `unit`); la selezione usa `_select_point` sul modello. La descrizione di `entity1` nello schema lo dice.
+  - Nessun tool nuovo: 208 tool (207 senza `execute_python`), offline 148/148, pyflakes 0.
+- **Ancora da fare**: trim (3, vedi sopra), delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
+  Il quadrante dell'angolo (A) resta com'e' (documentato). E (faccia forata) non riprodotto.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.

@@ -416,6 +416,16 @@ class SketchConstraintOperations:
             doc.ClearSelection2(True)
             descs, objs = [], []
             for i, r in enumerate(refs):
+                if isinstance(r, dict):
+                    # spigolo/vertice/faccia del MODELLO: {"edge":[x,y,z]} (coordinate del modello, `unit`)
+                    kind_m, pt = next(iter(r.items()))
+                    ok, info = self._select_point(doc, str(kind_m).lower(), pt, unit, append=(i > 0), mark=0)
+                    if not ok:
+                        return self._result(False, f"Entita' {i + 1} ({kind_m} del modello): {info.get('error')}",
+                                            SwErrors.swSelectionError)
+                    objs.append(None)                         # niente oggetto schizzo: il centro usa le altre entita'
+                    descs.append(f"{kind_m} modello {list(pt)}")
+                    continue
                 ok, msg = self._select_ref(doc, sk, r, append=(i > 0), unit=unit)
                 if not ok:
                     return self._result(False, f"Entita' {i + 1}: {msg}", SwErrors.swSelectionError)
@@ -980,8 +990,9 @@ class SketchConstraintOperations:
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def convert_entities(self, edge_points: list = None, face_point: list = None, chain: bool = True,
-                         unit: str = None) -> Dict:
-        """Converti entita': proietta nello schizzo attivo spigoli (punti sugli spigoli) o i bordi di una faccia."""
+                         unit: str = None, construction: bool = False) -> Dict:
+        """Converti entita': proietta nello schizzo attivo spigoli (punti sugli spigoli) o i bordi di una faccia.
+        construction=True: le linee create sono di costruzione (riferimento per le quote, non profilo)."""
         try:
             doc, err = self._part()
             if err:
@@ -1003,8 +1014,17 @@ class SketchConstraintOperations:
             n1 = len(self._segments(sk))
             if n1 <= n0:
                 return self._result(False, "SketchUseEdge3 non ha aggiunto segmenti", SwErrors.swSketchError)
-            return self._result(True, f"Convertite entita': +{n1 - n0} segmenti", SwErrors.swSuccess,
-                                {"new_segments": n1 - n0, "ids": [self._seg_id(s) for s in self._segments(sk)][n0:]})
+            new = self._segments(sk)[n0:]
+            if construction:
+                for s in new:
+                    s.ConstructionGeometry = True
+                if not all(bool(s.ConstructionGeometry) for s in new):
+                    return self._result(False, "Segmenti convertiti ma non di costruzione: SolidWorks non ha cambiato lo stato.",
+                                        SwErrors.swSketchError)
+            ids = [self._seg_id(s) for s in new]
+            tag = " come costruzione" if construction else ""
+            return self._result(True, f"Convertite entita'{tag}: +{n1 - n0} segmenti {ids}", SwErrors.swSuccess,
+                                {"new_segments": n1 - n0, "ids": ids, "construction": bool(construction)})
         except Exception as e:
             logger.error(f"convert_entities: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)

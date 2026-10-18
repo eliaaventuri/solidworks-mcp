@@ -16,7 +16,8 @@ from mcp.types import Tool
 S, N, B, A, O = "string", "number", "boolean", "array", "object"
 _UNIT = (S, "Length unit (default mm)")
 _SK = (S, "Sketch name (default: active/last)")
-_ENT = (None, "Sketch entity: draw_* id, '@x,y' (segment), 'pt@x,y' (point), 'origin'")
+_ENT = (None, "Sketch entity: draw_* id, '@x,y' (segment), 'pt@x,y' (point), 'origin'; add_sketch_dimension also accepts a MODEL "
+              "edge/vertex/face as {\"edge\": [x,y,z]} (`unit`, a point on it)")
 _ENT2 = (None, "Sketch entity (as entity1)")
 _PT3 = (A, "Point [x,y,z] (`unit`) ON the entity")
 _PTS3 = (A, "Points [[x,y,z],...] (`unit`), one ON each entity")
@@ -120,7 +121,8 @@ _TOOLS = {
     "convert_entities": ("convert_entities",
         "Project model edges (edge_points) or a face boundary (face_point) into the active sketch.",
         {"edge_points": (A, "Points [[x,y,z],...] (`unit`), one on each edge"), "face_point": _PT3,
-         "chain": (B, "Select whole chain (default true)"), "unit": _UNIT}, []),
+         "chain": (B, "Select whole chain (default true)"), "unit": _UNIT,
+         "construction": (B, "true = the new lines are construction geometry (reference for dimensions, not profile); default false")}, []),
     "mirror_sketch_entities": ("mirror_sketch_entities", "Mirror sketch entities about a line or axis.",
         {"entities": (A, "Entities to mirror (id or '@x,y')"), "axis": (None, "Mirror line/centerline (id or '@x,y')"), "unit": _UNIT,
          "keep_original": (B, "Keep originals (default true)")},
