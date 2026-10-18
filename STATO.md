@@ -303,9 +303,17 @@ egr_f2.log`):
   Prova: linea 0..40 divisa in (20,0) -> due segmenti che condividono il punto P1-5 (3 punti in tutto: il giunto e' vero, non solo
   geometrico). Punto fuori linea (9 mm) e punto all'estremo: rifiutati con messaggio. Distruttivo, registrato in `safety.py`.
   Conteggi tool: 206 (205 senza `execute_python`).
-- **Tool 3 `trim_sketch_entities` NON fatto**: l'API qui ha `SketchTrim` ed `SketchExtend`, ma i codici del tipo di taglio
-  (power trim, extend) non si leggono dalla libreria dei tipi con `scripts_tmp/tlbenum.py` (nessun enum trovato): da decidere con
-  Elia se provare i valori dal vivo o no.
+- **Tool 3 `trim_sketch_entities` NON fatto** (2026-10-18, prove dal vivo `scripts_tmp/probe_trim.py`, `probe_trim2.py`,
+  `probe_trim3.py`). Documentazione (`ISketchManager.SketchTrim`, enum `swSketchTrimChoice_e`): Closest, Corner, Entities,
+  EntityPoint (power trim: un segmento selezionato, un punto con X, Y, Z NON nulli), Inside, Outside. I valori numerici NON si
+  leggono dalla libreria locale (`tlbenum.py` non trova enum) e la pagina non li riporta nello snippet.
+  Risultati misurati (scena: orizzontale 0..40 + verticale a x=20, clic/punto (30,0)):
+  - senza selezione: 0-6 tutti `False`; il codice 3 agiva sull'ULTIMA linea disegnata (ancora selezionata), non sul punto;
+  - con l'orizzontale selezionata: codice 0 -> orizzontale 0..20 ma `False` (il valore di ritorno NON e' affidabile);
+    codice 3 -> `True`, orizzontale 30..40; codice 4 -> `True`, orizzontale 20..40; 1, 2, 5, 6 -> `False`, nessun cambio.
+  Conclusione: nessun codice dimostrato come power trim; il successo va verificato sulla geometria, non sul ritorno.
+  Da decidere con Elia: confermare i valori numerici dell'enum (pagina della documentazione o prova controllata) prima
+  di scrivere `trim_sketch_entities`.
 - **Ancora da fare**: trim (3), move_sketch_point (5), toggle_construction (6), convert_entities come costruzione (7),
   quote su spigoli del modello (8), delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
