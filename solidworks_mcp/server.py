@@ -473,11 +473,39 @@ def _timeout_message(name: str, timeout: float) -> str:
             "controllare SolidWorks. Il server non chiude l'istanza dell'utente.")
 
 
+_LAST_ACTIVE_TITLE = [None]   # titolo del documento attivo dopo l'ultimo tool (per l'avviso di cambio)
+
+
+def _active_title():
+    """Titolo del documento attivo in SolidWorks, None se non c'e' niente di collegato/aperto."""
+    try:
+        app = sw_automation._sw_app
+        if app is None:
+            return None
+        doc = app.ActiveDoc
+        return None if doc is None else str(sw_automation._get_doc_title(doc))
+    except Exception:
+        return None
+
+
 def _dispatch_tool(name: str, arguments: dict) -> Dict:
-    """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool."""
+    """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool.
+    Parametro comune `document` (titolo di un documento aperto): lo rende attivo prima del tool. Senza, se il documento
+    attivo e' cambiato dalla chiamata precedente, il risultato lo segnala (un close_sketch chiudeva lo schizzo di un altro file)."""
+    doc_arg = arguments.pop("document", None) if isinstance(arguments, dict) else None
     try:
         if sw_automation._sw_app is not None:
             sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
+        if doc_arg:
+            act = sw_automation.activate_document(name=doc_arg)
+            if not act.get("success"):
+                return act
+        _pending_notice = None
+        if not doc_arg:
+            cur = _active_title()
+            if _LAST_ACTIVE_TITLE[0] and cur and cur != _LAST_ACTIVE_TITLE[0]:
+                _pending_notice = (f"ATTENZIONE: il documento attivo era '{_LAST_ACTIVE_TITLE[0]}' e ora e' '{cur}': "
+                                   f"il tool ha agito su '{cur}'. Passa document='<titolo>' per scegliere.")
         result = None
         if name in SPECIAL_HANDLERS:
             result = SPECIAL_HANDLERS[name](arguments)
@@ -494,8 +522,11 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
         if notice and isinstance(result, dict):
             result["message"] = f"{notice} {result.get('message', '')}"
             result.setdefault("data", {})["instance_restarted"] = True
+        if _pending_notice and isinstance(result, dict):
+            result["message"] = f"{_pending_notice} {result.get('message', '')}"
         return result
     finally:
+        _LAST_ACTIVE_TITLE[0] = _active_title()
         try:
             sw_automation._restore_prefs()      # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
         except Exception as e:

@@ -54,10 +54,26 @@ DESTRUCTIVE_TOOLS: Dict[str, str] = {
 }
 
 
+DOCUMENT_PARAM = {"type": "string", "description": "Optional: title of an open document to make active before this tool "
+                  "(as in list_open_documents, e.g. 'Parte1'). Without it the active document is used, and the result warns "
+                  "if the active document changed since the previous call."}
+
+
+def _with_document(t: Tool) -> Tool:
+    """Aggiunge il parametro comune `document` allo schema di ogni tool (lo gestisce server._dispatch_tool)."""
+    schema = dict(t.inputSchema or {})
+    if schema.get("type") != "object":
+        return t
+    props = dict(schema.get("properties", {}))
+    props.setdefault("document", DOCUMENT_PARAM)
+    schema["properties"] = props
+    return t.model_copy(update={"inputSchema": schema})
+
+
 def decorate_tools(tools: List[Tool]) -> List[Tool]:
     """Aggiunge annotazioni MCP, nota nella descrizione e parametro `overwrite` ai tool a rischio."""
     out = []
-    for t in tools:
+    for t in (_with_document(x) for x in tools):
         if t.name not in DESTRUCTIVE_TOOLS:
             out.append(t)
             continue

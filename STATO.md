@@ -279,7 +279,15 @@ egr_f2.log`):
 - **E, prova dal vivo (2026-10-18, `scripts_tmp/probe_e.py`)**: su un blocco 40x30x10 la `select_at_point` di una faccia piana
   funziona in 4 punti (distanza 0, area 1200 mm2). Il rifiuto "Select4 ha rifiutato il face" NON si riproduce su faccia piana:
   resta da provare la faccia con foro al centro e la selezione con un altro documento aperto (legato a F).
-- **Ancora da fare**: F (parametro `document`), e i nove strumenti nuovi.
+- **E su faccia forata (2026-10-18, `scripts_tmp/probe_e2.py`)**: foro M8 al centro, `select_at_point` nel centro dà il rifiuto
+  giusto ("nessuna faccia entro 0,05 mm, piu' vicino a 4,5 mm"); su faccia forata a 6 mm dal centro e nei punti lontani la selezione
+  riesce. Il messaggio "Select4 ha rifiutato" NON si riproduce. E resta aperto.
+- **F `[x]` in parte, provato dal vivo** (2026-10-18, `scripts_tmp/probe_f.py`): nuovo parametro comune `document` (titolo di un
+  documento aperto), gestito in `server._dispatch_tool` e aggiunto allo schema di tutti i tool in `safety.decorate_tools`.
+  Prova: con Parte2 attiva, `create_sketch(plane="Top", document="Parte1")` crea lo schizzo su Parte1 e Parte1 diventa attiva.
+  **Non provato dal vivo**: l'avviso "il documento attivo e' cambiato" tra due chiamate (serve un cambio fatto fuori dal server).
+  Offline 148/148 (il test di coerenza degli schemi ammette `document`), pyflakes 0.
+- **Ancora da fare**: i nove strumenti nuovi (1-9 della lista) e le quote su spigoli del modello.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.

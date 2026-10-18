@@ -125,7 +125,7 @@ def _test_registry_full(expected):
         varkw = any(v.kind == v.VAR_KEYWORD for v in params.values())
         if not varkw and allowed - set(params):
             problems.append(f"{t.name}: {method}() non accetta {sorted(allowed - set(params))}")
-        lost = props - allowed - {"overwrite"}             # overwrite e' consumato dalla guardia in server.py
+        lost = props - allowed - {"overwrite", "document"}  # overwrite e document sono consumati da server.py
         if lost:
             problems.append(f"{t.name}: proprieta' dello schema mai passate al metodo {sorted(lost)}")
         needed = {p for p, v in params.items()
