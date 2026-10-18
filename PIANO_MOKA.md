@@ -23,6 +23,12 @@ Estrusioni e tagli con condizioni di fine, rivoluzioni e tagli di rivoluzione, l
 raccordi, smussi, specchiature, ripetizioni lineari e circolari, Hole Wizard (filettati M8 e M56 compresi, svasato M5),
 `move_faces`, piani sfalsati/inclinati/per 3 vertici, assi, spline, poligoni, quote verso spigoli del modello, configurazioni.
 
+Confronto con la copia `C:\Users\elia\Downloads\solidworks-mcp-pulito` (2026-10-18): ha 202 tool, tutti presenti anche qui;
+qui ce ne sono 8 in più (`move_faces`, `delete_dimension`, `delete_sketch_entities`, `list_sketch_relations`, `move_sketch_point`,
+`set_dimension_driven`, `split_sketch_entity`, `toggle_construction`). Gli schemi di estrusione, rivoluzione, loft, piani,
+relazioni ed entità sono identici. Nessuno dei 10 strumenti qui sotto c'è nella copia pulita, che in più non ha `move_faces`
+(serve a Kettle e Knob).
+
 ## Strumenti da creare (in ordine di priorità)
 
 1. **`add_cosmetic_thread`**: filettatura cosmetica su uno spigolo circolare scelto per coordinate, esterna o interna,
