@@ -237,6 +237,11 @@ egr_f2.log`):
   `qual_assieme.png`, von Mises di S6), tabelle funzioni/scenari/variabili, sicurezza, lingue, limiti noti. Residuo visivo visto
   nelle tavole di S1/S6: sotto la nota dei fori c'e' un rettangolo vuoto (cornice della nota?), non indagato.
 
+- 2026-10-18, GitHub Actions rosso dalla run #11 (commit 6fdf2d2, ma la causa e' in 1b23e96): test offline 147/148 su Linux,
+  "timeout: errore dopo il limite" -> `[Errno 2] No such file or directory: 'taskkill'` (`_timeout_message` in `server.py` lancia
+  `taskkill`, che su Linux non esiste). Corretto: OSError -> istanza "non chiusa". Riprodotto su Windows togliendo `taskkill` con un
+  `sitecustomize.py` nello scratchpad: senza correzione 147/148, con correzione 148/148; pyflakes 0.
+
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza

@@ -456,7 +456,10 @@ def _dedicated_lost() -> bool:
 def _timeout_message(name: str, timeout: float) -> str:
     if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
         pid = sw_automation._dedicated_pid
-        killed = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True).returncode == 0
+        try:
+            killed = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True).returncode == 0
+        except OSError:                                  # taskkill assente (test offline su Linux): istanza non chiusa
+            killed = False
         if killed:
             sw_automation._sw_app = None
             sw_automation._connected = False
