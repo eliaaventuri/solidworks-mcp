@@ -328,7 +328,15 @@ egr_f2.log`):
     -> 10,0000 mm (distanza reale 15-5). Il riferimento del modello e' `{"edge"|"vertex"|"face": [x,y,z]}` (coordinate del modello,
     `unit`); la selezione usa `_select_point` sul modello. La descrizione di `entity1` nello schema lo dice.
   - Nessun tool nuovo: 208 tool (207 senza `execute_python`), offline 148/148, pyflakes 0.
-- **Ancora da fare**: trim (3, vedi sopra), delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
+- **Tool 9 `delete_dimension` e `set_dimension_driven`, provati dal vivo** (`scripts_tmp/probe_driven2.py`):
+  - `delete_dimension(name)`: stessa operazione di `delete_sketch_entities(dimensions=[..])`. Provato: schizzo da
+    completamente definito a sottodefinito, quote 0.
+  - `set_dimension_driven(name, driven)`: `Dimension.DrivenState` e' scrivibile (guidata = 2, di riferimento = 1, letti dal vivo).
+    **Trappola**: senza una ricostruzione il solutore NON applica il cambio (la quota restava vincolante e il punto era bloccato).
+    Il tool chiude lo schizzo, fa `EditRebuild3` e lo riapre per leggere lo stato. Provato: di riferimento -> sottodefinito, il punto
+    si sposta a 50 mm e la geometria segue; rimessa guidata -> completamente definito.
+  - Conteggi tool: 210 (209 senza `execute_python`). Offline 148/148, pyflakes 0. `delete_dimension` e' distruttivo (`safety.py`).
+- **Ancora da fare**: trim (3, vedi sopra), sketch_offset/mirror/fillet (10, solo se Elia li vuole).
   Il quadrante dell'angolo (A) resta com'e' (documentato). E (faccia forata) non riprodotto.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore

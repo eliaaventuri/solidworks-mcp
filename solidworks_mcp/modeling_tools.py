@@ -52,6 +52,14 @@ _TOOLS = {
         {"entities": (A, "Entities to delete: ids, '@x,y' or 'pt@x,y'"),
          "dimensions": (A, "Dimension names, e.g. 'D2@Sketch34'"),
          "relations": (A, "Relation indices from list_sketch_relations (integers)"), "sketch": _SK}, []),
+    "delete_dimension": ("delete_dimension",
+        "Delete one sketch dimension by name (e.g. 'D2@Sketch34'). Destructive: no undo.",
+        {"name": (S, "Dimension name, e.g. 'D2@Sketch34'"), "sketch": _SK}, ["name"]),
+    "set_dimension_driven": ("set_dimension_driven",
+        "Make a sketch dimension a reference (driven=true: it measures and does not constrain the geometry) or put it back "
+        "to driving (driven=false). Reports the sketch status.",
+        {"name": (S, "Dimension name, e.g. 'D1@Sketch1'"),
+         "driven": (B, "true = reference (driven), false = driving again; default true"), "sketch": _SK}, ["name"]),
     "split_sketch_entity": ("split_sketch_entity",
         "Split a LINE of a sketch at a point lying on it: the line is rebuilt as two lines meeting at that point. "
         "Dimensions and relations of the original line are lost. Lines only (arcs are refused). Destructive.",

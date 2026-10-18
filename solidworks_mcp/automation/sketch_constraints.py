@@ -692,6 +692,49 @@ class SketchConstraintOperations:
             logger.error(f"split_sketch_entity: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
+    def delete_dimension(self, name: str, sketch: str = None) -> Dict:
+        """Cancella una quota per nome ('D1@Schizzo1'): la stessa operazione di delete_sketch_entities(dimensions=[..])."""
+        return self.delete_sketch_entities(dimensions=[name], sketch=sketch)
+
+    def set_dimension_driven(self, name: str, driven: bool = True, sketch: str = None) -> Dict:
+        """Rende la quota 'di riferimento' (driven=True: misura, non vincola: non cambia la geometria) o la rimette
+        a 'guidata' (driven=False: torna a pilotare lo schizzo). Ricontrolla lo stato dello schizzo."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            dim = doc.Parameter(name)
+            if dim is None:
+                return self._result(False, f"Quota '{name}' non trovata (usa il formato D1@Schizzo1).",
+                                    SwErrors.swSelectionError)
+            before = int(self._com(dim, "DrivenState"))
+            # 1 = di riferimento (valore misurato, come controlla add_sketch_dimension); 2 = guidata (valore di partenza
+            # letto dal vivo su una quota normale)
+            target = 1 if driven else 2
+            dim.DrivenState = target
+            after = int(self._com(dim, "DrivenState"))
+            if after != target:
+                return self._result(False, f"'{name}': SolidWorks non ha cambiato lo stato (resta {after}).",
+                                    SwErrors.swSketchError, {"driven_state": after})
+            # senza una ricostruzione il solutore non applica il cambio (provato dal vivo: la quota restava vincolante)
+            self._exit_sketch(doc)
+            doc.EditRebuild3
+            sk, err = self._active_sketch(doc, sk_name)
+            if err:
+                return err
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            return self._result(True, f"Quota {name}: {'di riferimento' if driven else 'guidata'} (era {before}); "
+                                f"schizzo {STATUS_NAMES.get(status)}", SwErrors.swSuccess,
+                                {"dimension": name, "sketch": sk_name, "driven": bool(driven),
+                                 "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"set_dimension_driven: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
     def list_sketch_relations(self, sketch: str = None) -> Dict:
         """Relazioni geometriche dello schizzo: tipo, entita' coinvolte (id), indice. Serve a trovare la relazione
         sbagliata e cancellarla con delete_sketch_entities."""

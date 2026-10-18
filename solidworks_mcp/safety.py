@@ -43,6 +43,7 @@ DESTRUCTIVE_TOOLS: Dict[str, str] = {
     "delete_mate": "deletes a mate",
     "delete_sketch_entities": "deletes sketch entities, dimensions or relations with no undo",
     "split_sketch_entity": "replaces a sketch line with two lines; its dimensions and relations are lost",
+    "delete_dimension": "deletes a sketch dimension with no undo",
     "replace_component": "replaces an assembly component",
     "delete_custom_property": "deletes a custom property",
     "delete_global_variable": "deletes a global variable",
