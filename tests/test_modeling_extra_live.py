@@ -162,7 +162,8 @@ async def scenario(c, tl):
     only = {a.upper() for a in sys.argv[1:]}
     sezioni = [("B0", lambda: sicurezza_tool_list(c, tl)), ("B1", lambda: b1_fillet_variabile(c)),
                ("B2", lambda: b2_riferimenti(c)), ("B3", lambda: b3_feature(c)), ("B4", lambda: b4_fori(c)),
-               ("B5", lambda: b5_tool_base(c)), ("B6", lambda: b6_sicurezza(c))]
+               ("B5", lambda: b5_tool_base(c)), ("B6", lambda: b6_sicurezza(c)), ("B7", lambda: b7_fori_grandi(c)),
+               ("B8", lambda: b8_sposta_facce(c))]
     for nome, fn in sezioni:
         if not only or nome in only:
             await fn()
@@ -761,6 +762,155 @@ async def b4_fori(c):
               f"ruota la posizione angolare sulle facce cilindriche)")
     else:
         record("B4 cilindro: foro presente", False, "nessun cilindro piccolo")
+    await discard_all(c)
+
+
+# ===================================================================================================== B7
+BIG_T = 100.0         # piastra 200 x 200 x 100 (il lamato M64 e' profondo 68): x 0..100, faccia dei fori x = 100, centro (y, z) = (100, 100)
+
+
+async def big_plate(c):
+    await new_part(c)
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_rectangle", x1=0, y1=0, x2=200, y2=200)
+    await c.call("extrude_boss", depth=BIG_T)
+
+
+async def big_case(c, label, d_exp, method, extra=None, **args):
+    """Foro grande al centro della piastra: Ø MISURATO sul modello, volume asportato contro la formula, metodo usato."""
+    await big_plate(c)
+    v0 = await vol(c)
+    ok, text, d = await c.call("create_hole", face_point=[BIG_T, 100, 100], **args)
+    if not ok:
+        record(f"B7 {label}", False, text[:200])
+        await discard_all(c)
+        return {}
+    removed = v0 - await vol(c)
+    cyl, cones, floors = await measure_hole(c, 100, 100, x_top=BIG_T)
+    rs = sorted(cyl)
+    r_min = rs[0] if rs else 0.0
+    good = abs(2 * r_min - d_exp) < 0.02 and d.get("method") == method
+    notes = [f"Ø misurato {2 * r_min:.4f} (atteso {d_exp})", f"metodo {d.get('method')} (atteso {method})"]
+    if args.get("through"):
+        exp_v = hole_volume(cyl, cones, None) if len(rs) > 1 else PI * (d_exp / 2) ** 2 * BIG_T
+    else:
+        tip = r_min if method == "hole_wizard" else None          # foro generico: fondo piatto
+        exp_v = hole_volume(cyl, cones, None, blind_tip_r=tip)
+        if method == "generic_hole":
+            exp_v = PI * (d_exp / 2) ** 2 * args["depth"]
+    okv = rel(removed, exp_v) < TOL
+    good &= okv
+    notes.append(f"asportato {removed:.2f} mm3, formula {exp_v:.2f} ({rel(removed, exp_v) * 100:.4f} %)")
+    for k, v in (extra or {}).items():
+        got = d.get(k)
+        okk = (bool(got) and all(got)) if v == "present" else got == v
+        good &= okk
+        notes.append(f"{k}={got}")
+    record(f"B7 {label}", good, "; ".join(notes))
+    await discard_all(c)
+    return d
+
+
+async def b7_fori_grandi(c):
+    print("\n== B7. Fori grandi fino a M70 (database Hole Wizard e foro generico)")
+    T = dict(through=True)
+    await big_case(c, "ISO M24 semplice passante (ISO 273 media 26)", 26.0, "hole_wizard", kind="simple", size="M24", **T)
+    await big_case(c, "ISO M45 semplice fit=loose (52)", 52.0, "hole_wizard", kind="simple", size="M45", fit="loose", **T)
+    await big_case(c, "ISO M36 filettato passante (punta 32)", 32.0, "hole_wizard", kind="tapped", size="M36", **T)
+    await big_case(c, "ISO M52 filettato passante: nel database solo 'M52x5.0' (punta 47)", 47.0, "hole_wizard",
+                   {"database_size": "M52x5.0"}, kind="tapped", size="M52", **T)
+    await big_case(c, "ISO M64 lamato testa cilindrica (passaggio 70)", 70.0, "hole_wizard", kind="counterbore", size="M64",
+                   head="socket", **T)
+    await big_case(c, "ISO M60 semplice: assente dal database -> foro generico Ø66", 66.0, "generic_hole",
+                   kind="simple", size="M60", **T)
+    await big_case(c, "ISO M68 semplice fit=close -> foro generico Ø70", 70.0, "generic_hole",
+                   kind="simple", size="M68", fit="close", **T)
+    await big_case(c, "ISO M68 filettato passante -> foro generico Ø62 + filettatura cosmetica", 62.0, "generic_hole",
+                   {"cosmetic_threads": "present"}, kind="tapped", size="M68", **T)
+    d = await big_case(c, "ISO M70 filettato passante -> Ø64 + filettatura cosmetica", 64.0, "generic_hole",
+                       {"cosmetic_threads": "present"}, kind="tapped", size="M70", **T)
+    record("B7 M70: nota sui valori non normati", "interpolati" in str(d.get("size_note")), str(d.get("size_note"))[:120])
+    await big_case(c, "ISO M70 filettato cieco prof. 40, filetto 30 -> Ø64 x 40 fondo piatto", 64.0, "generic_hole",
+                   {"cosmetic_threads": "present"}, kind="tapped", size="M70", depth=40, thread_depth=30)
+    await big_case(c, "DIN M48 lamato (passaggio 52)", 52.0, "hole_wizard", kind="counterbore", size="M48",
+                   standard="din", head="socket", **T)
+    # rifiuti chiari
+    await big_plate(c)
+    ok, text, _ = await c.call("create_hole", kind="countersink", size="M30", face_point=[BIG_T, 100, 100], **T)
+    record("B7 svasato M30: rifiutato con le misure disponibili", not ok and "nessuna" in text,
+           text[:200])
+    ok, text, _ = await c.call("create_hole", kind="counterbore", size="M27", face_point=[BIG_T, 100, 100], head="socket", **T)
+    record("B7 lamato M27: rifiutato, indica M24/M30", not ok and "M24, M30" in text, text[:200])
+    ok, text, _ = await c.call("create_hole", kind="simple", size="M72", face_point=[BIG_T, 100, 100], **T)
+    record("B7 M72: misura non supportata", not ok and "M70" in text, text[:160])
+    await discard_all(c)
+
+
+# ===================================================================================================== B8
+async def mf_block(c):
+    """Blocco x 0..40, y 0..100, z 0..60: V = 240000 mm3."""
+    await new_part(c)
+    await c.call("create_sketch", plane="Front")
+    await c.call("draw_rectangle", x1=0, y1=0, x2=100, y2=60)
+    await c.call("extrude_boss", depth=40)
+
+
+async def xmax(c):
+    ok, _, d = await c.call("get_bounding_box")
+    return d.get("max", [None])[0] if ok else None
+
+
+async def hole_axis(c):
+    ok, _, d = await c.call("list_entities", kind="face", limit=100)
+    for e in d.get("entities", []):
+        if e.get("type") == "cylinder":
+            return e["axis_origin"], e["radius"]
+    return None, None
+
+
+async def b8_sposta_facce(c):
+    print("\n== B8. move_faces: offset, traslazione, rotazione")
+    F = [[40, 50, 30]]
+    for dist, exp in ((5, 270000.0), (-5, 210000.0)):
+        await mf_block(c)
+        ok, text, _ = await c.call("move_faces", faces=F, mode="offset", distance=dist)
+        v, x = await vol(c), await xmax(c)
+        record(f"B8 offset {dist:+} mm della faccia x=40", ok and rel(v, exp) < 1e-6 and abs(x - (40 + dist)) < 1e-6,
+               f"V {v:.3f} (atteso {exp:.3f}), x max {x} (atteso {40 + dist}); {text[:80]}")
+        await discard_all(c)
+    # traslazione del foro: il cilindro si sposta, il volume resta
+    a_hole = PI * 5.5 ** 2 * 40
+    for label, args, exp_c in (("vector [0,10,0]", {"vector": [0, 10, 0]}, (60.0, 30.0)),
+                               ("direction [0,0,2] + distance 5", {"direction": [0, 0, 2], "distance": 5}, (50.0, 35.0))):
+        await mf_block(c)
+        await c.call("create_hole", kind="simple", size="M10", face_point=[40, 50, 30], through=True)
+        ok, text, _ = await c.call("move_faces", faces=[[20, 50 + 5.5, 30]], mode="translate", **args)
+        ao, r = await hole_axis(c)
+        v = await vol(c)
+        good = ok and ao is not None and abs(ao[1] - exp_c[0]) < 1e-4 and abs(ao[2] - exp_c[1]) < 1e-4 and \
+            abs(r - 5.5) < 1e-4 and rel(v, 240000 - a_hole) < 1e-6
+        record(f"B8 translate {label}: asse del foro in (y,z) = {exp_c}", good,
+               f"asse {ao}, r {r}, V {v:.3f} (atteso {240000 - a_hole:.3f}); {text[:80]}")
+        await discard_all(c)
+    # rotazione della faccia x=40 attorno all'asse Y per (40, *, 0): cuneo 100 * 60^2 * tan(a) / 2
+    for ang in (5, -5):
+        await mf_block(c)
+        ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", axis="y", axis_point=[40, 0, 0], angle=ang)
+        v, x = await vol(c), await xmax(c)
+        t = math.tan(math.radians(ang))
+        exp_v = 240000 + 100 * 60 * 60 * t / 2
+        exp_x = 40 + max(0.0, 60 * t)
+        record(f"B8 rotate {ang:+} gradi attorno a Y per (40,0,0)", ok and rel(v, exp_v) < 1e-6 and abs(x - exp_x) < 1e-4,
+               f"V {v:.3f} (atteso {exp_v:.3f}), x max {x:.5f} (atteso {exp_x:.5f}); {text[:80]}")
+        await discard_all(c)
+    await mf_block(c)
+    ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", angle=5)
+    record("B8 rotate senza asse: rifiutato", not ok and "axis" in text, text[:120])
+    ok, text, _ = await c.call("move_faces", faces=F, mode="scale", distance=5)
+    record("B8 mode sconosciuto: rifiutato", not ok, text[:120])
+    ok, text, _ = await c.call("move_faces", faces=[[500, 500, 500]], mode="offset", distance=5)
+    record("B8 faccia inesistente: rifiutato", not ok, text[:120])
+    record("B8 volume invariato dopo i rifiuti", rel(await vol(c), 240000.0) < 1e-9)
     await discard_all(c)
 
 

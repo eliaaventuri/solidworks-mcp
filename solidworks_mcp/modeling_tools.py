@@ -154,6 +154,17 @@ _TOOLS = {
         {"angle": (N, "Draft angle in degrees"), "faces": _PTS3, "neutral_face_point": _PT3,
          "flip": (B, "Flip the draft direction"), "propagate_tangent": (B, "Propagate to tangent faces"),
          "unit": _UNIT}, ["angle", "faces", "neutral_face_point"]),
+    "move_faces": ("move_faces",
+        "Move faces (direct edit, like Insert > Face > Move): offset each face along its normal, translate by a vector, "
+        "or rotate about an axis parallel to X, Y or Z. Example: {\"faces\":[[40,50,30]],\"mode\":\"offset\",\"distance\":5}; "
+        "{\"faces\":[[40,50,30]],\"mode\":\"rotate\",\"axis\":\"y\",\"axis_point\":[40,0,0],\"angle\":5}.",
+        {"faces": _PTS3, "mode": (S, "offset (default) | translate | rotate"),
+         "distance": (N, "offset: distance along the face normal, negative = inward; translate: length along `direction` (`unit`)"),
+         "vector": (A, "translate: move vector [dx,dy,dz] (`unit`)"),
+         "direction": (A, "translate: direction [dx,dy,dz] (unitless, normalized), used with distance"),
+         "axis": (S, "rotate: x | y | z, axis direction (right-hand rule)"),
+         "axis_point": (A, "rotate: point [x,y,z] on the rotation axis (`unit`)"),
+         "angle": (N, "rotate: angle in degrees"), "unit": _UNIT}, ["faces"]),
     "fillet_at_points": ("fillet_at_points", "Constant-radius fillet on edges picked by coordinates. "
         "Example: {\"radius\":5,\"edge_points\":[[10,0,5]]}.",
         {"radius": (N, "Fillet radius (`unit`)"), "edge_points": _PTS3,
@@ -197,14 +208,17 @@ _TOOLS = {
     # ---------------------------------------------------------------- Hole Wizard
     "create_hole": ("create_hole",
         "Hole Wizard hole on a planar, cylindrical or inclined face, placed by coordinates (normal to the face). "
-        "UNI is not in the SolidWorks database. "
+        "UNI is not in the SolidWorks database. Metric sizes M3..M70 (ISO 261 coarse + M70x6). Above M20 the SolidWorks "
+        "database has counterbores only for M24/M30/M36/M42/M48/M56/M64 and no countersinks; simple and tapped sizes it "
+        "lacks (M60 clearance, M68, M70) are made as a generic hole with the computed diameter (flat bottom if blind) "
+        "plus a cosmetic thread for tapped holes (result key `method`). "
         "head by kind: counterbore socket | cheese | pan | button | hex | hex_cap | hex_machine; "
         "countersink socket | flat | raised | oval; tapped bottoming. "
         "Every point given (face_point AND each of positions) becomes a hole center: for several holes pass only `positions`. "
         "Example: {\"kind\":\"tapped\",\"size\":\"M6\",\"face_point\":[0,0,10],\"through\":true}; 4 holes: "
         "{\"kind\":\"simple\",\"size\":\"M8\",\"positions\":[[10,0,10],[-10,0,10],[0,10,10],[0,-10,10]],\"through\":true}.",
         {"kind": (S, "simple | tapped | countersink | counterbore"),
-         "size": (S, "Metric 'M3'..'M20' (or 'M8x1.25'); ANSI inch '#10', '1/4-20'"),
+         "size": (S, "Metric 'M3'..'M70' (or 'M8x1.25'); ANSI inch '#10', '1/4-20'"),
          "face_point": (A, "Center [x,y,z] (`unit`) of ONE hole, on the face (it is drilled too: omit it when using positions)"),
          "positions": (A, "Hole centers [[x,y,z],...] on the face (`unit`)"),
          "depth": (N, "Blind hole depth (`unit`, default 10)"),

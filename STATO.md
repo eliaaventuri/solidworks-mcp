@@ -10,11 +10,11 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Server registrato come `solidworks` in `~/.claude.json` e in `%APPDATA%\Claude\claude_desktop_config.json`.
 
 ## Cosa c'e'
-202 tool MCP: 25 base, 50 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione (statica, frequenze, buckling, termico).
+203 tool MCP: 25 base, 51 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione (statica, frequenze, buckling, termico).
 
 | Area | Stato | Test live (ultima regressione, 2026-10-17/18) |
 |---|---|---|
-| Modellazione 3D (blocco 1, gruppo B) | completa (UNI assente dal database di SolidWorks) | `test_modeling_live` 175/175, `test_modeling_extra_live` 259/259 |
+| Modellazione 3D (blocco 1, gruppo B) | completa (UNI assente dal database di SolidWorks) | `test_modeling_live` 175/175, `test_modeling_extra_live` 284/284 (2026-10-18, con B7 e B8) |
 | Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 |
 | Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
 | Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 |
@@ -249,6 +249,18 @@ egr_f2.log`):
   API dei commit con sole email noreply, README/immagini/badge raggiungibili, badge "passing". RESTA: i commit vecchi sono ancora
   raggiungibili da chi conosce il loro codice (es. `/commit/c0c0252.patch` mostra l'email) finche' GitHub non li elimina; per toglierli
   subito serve una richiesta al supporto GitHub (rimozione di dati sensibili / viste in cache).
+
+## Fori fino a M70 e move_faces (2026-10-18) — FATTO
+- `create_hole`: misure metriche M3..M70 (tabelle in `modeling.py`, `_METRIC`). Il database Hole Wizard non ha tutte le misure grandi
+  (M60 di passaggio, M52 filettato senza passo, M68 e M70 per nessun tipo, lamati solo M24/M30/M36/M42/M48/M56/M64, svasati nessuno
+  sopra M20): il tool prova la misura, poi col passo grosso, poi per semplici e filettati fa un foro generico col diametro calcolato
+  piu' una filettatura cosmetica (risultato: `method`, `database_size`, `cosmetic_threads`). Lamati e svasati inesistenti: rifiuto
+  con le misure disponibili. M70: valori di passaggio interpolati (non normati), dichiarato nel risultato.
+- Nuovo tool `move_faces` (203 tool): offset, traslazione, rotazione attorno a un asse parallelo a X/Y/Z.
+- Test: B7 15/15 e B8 12/12 (numeri in `LIMITI.md`, trappole in `STATO_STORICO.md`); `test_modeling_extra_live` 284/284,
+  `test_modeling_live` 175/175, offline 148/148, pyflakes 0; 0 processi SolidWorks lasciati (l'istanza di Elia non e' stata toccata).
+  Regressione completa non rifatta: cambiati solo `modeling.py`, `modeling_tools.py` e i conteggi dei tool nei test.
+- Barre di avanzamento per le attese: `scripts_tmp/avanzamento_log.py` (non versionato), si lancia in una scheda del terminale.
 
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.

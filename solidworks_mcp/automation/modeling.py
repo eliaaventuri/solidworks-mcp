@@ -37,21 +37,30 @@ END_CONDITIONS = {
     "offset_from_surface": 5, "mid_plane": 6, "symmetric": 6, "up_to_body": 7,
 }
 
-# diametri ISO 273 (serie media) e punte per maschiatura, mm
-CLEARANCE_MM = {"M3": 3.4, "M4": 4.5, "M5": 5.5, "M6": 6.6, "M8": 9.0, "M10": 11.0, "M12": 13.5,
-                "M14": 15.5, "M16": 17.5, "M20": 22.0}
-TAP_DRILL_MM = {"M3": 2.5, "M4": 3.3, "M5": 4.2, "M6": 5.0, "M8": 6.8, "M10": 8.5, "M12": 10.2,
-                "M14": 12.0, "M16": 14.0, "M20": 17.5}
-NOMINAL_MM = {"M3": 3, "M4": 4, "M5": 5, "M6": 6, "M8": 8, "M10": 10, "M12": 12, "M14": 14, "M16": 16, "M20": 20}
-
-# Ø di passaggio ISO 273 (serie fine / media / grossa), mm
-CLEARANCE_FIT_MM = {
-    "close": {"M3": 3.2, "M4": 4.3, "M5": 5.3, "M6": 6.4, "M8": 8.4, "M10": 10.5, "M12": 13.0, "M14": 15.0, "M16": 17.0, "M20": 21.0},
-    "normal": CLEARANCE_MM,
-    "loose": {"M3": 3.6, "M4": 4.8, "M5": 5.8, "M6": 7.0, "M8": 10.0, "M10": 12.0, "M12": 14.5, "M14": 16.5, "M16": 18.5, "M20": 24.0},
+# Misure metriche M3..M70 (ISO 261, serie grossa): Ø di passaggio ISO 273 fine/media/grossa, punta per maschiatura
+# (D - P) e passo grosso. M70 non e' nella serie grossa ne' in ISO 273: passo 6 (ISO 261, terza scelta), punta 64,
+# Ø di passaggio interpolati fra M68 e M72 (72/76/80). Misurato (2026-10-18): il database di SolidWorks non ha M60 tra
+# i fori di passaggio, M52 filettato solo come 'M52x5.0', M68 e M70 per nessun tipo -> create_hole ripiega da solo.
+_METRIC = {   # misura: (passaggio fine, media, grossa, punta, passo grosso)
+    "M3": (3.2, 3.4, 3.6, 2.5, "0.5"), "M4": (4.3, 4.5, 4.8, 3.3, "0.7"), "M5": (5.3, 5.5, 5.8, 4.2, "0.8"),
+    "M6": (6.4, 6.6, 7.0, 5.0, "1.0"), "M8": (8.4, 9.0, 10.0, 6.8, "1.25"), "M10": (10.5, 11.0, 12.0, 8.5, "1.5"),
+    "M12": (13.0, 13.5, 14.5, 10.2, "1.75"), "M14": (15.0, 15.5, 16.5, 12.0, "2.0"), "M16": (17.0, 17.5, 18.5, 14.0, "2.0"),
+    "M18": (19.0, 20.0, 21.0, 15.5, "2.5"), "M20": (21.0, 22.0, 24.0, 17.5, "2.5"), "M22": (23.0, 24.0, 26.0, 19.5, "2.5"),
+    "M24": (25.0, 26.0, 28.0, 21.0, "3.0"), "M27": (28.0, 30.0, 32.0, 24.0, "3.0"), "M30": (31.0, 33.0, 35.0, 26.5, "3.5"),
+    "M33": (34.0, 36.0, 38.0, 29.5, "3.5"), "M36": (37.0, 39.0, 42.0, 32.0, "4.0"), "M39": (40.0, 42.0, 45.0, 35.0, "4.0"),
+    "M42": (43.0, 45.0, 48.0, 37.5, "4.5"), "M45": (46.0, 48.0, 52.0, 40.5, "4.5"), "M48": (50.0, 52.0, 56.0, 43.0, "5.0"),
+    "M52": (54.0, 56.0, 62.0, 47.0, "5.0"), "M56": (58.0, 62.0, 66.0, 50.5, "5.5"), "M60": (62.0, 66.0, 70.0, 54.5, "5.5"),
+    "M64": (66.0, 70.0, 74.0, 58.0, "6.0"), "M68": (70.0, 74.0, 78.0, 62.0, "6.0"), "M70": (72.0, 76.0, 80.0, 64.0, "6.0"),
 }
-COARSE_PITCH = {"M3": "0.5", "M4": "0.7", "M5": "0.8", "M6": "1.0", "M8": "1.25", "M10": "1.5", "M12": "1.75",
-                "M14": "2.0", "M16": "2.0", "M20": "2.5"}
+CLEARANCE_MM = {k: v[1] for k, v in _METRIC.items()}
+TAP_DRILL_MM = {k: v[3] for k, v in _METRIC.items()}
+NOMINAL_MM = {k: float(k[1:]) for k in _METRIC}
+CLEARANCE_FIT_MM = {"close": {k: v[0] for k, v in _METRIC.items()}, "normal": CLEARANCE_MM,
+                    "loose": {k: v[2] for k, v in _METRIC.items()}}
+COARSE_PITCH = {k: v[4] for k, v in _METRIC.items()}
+# Lamati e svasati sopra M20 nel database (misurato 2026-10-18, ISO e DIN): la norma della vite decide le misure.
+BIG_HEAD_SIZES = {"counterbore": "M24, M30, M36, M42, M48, M56, M64 (head socket, hex, hex_cap, hex_machine)",
+                  "countersink": "nessuna (DIN socket: M24)"}
 # punte per maschiatura UNC (mm): #43, #36, #29, #25, #7, F, 5/16, U, 27/64, 17/32, 21/32
 TAP_DRILL_INCH_MM = {"#4": 2.261, "#6": 2.705, "#8": 3.454, "#10": 3.797, "1/4": 5.105, "5/16": 6.528, "3/8": 7.938,
                      "7/16": 9.347, "1/2": 10.716, "5/8": 13.494, "3/4": 16.669}
@@ -538,6 +547,79 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.error(f"draft_faces: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
+    def move_faces(self, faces: list, mode: str = "offset", distance: float = None, vector: list = None,
+                   direction: list = None, axis: str = None, axis_point: list = None, angle: float = None,
+                   unit: str = None) -> Dict:
+        """Sposta facce (Inserisci > Facce > Sposta, InsertMoveFace3) indicate da un punto su ciascuna [[x,y,z],...].
+        mode offset: ogni faccia si sposta lungo la propria normale di `distance` (negativo = verso l'interno).
+        mode translate: tutte le facce si spostano del vettore `vector` [dx,dy,dz], oppure di `distance` lungo `direction`.
+        mode rotate: rotazione di `angle` gradi attorno a un asse parallelo a X, Y o Z (`axis`) passante per `axis_point`
+        (regola della mano destra). Misurato (2026-10-18): TranslationParams = [dx,dy,dz] in metri, RotationParams =
+        [origine x,y,z in metri, rotazioni attorno a X,Y,Z in radianti]; il parametro Angle e' ignorato."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            self._exit_sketch(doc)
+            mode_l = str(mode or "offset").lower()
+            mode_l = {"sposta": "translate", "trasla": "translate", "ruota": "rotate", "offset": "offset"}.get(mode_l, mode_l)
+            if mode_l not in ("offset", "translate", "rotate"):
+                return self._result(False, f"mode sconosciuto: {mode} (offset | translate | rotate)", SwErrors.swInvalidInput)
+            if not faces:
+                return self._result(False, "Servono faces: un punto [x,y,z] su ogni faccia da spostare.",
+                                    SwErrors.swInvalidInput)
+            tp, rp, dist, rev = None, None, 0.0, False
+            if mode_l == "offset":
+                if distance is None or float(distance) == 0:
+                    return self._result(False, "offset: serve distance diversa da 0.", SwErrors.swInvalidInput)
+                dist, rev = self._mmu(abs(float(distance)), unit), float(distance) < 0
+            elif mode_l == "translate":
+                if vector is not None:
+                    v = [float(c) for c in vector]
+                elif direction is not None and distance is not None:
+                    d = [float(c) for c in direction]
+                    n = math.sqrt(sum(c * c for c in d))
+                    if n == 0:
+                        return self._result(False, "translate: direction nulla.", SwErrors.swInvalidInput)
+                    v = [c / n * float(distance) for c in d]
+                else:
+                    return self._result(False, "translate: serve vector [dx,dy,dz] oppure direction + distance.",
+                                        SwErrors.swInvalidInput)
+                if len(v) != 3 or not any(v):
+                    return self._result(False, "translate: vettore di 3 componenti non tutte nulle.", SwErrors.swInvalidInput)
+                tp = r8_array([self._mmu(c, unit) for c in v])
+            else:
+                ax = str(axis or "").lower()
+                if ax not in ("x", "y", "z") or angle is None or axis_point is None:
+                    return self._result(False, "rotate: servono axis (x | y | z), axis_point [x,y,z] e angle (gradi).",
+                                        SwErrors.swInvalidInput)
+                rot = [0.0, 0.0, 0.0]
+                rot["xyz".index(ax)] = math.radians(float(angle))
+                rp = r8_array([self._mmu(float(c), unit) for c in axis_point] + rot)
+            v0 = self._volume_m3(doc)
+            before = self._names(doc)
+            doc.ClearSelection2(True)
+            ok, msg = self._select_points(doc, "face", faces, unit, mark=1)     # con mark 0 nessuna feature (misurato)
+            if not ok:
+                return self._result(False, msg, SwErrors.swSelectionError)
+            mt = {"offset": 0, "translate": 1, "rotate": 2}[mode_l]
+            try:
+                feat = doc.FeatureManager.InsertMoveFace3(mt, rev, 0.0, dist, tp, rp, 0, 0.0)
+            except Exception as e:
+                return self._result(False, f"Sposta facce fallito: {e}", SwErrors.swFeatureError)
+            doc.ClearSelection2(True)
+            extra = {"mode": mode_l, "faces": len(faces), "unit": self._unit_name(unit)}
+            if mode_l == "offset":
+                extra["distance"] = distance
+            elif mode_l == "translate":
+                extra["vector"] = [round(c, 6) for c in v]
+            else:
+                extra.update({"axis": ax, "axis_point": axis_point, "angle": angle})
+            return self._finish(doc, "Sposta facce", feat, v0, before, extra)
+        except Exception as e:
+            logger.error(f"move_faces: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
+
     # ------------------------------------------------------------------ raccordi / smussi autonomi
     def fillet_at_points(self, radius: float, edge_points: list, tangent_propagation: bool = True,
                          radius2: float = None, unit: str = None) -> Dict:
@@ -821,7 +903,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         head (tipo di vite o variante, vedi HOLE_STANDARDS): lamato -> socket (testa cilindrica con esagono incassato),
         cheese, pan, button, hex, hex_cap, hex_machine; svasato -> socket, flat, raised, oval; filettato -> bottoming
         (con fondo filettato); semplice -> nessuno.
-        size: M3..M20 (anche 'M8x1.25'); ANSI pollici: '#10', '1/4', '1/4-20' (tapped: UNC grosso se manca il passo).
+        size: M3..M70 (anche 'M8x1.25'); ANSI pollici: '#10', '1/4', '1/4-20' (tapped: UNC grosso se manca il passo).
         positions: [[x,y,z],...] punti sulla faccia = centri dei fori (face_point per un solo foro).
         depth: profondita' (cieco). diameter: sovrascrive il Ø di passaggio/punta.
         fit: close | normal | loose = Ø di passaggio ISO 273 (default medio); database = valore del database."""
@@ -866,7 +948,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 sz_u = sz.upper().replace(" ", "")
                 base = sz_u.split("X")[0]
                 if base not in CLEARANCE_MM:
-                    return self._result(False, f"Misura non supportata: {size}. Valide: {sorted(CLEARANCE_MM)}",
+                    return self._result(False, f"Misura non supportata: {size}. Valide: {', '.join(_METRIC)}",
                                         SwErrors.swInvalidInput)
                 if pitch_suffix and kind_key == "tapped" and "X" not in sz_u:
                     sz_u = f"{base}X{COARSE_PITCH[base]}"
@@ -926,10 +1008,27 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             pick_map = None         # (F, R) dal primo foro su faccia curva: punto di pick = F^T R^T p (vedi _hw_pick)
             pos_errs = []
 
+            # varianti provate in ordine (2026-10-18, misurato): misura del database; filettato senza passo -> con il passo
+            # grosso ('M52' c'e' solo come 'M52x5.0'); foro semplice o filettato assente dal database (M60 di passaggio, M68,
+            # M70) -> foro generico (Hole Wizard "legacy", tipo 5) col diametro calcolato, fondo piatto, piu' filettatura
+            # cosmetica per i filettati.
+            variants = [("hw", sz)]
+            if metric and kind_key == "tapped" and "x" not in sz.lower():
+                variants.append(("hw", f"{base}x{COARSE_PITCH[base]}"))
+            if metric and kind_key in ("simple", "tapped"):
+                variants.append(("legacy", sz))
+            state = {"i": 0}
+            cthreads = []
+
             def hw():
-                return fm.HoleWizard5(gen, std_idx, fast, sz, end_t, dia_m, use_depth, 0.0, *vals, 0, False, True, True,
+                mode, s_ = variants[state["i"]]
+                if mode == "legacy":
+                    return fm.HoleWizard5(5, std_idx, 0, "", end_t, dia_m, use_depth, 0.0, *([0.0] * 12), 0, False, True,
+                                          True, True, True, True)
+                return fm.HoleWizard5(gen, std_idx, fast, s_, end_t, dia_m, use_depth, 0.0, *vals, 0, False, True, True,
                                       True, True, True)
 
+            u_m = self._mmu(1.0, unit)          # metri per unita' dell'utente
             for i, pt in enumerate(pts):
                 doc.ClearSelection2(True)
                 ok, info = self._select_point(doc, "face", pt, unit, False, 0)
@@ -937,36 +1036,73 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                     fails.append(info.get("error", "faccia non trovata"))
                     continue
                 p_m = [self._mmu(float(c), unit) for c in pt]
+                normal = None
                 try:
-                    curved = not bool(doc.SelectionManager.GetSelectedObject6(1, -1).GetSurface.IsPlane)
+                    face = doc.SelectionManager.GetSelectedObject6(1, -1)
+                    curved = not bool(face.GetSurface.IsPlane)
+                    if not curved:
+                        normal = [float(c) for c in face.Normal]
                 except Exception:
                     curved = False
+                feat, err, exc = None, None, None
+                for _ in range(len(variants)):
+                    if curved:
+                        try:
+                            feat, err, pick_map = self._hw_on_curved(doc, hw, pt, p_m, unit, pick_map)
+                        except Exception as ex:
+                            exc = ex
+                    else:
+                        doc.ClearSelection2(True)
+                        self._select_point(doc, "face", pt, unit, False, 0)
+                        try:
+                            feat = hw()
+                        except Exception as ex:
+                            exc = ex
+                        doc.ClearSelection2(True)
+                    if feat is not None or state["i"] + 1 >= len(variants):
+                        break
+                    state["i"] += 1                 # vale anche per i punti seguenti
+                if feat is None:
+                    why = f"{exc}" if exc else ("HoleWizard5 non ha creato il foro" + (" sulla faccia curva" if curved else ""))
+                    hint = ""
+                    if metric and kind_key in ("counterbore", "countersink") and NOMINAL_MM[base] > 20:
+                        hint = (f"; sopra M20 il database di SolidWorks ha {kind_key} solo per {BIG_HEAD_SIZES[kind_key]}: "
+                                f"la norma della vite non prevede {base}")
+                    fails.append(f"punto {pt}: {why} (parametri non validi per {kind} {sz} {std_key}: controlla misura e "
+                                 f"head{', oppure punto non raggiungibile' if curved else ''}){hint}")
+                    continue
                 if curved:
-                    try:
-                        feat, err, pick_map = self._hw_on_curved(doc, hw, pt, p_m, unit, pick_map)
-                    except Exception as ex:
-                        fails.append(f"punto {pt}: {ex}")
-                        continue
-                    if feat is None:
-                        fails.append(f"punto {pt}: HoleWizard5 non ha creato il foro sulla faccia curva (parametri non validi "
-                                     f"per {kind} {sz} {std_key}, oppure punto non raggiungibile)")
-                        continue
                     if err is None or err > 1e-5:
                         fails.append(f"punto {pt}: foro creato ma il centro e' a "
                                      f"{'?' if err is None else round(err * 1000, 4)} mm dal punto richiesto")
                     if err is not None:
                         pos_errs.append(round(err * 1000, 6))
-                else:
-                    try:
-                        feat = hw()
-                    except Exception as ex:
-                        fails.append(f"punto {pt}: {ex}")
-                        continue
-                    doc.ClearSelection2(True)
-                    if feat is None:
-                        fails.append(f"punto {pt}: HoleWizard5 ha restituito None (parametri non validi per {kind} {sz} "
-                                     f"{std_key}: controlla misura e head)")
-                        continue
+                if variants[state["i"]][0] == "legacy" and kind_key == "tapped":
+                    # filettatura cosmetica sullo spigolo d'ingresso (Ø punta): tipo 1 = passante, 0 = cieca per thread_depth
+                    ct_name = None
+                    if normal is not None:
+                        a = [1.0, 0.0, 0.0] if abs(normal[0]) < 0.9 else [0.0, 1.0, 0.0]
+                        uu = [normal[1] * a[2] - normal[2] * a[1], normal[2] * a[0] - normal[0] * a[2],
+                              normal[0] * a[1] - normal[1] * a[0]]
+                        ln = math.sqrt(sum(c * c for c in uu))
+                        r_u = dia_m / 2 / u_m
+                        ep = [float(c) + r_u * uu[k] / ln for k, c in enumerate(pt)]
+                        doc.ClearSelection2(True)
+                        okc, _ = self._select_point(doc, "edge", ep, unit, False, 0)
+                        if okc:
+                            p_txt = (sz.lower().split("x")[1] if "x" in sz.lower() else COARSE_PITCH[base])
+                            p_txt = p_txt[:-2] if p_txt.endswith(".0") else p_txt
+                            try:
+                                ct = fm.InsertCosmeticThread2(1 if through else 0, NOMINAL_MM[base] / 1000.0,
+                                                              0.0 if through else vals[0], f"{base}x{p_txt}")
+                                ct_name = self._com(ct, "Name") if ct is not None else None
+                            except Exception:
+                                ct_name = None
+                        doc.ClearSelection2(True)
+                    cthreads.append(ct_name)
+                    if ct_name is None:
+                        fails.append(f"punto {pt}: foro Ø{round(dia_m * 1000, 3)} creato, ma filettatura cosmetica "
+                                     f"{base} non aggiunta" + (" (faccia curva)" if normal is None else ""))
                 created.append(self._com(feat, "Name"))
                 try:
                     fd = feat.GetDefinition
@@ -994,6 +1130,14 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                                  "size_used": sz, "fastener_index": fast, "fit": fit_l if metric else "database",
                                  "curved_face_position_error_mm": pos_errs or None,
                                  "curved_face_pick_corrected": pick_map is not None,
+                                 "method": {"hw": "hole_wizard", "legacy": "generic_hole"}[variants[state["i"]][0]],
+                                 "database_size": variants[state["i"]][1] if variants[state["i"]][0] == "hw" else None,
+                                 "cosmetic_threads": cthreads or None,
+                                 "generic_hole_note": ("misura assente dal database Hole Wizard di SolidWorks: foro generico "
+                                                       "col diametro calcolato (fondo piatto se cieco), filettatura cosmetica "
+                                                       "per i filettati" if variants[state["i"]][0] == "legacy" else None),
+                                 "size_note": ("M70: passo 6 (ISO 261), diametri di passaggio non normati (ISO 273 salta da "
+                                               "M68 a M72): valori interpolati 72/76/80" if base == "M70" else None),
                                  "note": "tapped blind: la zona filettata e' modellata a Ø nominale per thread_depth, "
                                          "poi Ø punta fino a depth + punta a 118 gradi"})
         except Exception as e:

@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-6.0.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-202-green)
+![tools](https://img.shields.io/badge/MCP%20tools-203-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,7 +23,7 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **202 tools**. With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **203 tools**. With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
 Every tool has been tested against a live SOLIDWORKS session. The tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. A tool only counts as done when those numbers match.
 
@@ -32,7 +32,7 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 | Area | Tools | What it can do |
 |---|:---:|---|
 | 🧱 **Core** | 25 | Connect; new/open/save/close; basic sketches; extrude, cut, fillet, chamfer |
-| 📐 **Modeling** | 50 | Sketch dimensions and relations; revolve, sweep, loft, shell, rib, draft; linear, circular and mirror patterns; Hole Wizard (ISO, ANSI, DIN, BSI, JIS); reference planes, axes, points and coordinate systems |
+| 📐 **Modeling** | 51 | Sketch dimensions and relations; revolve, sweep, loft, shell, rib, draft, move faces; linear, circular and mirror patterns; Hole Wizard (ISO, ANSI, DIN, BSI, JIS; metric up to M70); reference planes, axes, points and coordinate systems |
 | 📄 **Drawings** | 38 | ISO sheets (first-angle projection); standard, projected, section, detail, auxiliary, broken and crop views; clean automatic dimensions; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
 | ⚙️ **Assemblies** | 35 | Insert components and mate them (standard, advanced and limit mates); component patterns; mirroring with opposite-hand parts; exploded views; interference and clearance checks; measured degrees of freedom |
 | 📦 **Data & export** | 31 | Materials (including custom libraries); mass properties and inertia (also in a user coordinate system); custom properties; equations; configurations, also from a CSV/JSON table; STL/3MF/STEP/IGES/Parasolid/3D PDF/eDrawings export with a check of the written file; import; high-resolution images; measurements |
@@ -142,7 +142,7 @@ Each of these limitations has been tested, and the affected tool reports it in i
 
 - **STEP AP242** cannot be written through the API on the Student edition, where the file comes out as AP203. AP214 works.
 - **Exploded views:** SOLIDWORKS 2026 does not store a rotation inside a translation step. Rotation works in radial steps, and the tool suggests that workaround.
-- **UNI** hole standards are missing from the SOLIDWORKS Hole Wizard database.
+- **UNI** hole standards are missing from the SOLIDWORKS Hole Wizard database. Above M20 the database also lacks some sizes (M60 clearance, M68, M70; counterbores only M24-M64 in steps, no countersinks): simple and tapped holes of those sizes are made as a generic hole with the computed diameter (flat bottom if blind) plus a cosmetic thread.
 - A local no-penetration contact that opens under load (a part held only by the contact) can make the solver run until the timeout.
 - Saving a part right after a simulation can take a few minutes.
 
@@ -172,6 +172,6 @@ These documents are in Italian.
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 202 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 203 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.

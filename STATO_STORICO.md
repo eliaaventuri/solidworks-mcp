@@ -587,3 +587,22 @@ Trappole e nomi verificati (SW 2026 SP4.1, istanza dedicata nascosta, late bindi
 - Sonde: una chiamata `execute_python` per passo (se una si blocca, l'output delle altre resta); `SW_MCP_TOOL_TIMEOUT=120` per non aspettare 300 s.
 
 - 2026-10-18, regressione di rilascio: rilancio dell'istanza dedicata dopo la morte del processo = 23 s (15 s nella fase 5): il tempo concesso al tool di ripresa ora include SW_MCP_STARTUP_TIMEOUT + 60 quando il processo dedicato risulta terminato (`Popen.poll()`, senza COM).
+
+## Fori fino a M70 e move_faces (2026-10-18)
+- Database Hole Wizard: `C:\SOLIDWORKS Data\lang\english\swbrowser.sldedb` e' SQLite (tabelle `<STD>_DATA_HW_ScrewClearances`,
+  `_TapDrills`, `_TappedHole`...), leggibile in sola lettura. Sonda dal vivo (`create_hole` con le tabelle estese, ISO e DIN, M18..M64):
+  semplici OK fino a M64 tranne M60 (le misure di passaggio saltano M60 e M68: M52, M56, M64, M72); filettati OK tranne M52 (c'e' solo
+  'M52x5.0'); lamati sopra M20 solo M24, M30, M36, M42, M48, M56, M64 (socket/hex/hex_cap/hex_machine; cheese e pan nessuno); svasati
+  nessuno sopra M20 (DIN socket: M24). M68 e M70 non esistono per nessun tipo. Con una misura assente HoleWizard5 restituisce None.
+- Foro "legacy" (HoleWizard5 con GenericHoleType 5, FastenerType = swWzdHoleTypes_e 0 semplice, SSize ""): rispetta Diameter, EndType
+  e Depth; cieco = fondo PIATTO (nessuna punta anche passando 118 gradi); i Value1..12 per lamato/svasato legacy sono ignorati (esce un
+  foro semplice). GetDefinition del foro legacy restituisce tutti zeri.
+- Filettatura cosmetica: `InsertCosmeticThread2(Type, Diameter, Length, Note)` con lo spigolo circolare d'ingresso selezionato;
+  Type 0 = cieca per Length, 1 = passante, 2 = fino alla successiva. Diameter = Ø nominale (es. 0,068 m), Note = richiamo ("M68x6").
+- `InsertMoveFace3(MoveType, ReverseDir, Angle, Distance, TranslationParams, RotationParams, EndConditionType, OffsetDistance)`:
+  facce selezionate con mark 1 (con mark 0 nessuna feature, misurato dal vivo); offset = Distance (ReverseDir verso l'interno);
+  traslazione = TranslationParams [dx,dy,dz] in metri (un vettore unitario (1,0,0) sposta di 1 m!); rotazione = RotationParams
+  [origine x,y,z in metri, rotazioni attorno a X,Y,Z in radianti], il parametro Angle e' ignorato; regola della mano destra.
+  Una faccia scelta su uno spigolo puo' prendere la faccia piana vicina: per un foro dare un punto a meta' profondita'.
+- Con il server MCP di Claude aperto sullo stesso PC, i test live stampano "Logging error ... PermissionError" sul file di log comune
+  (`%LOCALAPPDATA%\solidworks-mcp\solidworks_mcp.log`, rotazione bloccata dall'altro processo): rumore, i test non ne risentono.

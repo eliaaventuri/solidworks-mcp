@@ -2,7 +2,7 @@
 Test OFFLINE: girano senza SolidWorks e senza Windows (pywin32 assente -> moduli COM finti).
 
 Coprono solo cio' che non tocca l'API di SolidWorks:
-  - registro dei tool: 202 tool, nomi unici, ogni tool smistato (elif in server.py o *_DISPATCH), ogni metodo esistente,
+  - registro dei tool: 203 tool, nomi unici, ogni tool smistato (elif in server.py o *_DISPATCH), ogni metodo esistente,
     parametri dello schema = parametri passati al metodo = parametri accettati dal metodo (nessun argomento perso o in piu'),
     `required` dello schema contenuti nelle proprieta' e uguali ai parametri obbligatori del metodo;
   - sicurezza (safety.py): rifiuto della sovrascrittura senza overwrite=true, annotazioni dei tool distruttivi;
@@ -68,7 +68,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 201                       # 202 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 202                       # 203 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -80,7 +80,7 @@ def record(name, ok, note=""):
 
 # ============================================================================ registro dei tool
 def test_registry():
-    # con execute_python attivo: il registro completo (202) va controllato anche per il suo smistamento
+    # con execute_python attivo: il registro completo (203) va controllato anche per il suo smistamento
     os.environ["SW_MCP_ALLOW_PYTHON"] = "1"
     try:
         _test_registry_full(EXPECTED_TOOLS + 1)

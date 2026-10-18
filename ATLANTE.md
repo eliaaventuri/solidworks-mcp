@@ -19,7 +19,7 @@ solidworks_mcp_server.py      avvio del server MCP (stdio)
 requirements.txt              dipendenze: mcp<2, pywin32
 solidworks_mcp/
   server.py                   25 tool base (connessione, documenti, schizzi, feature semplici, utilita'); smistamento di tutte le chiamate con tabelle (BASE_DISPATCH + *_DISPATCH, SPECIAL_HANDLERS), guardia di sovrascrittura
-  modeling_tools.py           schemi dei 50 tool di modellazione -> automation/modeling.py, sketch_constraints.py
+  modeling_tools.py           schemi dei 51 tool di modellazione -> automation/modeling.py, sketch_constraints.py
   drawing_tools.py            schemi dei 38 tool di disegno -> automation/drawings.py e mixin drawing_*
   assembly_tools.py           schemi dei 35 tool di assieme -> automation/assembly*.py
   data_tools.py               schemi dei 30 tool di dati ed export -> automation/data_export.py
@@ -42,7 +42,7 @@ solidworks_mcp/
     features.py               estrusioni, tagli, raccordi, smussi, elenco feature
     modeling_base.py          selezione 3D per coordinate (facce/spigoli/vertici), volume, ricerca feature, elenco entita'
     sketch_constraints.py     quote, relazioni, stato dello schizzo, spline/asola/ellisse/offset/specchia/testo
-    modeling.py               rivoluzione, sweep, loft, shell, nervatura, sformo, raccordi/smussi, ripetizioni, Hole Wizard (HOLE_STANDARDS), riferimenti, gestione feature
+    modeling.py               rivoluzione, sweep, loft, shell, nervatura, sformo, raccordi/smussi, ripetizioni, Hole Wizard (HOLE_STANDARDS, misure M3..M70, foro generico se manca dal database), move_faces, riferimenti, gestione feature
     drawings.py               messe in tavola: fogli, viste, sezioni, quote, annotazioni, BOM, export (rifiuta DXF/DWG con viste interrotte)
     drawing_layout.py         scala e layout automatici, spazio libero, proprieta' del cartiglio
     drawing_dims.py           lettura e pulizia delle quote, impilamento ISO 129, inventario del layout, tolleranze
@@ -66,7 +66,7 @@ tests/test_offline.py              SENZA SolidWorks (anche su Linux): registro e
 tests/run_all.py                   regressione completa (un test alla volta) con riepilogo in test_output/regressione_*.md
 tests/live_common.py               parti comuni dei test live: percorsi, Client MCP (auto_overwrite), sw_pids, cleanup
 tests/test_modeling_live.py        modellazione 3D con volumi calcolati a mano
-tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); argomenti B1 B4 ... per sezioni
+tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); B7 fori grandi fino a M70, B8 move_faces; argomenti B1 B4 ... per sezioni
 tests/test_drawings_live.py        tool di disegno
 tests/test_drawing_quality_live.py qualita' delle tavole (sovrapposizioni, duplicati, versi, tolleranze); QUAL_ONLY=staffa,cuneo per una sola tavola
 tests/test_assembly_live.py        assiemi (perno-staffa-boccola-viti, esploso, tavola, interferenze)
