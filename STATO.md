@@ -337,6 +337,12 @@ egr_f2.log`):
     si sposta a 50 mm e la geometria segue; rimessa guidata -> completamente definito.
   - Conteggi tool: 210 (209 senza `execute_python`). Offline 148/148, pyflakes 0. `delete_dimension` e' distruttivo (`safety.py`).
 - **Ancora da fare**: trim (3, vedi sopra), sketch_offset/mirror/fillet (10, solo se Elia li vuole).
+- **Regressione 2026-10-18 sera INTERROTTA da Elia** (log `%TEMP%\regr_h2.log`): offline 148/148; modeling FAIL "nessun riepilogo"
+  (istanza dedicata "non risponde piu'" durante `flangia`, piu' PermissionError sulla rotazione di
+  `%LOCALAPPDATA%\solidworks-mcp\solidworks_mcp.log`); modeling_extra FAIL 281/284 (3 rossi da leggere in
+  `test_output/run_modeling_extra.log`, processo 12748 rimasto); drawings PASS 65/65; drawing_quality FAIL "nessun riepilogo";
+  assembly interrotto a 8/113. Processi rimasti a fine sezione: 12748 e 14820 (poi chiusi). Sospetto: ~8 server MCP di altre sessioni aperti insieme scrivono lo stesso log
+  e la rotazione fallisce. Da indagare prima di rifare la regressione. Chiusi solo i processi dei test; istanza di Elia (3976) intatta.
   Il quadrante dell'angolo (A) resta com'e' (documentato). E (faccia forata) non riprodotto.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
