@@ -63,6 +63,13 @@ qui sotto è presente. `execute_python` permetterebbe di aggirarli con codice li
 10. Facoltativo: **inserire un componente Toolbox** (vite ISO 7046-1 M5×12). Senza, la vite si modella con gli strumenti
     esistenti (rivoluzione, loft di taglio, ripetizioni).
 
+## Stato degli strumenti (2026-10-19)
+1 `add_cosmetic_thread` FATTO · 2 `fill_pattern` FATTO · 3 piani `line_point`, `normal_to_curve`, `parallel_point` FATTI, `mid_plane`
+`[~]` (offset di meta' distanza, non associativo) · 4 asse di rivoluzione da asse/spigolo FATTO · 5 relazioni esterne FATTE (`pierce`
+verso un altro schizzo `[~]`, punto calcolato) · 6 `delete_body`, `insert_part`, `combine_bodies` (+ `list_bodies`) FATTI ·
+7 `start_from` FATTO · 8 `get_feature_definition` FATTO · 9 parametri delle facce in `list_entities` FATTO · 10 Toolbox `[~]`
+(nessuna API d'inserimento). Dettagli e trappole: `STATO_STORICO.md`, "Lotti di tool nuovi".
+
 ## Come proseguire
 - Fase 1: creare gli strumenti 1–6 (e 7 dopo la verifica), con un test dal vivo ciascuno e un numero misurato.
 - Fase 2, a regressione ferma, su istanza dedicata: aprire ogni file (copiandolo prima, mai sovrascrivere gli originali di

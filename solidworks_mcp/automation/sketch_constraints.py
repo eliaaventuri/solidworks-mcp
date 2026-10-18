@@ -46,6 +46,7 @@ RELATIONS = {
     "midpoint": "sgMIDPOINT", "punto_medio": "sgMIDPOINT",
     "horizontal_points": "sgHORIZONTALPOINTS2D", "vertical_points": "sgVERTICALPOINTS2D",
     "on_curve": "sgCOINCIDENT", "merge": "sgMERGEPOINTS",
+    "pierce": "sgATPIERCE", "perforazione": "sgATPIERCE", "on_line": "sgCOLINEAR", "su_linea": "sgCOLINEAR",
 }
 
 
@@ -563,7 +564,10 @@ class SketchConstraintOperations:
 
     # codici di tipo delle relazioni (GetRelationType): 4 e 9 dedotti dalla sonda 2026-10-18 (orizzontale su una linea,
     # coincidenza con l'origine); gli altri restano "tipo N" finche' non vengono verificati dal vivo
-    REL_NAMES = {4: "horizontal", 9: "coincident"}
+    # (i codici seguono swConstraintType_e: 5 verticale ... 40 perforazione; verificati dal vivo: 4, 9, 40)
+    REL_NAMES = {4: "horizontal", 5: "vertical", 6: "tangent", 7: "parallel", 8: "perpendicular", 9: "coincident",
+                 10: "concentric", 11: "symmetric", 12: "midpoint", 13: "intersection", 14: "equal", 17: "fixed",
+                 27: "collinear", 40: "pierce"}
 
     def move_sketch_point(self, point: str, x: float, y: float, unit: str = None, sketch: str = None) -> Dict:
         """Sposta un punto dello schizzo (id 'P0-1' o 'pt@x,y' = il punto piu' vicino a quelle coordinate) a (x,y).
@@ -755,7 +759,10 @@ class SketchConstraintOperations:
                     try:
                         ents.append(self._seg_id(e))
                     except Exception:
-                        ents.append(self._pt_id(e))     # i punti non hanno GetType
+                        try:
+                            ents.append(self._pt_id(e))     # i punti non hanno GetType
+                        except Exception:
+                            ents.append("external")         # spigolo/vertice/asse del modello o entita' di un altro schizzo
                 items.append({"index": i, "type_code": rtype, "type": self.REL_NAMES.get(rtype, f"tipo {rtype}"),
                               "entities": ents})
             status = int(self._com(sk, "GetConstrainedStatus"))
@@ -794,10 +801,100 @@ class SketchConstraintOperations:
         return sum(xs) / len(xs), sum(ys) / len(ys)
 
     # ------------------------------------------------------------------ relazioni
+    @staticmethod
+    def _frame_to_model(sk):
+        """Funzioni (u,v,w) dello schizzo -> punto MODELLO (m) e viceversa per qualunque ISketch (anche non attivo), piu'
+        origine e normale del suo piano: modello = M * (schizzo - t) / scala."""
+        a = [float(v) for v in sk.ModelToSketchTransform.ArrayData]
+        M = [a[0:3], a[3:6], a[6:9]]
+        t, sc = a[9:12], (a[12] or 1.0)
+
+        def to_model(s):
+            v = [(s[i] - t[i]) / sc for i in range(3)]
+            return [sum(M[r][c] * v[c] for c in range(3)) for r in range(3)]
+
+        def to_sketch(m):
+            return [sum(M[r][c] * m[r] for r in range(3)) * sc + t[c] for c in range(3)]
+        o = to_model([0, 0, 0])
+        un = to_model([0, 0, 1])
+        return to_model, to_sketch, o, [un[i] - o[i] for i in range(3)]
+
+    def _pierce_points_of_segment(self, sk_other, seg, sk_active) -> list:
+        """Punti (modello, m) in cui il segmento (linea, arco, cerchio) di un altro schizzo fora il piano dello schizzo
+        attivo. Altri tipi di curva (spline, ellisse): lista vuota."""
+        to_m1, _, o1, n1 = self._frame_to_model(sk_other)
+        _, _, o2, n2 = self._frame_to_model(sk_active)
+        dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+        t = int(seg.GetType)
+        out = []
+        if t == 0:
+            a, b = seg.GetStartPoint2, seg.GetEndPoint2
+            A = to_m1([a.X, a.Y, a.Z])
+            B = to_m1([b.X, b.Y, b.Z])
+            d = [B[i] - A[i] for i in range(3)]
+            den = dot(d, n2)
+            if abs(den) > 1e-12:
+                u = dot([o2[i] - A[i] for i in range(3)], n2) / den
+                if -1e-9 <= u <= 1 + 1e-9:
+                    out.append([A[i] + u * d[i] for i in range(3)])
+        elif t == 1:
+            c = seg.GetCenterPoint2
+            a, b = seg.GetStartPoint2, seg.GetEndPoint2
+            r = math.hypot(a.X - c.X, a.Y - c.Y)
+            ux = [to_m1([1, 0, 0])[i] - o1[i] for i in range(3)]
+            vx = [to_m1([0, 1, 0])[i] - o1[i] for i in range(3)]
+            C = to_m1([c.X, c.Y, c.Z])
+            Aa, Bb, D = r * dot(ux, n2), r * dot(vx, n2), dot([C[i] - o2[i] for i in range(3)], n2)
+            hyp = math.hypot(Aa, Bb)
+            if hyp > 1e-12 and abs(D) <= hyp + 1e-12:
+                base, dl = math.atan2(Bb, Aa), math.acos(max(-1.0, min(1.0, -D / hyp)))
+                circle = bool(self._com(seg, "IsCircle"))
+                a0, a1 = math.atan2(a.Y - c.Y, a.X - c.X), math.atan2(b.Y - c.Y, b.X - c.X)
+                ccw = int(seg.GetRotationDir) == 1
+                for th in {round(base + dl, 12), round(base - dl, 12)}:
+                    if not circle:
+                        s0, e0 = (a0, a1) if ccw else (a1, a0)
+                        if ((th - s0) % (2 * math.pi)) > ((e0 - s0) % (2 * math.pi)) + 1e-9:
+                            continue
+                    out.append([C[i] + r * math.cos(th) * ux[i] + r * math.sin(th) * vx[i] for i in range(3)])
+        return out
+
+    def _pierce_fallback(self, doc, sk, point, other_sketch: str, seg):
+        """Perforazione verso la curva di un ALTRO schizzo. SketchAddConstraints('sgATPIERCE') non crea nulla con un
+        segmento di un altro schizzo (provati: Select4, SelectByID2 EXTSKETCHSEGMENT, ordine invertito, mark 0/1/2/4,
+        feature dello schizzo, AddRelation: relazioni 0), mentre con spigoli e assi del modello funziona. Si calcola il
+        punto in cui la curva fora il piano dello schizzo attivo, ci si sposta il punto e lo si lega con una relazione
+        coincidente alla curva proiettata: geometria esatta, ma il punto resta libero di scorrere lungo la proiezione.
+        -> (ok, messaggio, info)."""
+        f = self._find_feature(doc, other_sketch)
+        sk_o = self._com(f, "GetSpecificFeature2")
+        pts = self._pierce_points_of_segment(sk_o, seg, sk)
+        if not pts:
+            return False, ("la curva non fora il piano dello schizzo attivo (o e' una spline/ellisse: per quelle usa uno "
+                           "spigolo o un asse del modello)"), {}
+        _, to_sketch, _, _ = self._frame_to_model(sk)
+        cur = [point.X, point.Y]
+        best = None
+        for m in pts:
+            u = to_sketch(m)
+            d = math.hypot(u[0] - cur[0], u[1] - cur[1])
+            if best is None or d < best[0]:
+                best = (d, u)
+        u = best[1]
+        point.X, point.Y = u[0], u[1]
+        doc.ClearSelection2(True)
+        point.Select4(False, self._sd(doc, 0))
+        seg.Select4(True, self._sd(doc, 0))
+        doc.SketchAddConstraints("sgCOINCIDENT")
+        return True, "perforazione calcolata (non nativa)", {"pierce_method": "computed_position_plus_coincident",
+                                                            "pierce_candidates": len(pts)}
+
     def add_sketch_relation(self, relation: str, entity1=None, entity2=None, entity3=None,
                             unit: str = None, sketch: str = None) -> Dict:
         """Relazione geometrica: horizontal, vertical, coincident, tangent, concentric, equal, parallel,
-        perpendicular, symmetric (3 entita': due + asse), fixed, collinear, midpoint."""
+        perpendicular, symmetric (3 entita': due + asse), fixed, collinear (= on_line), midpoint, pierce.
+        Le entita' possono essere anche ESTERNE allo schizzo attivo: {"edge":[x,y,z]} / {"vertex":[x,y,z]} del modello,
+        {"axis":nome}, {"sketch":"Schizzo1","entity":"S0-1-2"} (o "P0-1", "pt@x,y") di un altro schizzo."""
         try:
             doc, err = self._part()
             if err:
@@ -812,21 +909,61 @@ class SketchConstraintOperations:
             refs = [r for r in (entity1, entity2, entity3) if r is not None]
             if not refs:
                 return self._result(False, "Serve almeno entity1.", SwErrors.swInvalidInput)
+            ext_keys = ("edge", "vertex", "face", "axis", "plane", "point", "ref_point", "feature", "sketch")
             doc.ClearSelection2(True)
-            descs = []
+            descs, kinds, objs = [], [], []
             for i, r in enumerate(refs):
+                if isinstance(r, dict) and any(k in r for k in ext_keys):
+                    ok, msg, desc = self._select_any(doc, r, unit, i > 0, 0)
+                    if not ok:
+                        return self._result(False, f"Entita' {i + 1}: {msg}", SwErrors.swSelectionError)
+                    kinds.append("other_sketch" if "sketch" in r else "model")
+                    descs.append(desc)
+                    objs.append(self._sketch_entity_obj(doc, r["sketch"], r["entity"], unit)[0] if "sketch" in r else None)
+                    continue
                 ok, msg = self._select_ref(doc, sk, r, append=(i > 0), unit=unit)
                 if not ok:
                     return self._result(False, f"Entita' {i + 1}: {msg}", SwErrors.swSelectionError)
-                descs.append(self._resolve_entity(doc, sk, r, unit)[1])
+                o, d, _ = self._resolve_entity(doc, sk, r, unit)
+                kinds.append("sketch")
+                descs.append(d)
+                objs.append(o)
+            external = any(k != "sketch" for k in kinds)
+            is_pt = lambda o: o is not None and o != "origin" and hasattr(o, "X") and not hasattr(o, "GetType")
+            if code == "sgCOLINEAR" and (relation or "").lower() in ("on_line", "su_linea") and \
+                    any(is_pt(o) for o in objs):
+                code = "sgCOINCIDENT"
+            n0 = int(sk.RelationManager.GetRelationsCount(0))
             before = int(self._com(sk, "GetConstrainedStatus"))
-            doc.SketchAddConstraints(code)
+            info = {}
+            if code == "sgATPIERCE" and "other_sketch" in kinds:
+                pt = next((o for o, k in zip(objs, kinds) if k == "sketch" and is_pt(o)), None)
+                k_o = kinds.index("other_sketch")
+                if pt is None or len(refs) != 2:
+                    return self._result(False, "pierce: servono un punto dello schizzo attivo e una curva di un altro schizzo.",
+                                        SwErrors.swInvalidInput)
+                ok, msg, info = self._pierce_fallback(doc, sk, pt, refs[k_o]["sketch"], objs[k_o])
+                if not ok:
+                    doc.ClearSelection2(True)
+                    return self._result(False, f"pierce: {msg}", SwErrors.swSketchError)
+            else:
+                doc.SketchAddConstraints(code)
             doc.ClearSelection2(True)
             after = int(self._com(sk, "GetConstrainedStatus"))
+            n1 = int(sk.RelationManager.GetRelationsCount(0))
+            moved = []
+            for o, d in zip(objs, descs):
+                if is_pt(o):
+                    moved.append({"entity": d, "x": round(self._from_m(o.X, unit), 6), "y": round(self._from_m(o.Y, unit), 6)})
+            data = {"relation": code, "entities": descs, "status_before": STATUS_NAMES.get(before),
+                    "sketch_status": STATUS_NAMES.get(after), "relations_added": n1 - n0, "points": moved,
+                    "point_unit": self._unit_name(unit)}
+            data.update(info)
+            if external and n1 - n0 <= 0 and before == after:
+                return self._result(False, f"Relazione {relation} con entita' esterne: SolidWorks non l'ha creata "
+                                    f"({descs}); controlla che i tipi siano compatibili.", SwErrors.swSketchError, data)
             return self._result(True, f"Relazione {relation} su {descs}: schizzo {STATUS_NAMES.get(after)}",
-                                SwErrors.swSuccess,
-                                {"relation": code, "entities": descs, "status_before": STATUS_NAMES.get(before),
-                                 "sketch_status": STATUS_NAMES.get(after)})
+                                SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"add_sketch_relation: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)

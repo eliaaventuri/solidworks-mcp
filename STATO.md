@@ -348,6 +348,26 @@ egr_f2.log`):
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
 
+## Lotti di tool nuovi (2026-10-18/19, in corso) — obiettivo di Elia: server completo, soprattutto per la modellazione
+- Infrastruttura: tool nuovi per lotti in `solidworks_mcp/tools_ext/<lotto>.py` (schemi, gruppo `modeling`) + mixin
+  `automation/ext_<lotto>.py`; `DESTRUCTIVE`/`OVERWRITE` dei lotti uniti a `safety.py`. Laboratorio di sviluppo `scripts_tmp/lab.py NOME`
+  + `labrun.py` (piu' istanze dedicate insieme, codice ricaricato a ogni script, chiusura da sola dopo 45 min). Riferimento API dalle
+  DLL di interop: `scripts_tmp/api_ref/` (enum swconst, firme dei metodi, catalogo `RICERCA_MODELLAZIONE.md` di 240 comandi).
+- Log condiviso: la rotazione del file comune ai server MCP di piu' sessioni falliva con PermissionError (sospetto della regressione
+  interrotta): ora `_SharedRotatingFileHandler` salta la rotazione per 10 minuti e continua a scrivere.
+- Fatti e provati dal vivo (trappole in `STATO_STORICO.md`, "Lotti di tool nuovi"):
+  - moka1 (estensioni): piani `mid_plane` `[~]` (offset di meta' distanza, non associativo: il vincolo MidPlane non crea nulla),
+    `line_point`, `normal_to_curve`, `parallel_point`; asse di rivoluzione da asse/spigolo/altro schizzo; relazioni verso il modello e
+    altri schizzi (`pierce` verso la curva di un altro schizzo `[~]`: punto calcolato + coincidente sulla proiezione); estrusione
+    `start_from` (superficie Mark 32, vertice, offset T0=3); `list_entities` con tipo e parametri di superficie/curva. Test 50+29+31 PASS.
+  - moka2 (7 tool): `add_cosmetic_thread`, `fill_pattern`, `list_bodies`, `delete_body`, `combine_bodies`, `insert_part`,
+    `get_feature_definition`. Test 49/49. Toolbox `[~]` (nessuna API d'inserimento, add-in non caricato).
+  - sketch2 (16 tool): trim (6 modi), extend, smusso, ripetizioni lineare/circolare, sposta/ruota/scala/copia, rettangoli da centro e
+    3 punti, parallelogramma, arco tangente, parabola, curva da equazione, schizzo 3D (linea, spline, punto). Test 50/50.
+    Non fatti: conica (i 4 punti non hanno il significato atteso), curva di intersezione (`IntersectCurves` non crea nulla).
+- Conteggio: 233 tool con `execute_python` (232 senza). In lavorazione: curve, superfici 1, estensioni ext1; poi feature avanzate,
+  corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
+
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza

@@ -24,6 +24,10 @@ solidworks_mcp/
   assembly_tools.py           schemi dei 35 tool di assieme -> automation/assembly*.py
   data_tools.py               schemi dei 30 tool di dati ed export -> automation/data_export.py
   simulation_tools.py         schemi dei 23 tool di simulazione (statica, frequenze, buckling, termico, contatti locali, carichi remoti/cuscinetto, controllo mesh) -> automation/simulation.py
+  tools_ext/                  tool aggiunti per lotti: un modulo per lotto (TOOLS, DESTRUCTIVE, OVERWRITE), uniti al gruppo modeling e a safety
+    moka.py                   filettatura cosmetica, ripetizione di riempimento, corpi (elenca/elimina/combina/inserisci), lettura feature
+    sketch2.py                trim/extend, smusso, ripetizioni e trasformazioni di schizzo, rettangoli, arco tangente, parabola, equazioni, schizzo 3D
+    curves.py ... mold.py     lotti successivi (curve, superfici, feature avanzate, corpi 2, gestione, lamiera, saldature, stampi)
   safety.py                   tool distruttivi (destructiveHint + nota [DESTRUCTIVE]), parametro overwrite e rifiuto della sovrascrittura
   config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
@@ -56,6 +60,7 @@ solidworks_mcp/
     assembly_motion.py        gradi di liberta' misurati, move_component, delete_mate con controllo dei DOF
     assembly_analysis.py      linee di esplosione, interferenze, giochi, massa, conteggi, configurazioni
     data_export.py            materiali (.sldmat), massa e inerzie, proprieta', equazioni, configurazioni, export/import, immagini, misure
+    ext_<lotto>.py            mixin dei lotti di tools_ext (ext_moka, ext_sketch2, ext_curves, ext_surfaces1, ...)
     simulation.py             SOLIDWORKS Simulation (CosmosWorks): studi statici, vincoli, carichi, mesh, esecuzione con timeout, risultati, PNG
 formats/                      formati foglio ISO verticali A0-A3 (.slddrt, "... en" per SolidWorks inglese), versionati
 ```
@@ -75,6 +80,7 @@ tests/test_data_live.py            dati ed export (materiali, massa, equazioni, 
 tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3), argomenti per sezione: test_data_extra_live.py D7 D1
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
 tests/test_simulation_extra_live.py gruppo E (E3 FOS minimo, E5 frequenze/buckling/termico, E1 contatti locali, E4 carichi remoti/cuscinetto, E2 controllo mesh), argomenti per sezione
+tests/test_ext_<lotto>_live.py     un test live per lotto di tools_ext (moka1 = estensioni dei tool esistenti, moka2, sketch2, curves, ...), argomenti per sezione
 tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
@@ -84,5 +90,5 @@ I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata
 ```
 .venv/          ambiente Python
 test_output/    file generati dai test
-scripts_tmp/    strumenti di sviluppo locali: esplorazione della type library (tlb.py, tlbgrep.py, swenum.py), worker con istanza dedicata (worker.py + run.sh + restart_worker.sh), pngtool.py, lingua.py (it/en), contatore di fase (fase2.ps1 + fase2.json), prove (c3p*.py)
+scripts_tmp/    strumenti di sviluppo locali: laboratorio lab.py + labrun.py (istanze dedicate con nome), api_ref/ (enum, firme API, catalogo comandi), BRIEF_LOTTI.md + notes_<lotto>.md (sotto-agenti), esplorazione della type library (tlb.py, tlbgrep.py, swenum.py), worker con istanza dedicata (worker.py + run.sh + restart_worker.sh), pngtool.py, lingua.py (it/en), contatore di fase (fase2.ps1 + fase2.json), prove (c3p*.py)
 ```

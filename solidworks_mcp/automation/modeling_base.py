@@ -372,56 +372,154 @@ class ModelingBase:
                 return bool(feat.Select2(append, mark)), f"Feature '{name}' non selezionabile"
         return False, "Specifica non riconosciuta (usa edge/face/plane/axis)"
 
+    def _sketch_entity_obj(self, doc, sketch_name: str, ref, unit=None):
+        """Entita' (segmento o punto) di uno schizzo QUALSIASI del modello, senza aprirlo: -> (oggetto, descrizione, errore).
+        ref = id ('S0-1-2', 'P0-1'), 'pt@x,y' o '@x,y' nelle coordinate di quello schizzo."""
+        f = self._find_feature(doc, sketch_name)
+        if f is None or self._com(f, "GetTypeName2") != "ProfileFeature":
+            return None, "", f"schizzo '{sketch_name}' non trovato"
+        sk = self._com(f, "GetSpecificFeature2")
+        obj, desc, e = self._resolve_entity(doc, sk, ref, unit)
+        if e:
+            return None, "", f"{sketch_name}: {e}"
+        if obj == "origin":
+            return None, "", "l'origine non e' un'entita' di uno schizzo: usa {\"vertex\"} o il piano/origine del modello"
+        return obj, f"{sketch_name}:{desc}", None
+
+    def _select_any(self, doc, spec, unit=None, append=False, mark=0, tol_mm=0.05):
+        """Seleziona un riferimento generico. spec: [x,y,z] (spigolo) | "Piano1"/"front" (piano o feature per nome) |
+        {"face"|"edge"|"vertex":[x,y,z]} (punto SULL'entita') | {"plane"|"axis"|"feature"|"point":nome}
+        (piano, asse, punto di riferimento) | {"sketch":"Schizzo1","entity":"S0-1-2"|"P0-1"|"pt@x,y"|"@x,y"} (entita' di uno
+        schizzo). -> (ok, messaggio, descrizione)."""
+        if spec is None:
+            return False, "riferimento mancante", ""
+        if isinstance(spec, (list, tuple)):
+            ok, info = self._select_point(doc, "edge", spec, unit, append, mark, tol_mm)
+            return ok, info.get("error", ""), f"edge {list(spec)}"
+        if isinstance(spec, str):
+            spec = {"plane": spec}
+        if not isinstance(spec, dict):
+            return False, f"riferimento non valido: {spec}", ""
+        for kind in ("face", "edge", "vertex"):
+            if kind in spec:
+                ok, info = self._select_point(doc, kind, spec[kind], unit, append, mark, tol_mm)
+                return ok, info.get("error", ""), f"{kind} {list(spec[kind])}"
+        if "sketch" in spec and "entity" in spec:
+            obj, desc, e = self._sketch_entity_obj(doc, spec["sketch"], spec["entity"], unit)
+            if e:
+                return False, e, ""
+            ok = bool(obj.Select4(append, self._sd(doc, mark)))
+            return ok, f"selezione di '{desc}' rifiutata", desc
+        for key in ("plane", "axis", "feature", "point", "ref_point"):
+            if key in spec:
+                name = spec[key]
+                feat = self._find_feature(doc, name) or self._std_plane_feature(doc, name)
+                if feat is None:
+                    return False, f"Feature '{name}' non trovata", ""
+                ok = bool(feat.Select2(append, mark))
+                return ok, f"Feature '{name}' non selezionabile", name
+        return False, "riferimento non riconosciuto (usa face/edge/vertex/plane/axis/point/sketch+entity)", ""
+
     # ------------------------------------------------------------------ elenco entita'
-    def list_entities(self, kind: str = "face", unit: str = None, limit: int = 60) -> Dict:
-        """Elenca facce / spigoli / vertici del corpo con un punto utilizzabile per selezionarli."""
+    # ISurface.Identity() / ICurve.Identity() (swSurfaceTypes_e / swCurveTypes_e)
+    _SURFACE_TYPES = {4001: "plane", 4002: "cylinder", 4003: "cone", 4004: "sphere", 4005: "torus", 4006: "bspline",
+                      4007: "blend", 4008: "offset", 4009: "extrusion", 4010: "revolution"}
+    _CURVE_TYPES = {3001: "line", 3002: "circle", 3003: "ellipse", 3004: "intersection", 3005: "bspline",
+                    3006: "spcurve", 3008: "constparam", 3009: "trimmed"}
+
+    def _surface_params(self, surf, stype: str, unit, face=None) -> Dict:
+        """Parametri della superficie (m -> `unit`; direzioni senza unita'; angoli in gradi). Ordine dei valori MISURATO
+        (SW 2026): PlaneParams = normale(3) + punto(3); CylinderParams = origine(3) + asse(3) + raggio;
+        ConeParams = origine(3) + asse(3) + raggio all'origine + semi-angolo (rad); SphereParams = centro(3) + raggio;
+        TorusParams = centro(3) + asse(3) + raggio maggiore + minore."""
+        fl = lambda v: round(self._from_m(v, unit), 4)
+        vec = lambda a: [round(float(v) + 0.0, 5) for v in a]
+        pt = lambda a: [fl(v) for v in a]
+        if stype == "plane":
+            pp = [float(v) for v in self._com(surf, "PlaneParams")]
+            n = [float(v) for v in self._com(face, "Normal")] if face is not None else pp[0:3]
+            return {"normal": vec(n), "point_on_plane": pt(pp[3:6]),
+                    "distance_from_origin": fl(sum(n[i] * pp[3 + i] for i in range(3)))}
+        if stype == "cylinder":
+            cp = [float(v) for v in self._com(surf, "CylinderParams")]
+            return {"radius": fl(cp[6]), "axis_origin": pt(cp[0:3]), "axis_dir": vec(cp[3:6])}
+        if stype == "cone":
+            cp = [float(v) for v in self._com(surf, "ConeParams")]
+            half = cp[7]
+            out = {"origin": pt(cp[0:3]), "axis_dir": vec(cp[3:6]), "radius_at_origin": fl(cp[6]),
+                   "half_angle_deg": round(math.degrees(half), 4)}
+            if abs(math.tan(half)) > 1e-12:
+                h = cp[6] / math.tan(half)
+                out["apex"] = pt([cp[i] + cp[3 + i] * h for i in range(3)])
+            return out
+        if stype == "sphere":
+            sp = [float(v) for v in self._com(surf, "SphereParams")]
+            return {"center": pt(sp[0:3]), "radius": fl(sp[3])}
+        if stype == "torus":
+            tp = [float(v) for v in self._com(surf, "TorusParams")]
+            return {"center": pt(tp[0:3]), "axis_dir": vec(tp[3:6]), "major_radius": fl(tp[6]),
+                    "minor_radius": fl(tp[7])}
+        return {}
+
+    def _curve_params(self, cv, ctype: str, unit) -> Dict:
+        """LineParams = punto di partenza(3) + direzione(3); CircleParams = centro(3) + asse(3) + raggio."""
+        fl = lambda v: round(self._from_m(v, unit), 4)
+        if ctype == "line":
+            lp = [float(v) for v in self._com(cv, "LineParams")]
+            d = lp[3:6]
+            n = math.sqrt(sum(x * x for x in d)) or 1.0
+            return {"line_point": [fl(v) for v in lp[0:3]], "direction": [round(x / n + 0.0, 5) for x in d]}
+        if ctype == "circle":
+            cp = [float(v) for v in self._com(cv, "CircleParams")]
+            return {"center": [fl(v) for v in cp[0:3]], "axis_dir": [round(v + 0.0, 5) for v in cp[3:6]],
+                    "radius": fl(cp[6])}
+        return {}
+
+    def list_entities(self, kind: str = "face", unit: str = None, limit: int = 60, include_params: bool = True) -> Dict:
+        """Elenca facce / spigoli / vertici del corpo con un punto utilizzabile per selezionarli. Facce: tipo di
+        superficie (plane, cylinder, cone, sphere, torus, bspline...) e parametri (piano: normale e distanza dall'origine;
+        cilindro: asse e raggio; cono: origine, asse, semi-angolo, vertice; sfera: centro e raggio; toro: centro, asse,
+        raggi). Spigoli: tipo di curva e parametri di retta (punto, direzione) e cerchio (centro, asse, raggio)."""
         doc, err = self._part()
         if err:
             return err
         kind = {"faces": "face", "edges": "edge", "vertices": "vertex"}.get(kind.lower(), kind.lower())
         items, out = self._body_entities(doc, kind), []
-        for i, e in enumerate(items[:limit]):
+        for i, e in enumerate(items[:int(limit)]):
             row = {"index": i}
             try:
                 if kind == "face":
                     surf = self._com(e, "GetSurface")
                     row["area"] = round(self._from_m(float(self._com(e, "GetArea")) ** 0.5, unit) ** 2, 3)
-                    row["type"] = ("plane" if self._com(surf, "IsPlane") else "cylinder" if self._com(surf, "IsCylinder")
-                                   else "cone" if self._com(surf, "IsCone") else "sphere" if self._com(surf, "IsSphere")
-                                   else "torus" if self._com(surf, "IsTorus") else "other")
+                    row["type"] = self._SURFACE_TYPES.get(int(self._com(surf, "Identity")), "other")
                     box = self._com(e, "GetBox")
                     c = [(box[k] + box[k + 3]) / 2 for k in range(3)]
                     q = e.GetClosestPointOn(c[0], c[1], c[2])
                     row["point"] = [round(self._from_m(v, unit), 4) for v in list(q)[:3]]
-                    if row["type"] == "plane":
-                        row["normal"] = [round(v, 4) for v in self._com(e, "Normal")]
-                    elif row["type"] == "cylinder":
-                        cp = self._com(surf, "CylinderParams")
-                        row["radius"] = round(self._from_m(cp[6], unit), 4)
-                        row["axis_origin"] = [round(self._from_m(v, unit), 4) for v in cp[0:3]]
-                        row["axis_dir"] = [round(v, 4) for v in cp[3:6]]
+                    if include_params:
+                        row.update(self._surface_params(surf, row["type"], unit, e))
                 elif kind == "edge":
                     cv = self._com(e, "GetCurve")
                     v1, v2 = self._com(e, "GetStartVertex"), self._com(e, "GetEndVertex")
                     sp = self._com(v1, "GetPoint") if v1 is not None else None
                     ep = self._com(v2, "GetPoint") if v2 is not None else None
-                    row["type"] = ("line" if self._com(cv, "IsLine") else "circle" if self._com(cv, "IsCircle")
-                                   else "other")
+                    row["type"] = self._CURVE_TYPES.get(int(self._com(cv, "Identity")), "other")
                     if sp is not None and ep is not None:
                         mid = e.GetClosestPointOn((sp[0] + ep[0]) / 2, (sp[1] + ep[1]) / 2, (sp[2] + ep[2]) / 2)
                         row["start"] = [round(self._from_m(v, unit), 4) for v in sp]
                         row["end"] = [round(self._from_m(v, unit), 4) for v in ep]
                         row["point"] = [round(self._from_m(v, unit), 4) for v in list(mid)[:3]]
-                    elif self._com(cv, "IsCircle"):
+                    elif row["type"] == "circle":
                         cp = self._com(cv, "CircleParams")
-                        row["radius"] = round(self._from_m(cp[6], unit), 4)
-                        row["center"] = [round(self._from_m(v, unit), 4) for v in cp[0:3]]
                         pt = e.GetClosestPointOn(cp[0] + cp[6], cp[1], cp[2])
                         row["point"] = [round(self._from_m(v, unit), 4) for v in list(pt)[:3]]
+                    if include_params:
+                        row.update(self._curve_params(cv, row["type"], unit))
                 else:
                     row["point"] = [round(self._from_m(v, unit), 4) for v in self._com(e, "GetPoint")]
             except Exception as ex:
                 row["note"] = f"dati parziali: {ex}"
             out.append(row)
         return self._result(True, f"{len(items)} {kind} (mostrati {len(out)})", SwErrors.swSuccess,
-                            {"kind": kind, "count": len(items), "unit": self._unit_name(unit), "entities": out})
+                            {"kind": kind, "count": len(items), "unit": self._unit_name(unit), "entities": out,
+                             "angle_unit": "deg"})

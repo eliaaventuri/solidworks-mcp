@@ -606,3 +606,273 @@ Trappole e nomi verificati (SW 2026 SP4.1, istanza dedicata nascosta, late bindi
   Una faccia scelta su uno spigolo puo' prendere la faccia piana vicina: per un foro dare un punto a meta' profondita'.
 - Con il server MCP di Claude aperto sullo stesso PC, i test live stampano "Logging error ... PermissionError" sul file di log comune
   (`%LOCALAPPDATA%\solidworks-mcp\solidworks_mcp.log`, rotazione bloccata dall'altro processo): rumore, i test non ne risentono.
+
+## Lotti di tool nuovi (tools_ext, 2026-10-18/19): note dei sotto-agenti
+Ogni lotto: schemi in `solidworks_mcp/tools_ext/<lotto>.py`, metodi in `automation/ext_<lotto>.py` (o nei moduli esistenti per le estensioni),
+test in `tests/test_ext_<lotto>_live.py`. Prove fatte con il laboratorio `scripts_tmp/lab.py` (istanza dedicata, codice ricaricato a ogni script).
+
+### Lotto moka1
+
+Test: `tests/test_ext_moka1_live.py` (M1..M5, per sezione da argv). Nessun tool nuovo: cambia solo il numero di parametri.
+File toccati: `automation/modeling.py`, `automation/modeling_base.py`, `automation/sketch_constraints.py`, `modeling_tools.py`.
+
+#### Helper nuovi
+- `ModelingBase._select_any(doc, spec, unit, append, mark)`: seleziona un riferimento generico (`[x,y,z]` spigolo, nome di piano/feature,
+  `{"face"|"edge"|"vertex":[..]}`, `{"plane"|"axis"|"feature"|"point":nome}`, `{"sketch":nome,"entity":id}`). -> (ok, msg, descrizione).
+- `ModelingBase._sketch_entity_obj(doc, schizzo, id)`: segmento/punto di uno schizzo qualunque senza aprirlo.
+- `SketchConstraintOperations._frame_to_model(sk)`: trasformazioni schizzo<->modello di qualunque ISketch (anche non attivo).
+
+#### 1. create_reference_plane: mid_plane, line_point, normal_to_curve, parallel_point  [x] (mid_plane con metodo diverso)
+- line_point -> `doc.CreatePlaneThruLineAndPt(True)`; normal_to_curve -> `doc.CreatePlanePerCurveAndPassPoint3(True, True)`;
+  parallel_point -> `doc.CreatePlaneThruPtParallelToPlane(True)`. Selezione: linea/curva prima, punto dopo (l'ordine non conta). Tutti
+  creano il piano; `InsertRefPlane` con questi vincoli non e' stato necessario (le chiamate dedicate funzionano e restituiscono il piano).
+- mid_plane `[~]`: `InsertRefPlane` col vincolo MidPlane (128) NON crea nulla in SW 2026. Provati: 128, 128|4, 128|1, 128|2, 264, 136,
+  384, 640, 8320, coppie (c1,c2) con 128 in uno dei due, e tutti i valori 0..42 del primo vincolo (con 2 facce o 2 piani selezionati,
+  Mark 0 e 1): sempre None e nessuna feature. `CreateDefinition(swFmRefPlane=59)` restituisce None; sul `RefPlaneFeatureData` di un
+  piano esistente `Selections` si imposta (il piano si sposta) ma `Type` e `Constraint(i)` non cambiano (`Constraint` e' proprieta'
+  indicizzata non scrivibile in late binding; `Type=` ignorato). Soluzione: offset di mezza distanza dal primo riferimento
+  (InsertRefPlane 8) con rilettura del piano (la posa e' controllata: il punto medio sta sul piano, altrimenti si inverte il verso
+  e si riprova). Riporta `between_refs`, `offset_each`, `method`. Il piano NON resta legato alla seconda faccia (non e' un vero
+  piano di mezzeria associativo). Rifiuta facce non parallele, coincidenti, non piane.
+- Misure (blocco 20x40x30): mid x=0/x=20 -> x=10; y=40/y=0 -> y=20; z=0/z=30 -> z=15; front/Piano a 30 -> x=15;
+  line_point normale (0.832,0,-0.5547) contiene spigolo e vertice (distanze 0.00000); normal_to_curve normale +-Y origine y=40;
+  parallel_point normale +-X, distanza del vertice 0.
+- Trappola: in questo template il piano Top ha normale +Z e mappa (u,v) -> (y,-x); Front normale +X con (u,v) -> (y,z).
+- Trappola: `ISketch.ModelToSketchTransform` funziona anche su schizzi non attivi; `RefPlaneFeatureData.GetSelectionsCount` e' "in sola
+  scrittura" in late binding.
+
+#### 2. revolve_boss / revolve_cut: axis esterno  [x]
+- `axis` accetta: id di segmento dello schizzo (come prima), nome di un asse di riferimento (stringa o `{"axis":nome}`),
+  `{"edge":[x,y,z]}` (spigolo lineare), `{"sketch":nome,"entity":id}` (linea di un altro schizzo). Selezione con Mark=4.
+- Trappola: per la linea di un ALTRO schizzo `Select4(Mark 4)` e `SelectByID2(..,"EXTSKETCHSEGMENT")` vengono accettati ma
+  FeatureRevolve2 non crea nulla; funziona `SelectByID2("Linea1@Schizzo1","SKETCHSEGMENT",0,0,0,True,4,...)` (restituisce False
+  ma la selezione c'e': si controlla il conteggio delle selezioni).
+- Misure (rettangolo 10x10 a 10 mm dall'asse: V = 2*pi*10*100 = 6283.185): boss asse di riferimento 6283.185; con `{"axis":nome}`
+  idem; 90 gradi 1570.8 (Pappo/4); taglio con asse di riferimento 6283.185 asportati; taglio con spigolo del modello 1570.796
+  (quarto d'anello nel blocco); boss con linea di altro schizzo 6283.185. Il risultato riporta `axis_kind`.
+
+#### 3. add_sketch_relation verso entita' esterne  [x] con pierce verso altro schizzo `[~]`
+- Entita' esterne: `{"edge"|"vertex":[x,y,z]}`, `{"axis":nome}`, `{"sketch":nome,"entity":id|"P0-1"|"pt@x,y"}`; relazioni nuove "pierce"
+  (sgATPIERCE) e "on_line" (punto -> coincident, linea -> collinear). Il risultato riporta `relations_added`, le coordinate finali
+  dei punti dello schizzo (`points`) e fallisce se SW non crea nessuna relazione con entita' esterne.
+- Verso spigoli/vertici del modello tutto nativo: pierce (tipo 40, punto = intersezione esatta), coincident, parallel, perpendicular,
+  collinear, tangent, equal, concentric (cerchio vs spigolo circolare): geometria riletta con scarto < 0.001 mm.
+- Verso un altro schizzo: coincident (punto-punto: il punto va alla proiezione; punto-segmento: sul segmento proiettato) funziona.
+  pierce `[~]`: `SketchAddConstraints("sgATPIERCE")` con un segmento di un altro schizzo non crea nessuna relazione. Provati: Select4
+  (mark 0/1/2/4, ordine inverso), `SelectByID2` EXTSKETCHSEGMENT, selezione della feature schizzo, `IModelDoc.AddRelation`, punto
+  dell'altro schizzo: sempre 0 relazioni. (Con spigoli/assi del modello la stessa chiamata funziona.) Aggiramento: si calcola il punto in cui
+  linea/arco/cerchio dell'altro schizzo fora il piano dello schizzo attivo (scegliendo il candidato piu' vicino al punto), ci si sposta
+  il punto e lo si lega con coincident alla curva proiettata. Geometria esatta (scarto 0.000000 mm), ma il punto resta libero di
+  scorrere lungo la proiezione (schizzo sottodefinito) e la relazione elencata e' `coincident`. Chiave `pierce_method`.
+  Spline/ellissi: non supportate dal calcolo (errore chiaro: usare spigolo/asse del modello).
+- `list_sketch_relations`: mappa nomi estesa (vertical, tangent, parallel, perpendicular, concentric, midpoint, equal, fixed,
+  collinear, pierce) ed entita' esterne mostrate come "external" invece di far fallire l'elenco.
+- Misure: pierce linea di altro schizzo punto (23.33333, 0) = atteso; cerchio (51.33975, 0) = candidato piu' vicino; pierce nativo
+  spigolo (-20, 0) = atteso; coincident vertice (-20, 30) = proiezione; equal 40.0 mm; tangent distanza 3.00000 = raggio.
+
+#### 4. extrude_boss / extrude_cut: start_from  [x]
+- `FeatureExtrusion3/FeatureCut4` parametro T0: 0 piano dello schizzo, 1 superficie, 2 vertice, 3 offset (swStartConditions_e).
+  Superficie: la faccia si seleziona DOPO lo schizzo con **Mark=32**; vertice: **Mark=0**; con gli altri mark (1,2,4,8,16,64)
+  la chiamata solleva un'eccezione COM o non crea nulla. Offset: T0=3 con StartOffset; il segno positivo e' lungo la normale dello
+  schizzo (sia boss che cut); FlipStartOffset=True inverte.
+- La partenza mantiene la direzione dell'estrusione (normale dello schizzo). Nota: per i TAGLI da un piano la direzione di default
+  e' opposta alla normale (dal Top il taglio va verso -z); `reverse` nel taglio e' "Flip side to cut" (taglia l'esterno del
+  profilo), non inverte la direzione.
+- `start_offset` senza `start_from` ora usa T0=3 (prima T0=0): stesso risultato misurato (+141.372 mm3), quindi nessuna regressione.
+- Trappola nelle prove: `DeleteSelection2(3)` di una feature cancella anche lo schizzo assorbito.
+- Misure (cerchio r=3 su blocco alto 30, colonna alta 25 accanto): boss da faccia z=25, da vertice, da offset 25, start_offset=25:
+  +141.372 mm3 (= pi*9*5); taglio da faccia, vertice, offset: -282.743 (= pi*9*10).
+
+#### 5. list_entities: tipo e parametri  [x]
+- Facce: `type` da `ISurface.Identity` (4001 plane, 4002 cylinder, 4003 cone, 4004 sphere, 4005 torus, 4006 bspline, 4007 blend, 4008 offset,
+  4009 extrusion, 4010 revolution). Ordine dei valori MISURATO: PlaneParams = normale(3)+punto(3); CylinderParams = origine(3)+asse(3)+raggio;
+  ConeParams = origine(3)+asse(3)+raggio nell'origine+semi-angolo (rad); SphereParams = centro+raggio; TorusParams = centro(3)+asse(3)+raggio
+  maggiore+minore. Spigoli: `ICurve.Identity` (3001 line, 3002 circle, ...); LineParams = punto(3)+direzione(3); CircleParams = centro(3)+asse(3)+raggio.
+- Piano: `normal` e' la normale USCENTE della faccia (Face.Normal), non quella di PlaneParams; `distance_from_origin` = n . p (con segno).
+- Cono: l'origine non e' sempre l'apice (raggio 10 a z=20 in un caso, 0 in un altro): `apex` = origine + asse * r / tan(semi-angolo), verificato con
+  due coni opposti (apice a z=22 con asse -z, apice a z=8 con asse +z).
+- Parametro `include_params` (default true; false = righe compatte). Lunghezze in `unit`, direzioni adimensionali, angoli in gradi.
+- Misure: cilindro r=10, cono semi-angolo 26.5651 (atteso 26.5651), apice (0,0,22), toro del raccordo 9/1 centro (0,0,1), sfera r=7 centro (0,0,15),
+  toro 15/3 centro (0,0,10), spigolo circolare r=10 centro (0,0,30), unita' cm raggio 1.0.
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool nel test offline (nessun tool nuovo da parte mia).
+- Se serve un vero piano di mezzeria associativo (mid_plane nativo) servirebbe un'altra via API (non trovata); il tool lo dichiara.
+
+### Lotto moka2
+
+Codice: `solidworks_mcp/automation/ext_moka.py` (mixin `MokaOperations`), schemi `solidworks_mcp/tools_ext/moka.py` (7 tool nuovi,
+`delete_body` in `DESTRUCTIVE`). Test: `tests/test_ext_moka2_live.py` (sezioni M1..M4). Prove: `scripts_tmp/moka2_*.py`.
+File originali della moka COPIATI (mai toccati gli originali) in `test_output/moka2_src/` (non versionato) e letti con il laboratorio.
+
+#### Tool
+
+### add_cosmetic_thread  [x]
+- API: `FeatureManager.InsertCosmeticThread3(8, "Machine Threads", size, Ø, end, depth, "")` con lo spigolo selezionato, POI `GetDefinition` ->
+  `AccessSelections(doc, VARIANT nullo)` -> set `Standard=8` (ISO), `StandardType="Machine Threads"`, `Size`, `ThreadCallout` ->
+  `ModifyDefinition`. Valori presi dai file originali della moka (Boiler M56, Valve M8, Knob M6).
+- TRAPPOLE: (1) `InsertCosmeticThread3` IGNORA standard, tipo e misura (rilegge `Standard=-2`, `Size=''`): vanno scritti dopo con ModifyDefinition.
+  (2) `CreateDefinition(swFmCosmeticThread=29)` restituisce None. (3) `DiameterType` (2 = maggiore, 3 = minore) lo decide SolidWorks
+  dallo spigolo (foro -> 2, albero -> 3) ed e' di sola lettura; il `Diameter` passato e' preso cosi' com'e': per un albero va dato il diametro MINORE.
+  (4) `Size` non e' validato (anche 'BOGUS' viene accettato). (5) Con "fino alla fine"/"fino al successivo" SolidWorks ricalcola `BlindDepth` =
+  lunghezza reale. (6) `GetTypeName2` = `CosmeticThread`; non e' tra le feature di primo livello cercate da `_features` (sotto-feature del taglio).
+  (7) Una seconda filettatura sullo stesso spigolo viene creata lo stesso (non controllato).
+- Diametro minore esterno: misurato sui file della moka M8 = 6,619 e M56 = 49,971. Formula trovata: D1 ISO (D - 1,0825 P) meno lo scostamento
+  6g (0,015 + 0,011 P mm): M8 6,6181, M56 49,97075 (scarto < 1 um). E' il valore che il tool usa. Interno: Ø maggiore = nominale (Knob M6 = 6,0).
+- Interno/esterno dedotto da `FaceInSurfaceSense` della faccia cilindrica adiacente (True = foro). Avviso se `kind` contraddice la geometria.
+- Test: vedi M1.
+
+### fill_pattern  [x]
+- API: `FeatureManager.FeatureFillPattern` e' OBSOLETO (restituisce sempre None, nessuna feature, provate 150 combinazioni di marche).
+  Funziona: selezioni con le marche della doc di `IFillPatternFeatureData` (confine = faccia o schizzo **16384**, direzione **1**, punto seme
+  (vertice / punto di schizzo) **3**, feature da ripetere **4**) -> `CreateDefinition(105)` -> set delle proprieta' -> `CreateFeature`.
+- TRAPPOLE: (1) `PatternFillBoundaryArray`/`PatternFeatureArray` NON vanno impostati (basta la selezione con le marche). (2) La **direzione e'
+  obbligatoria in pratica**: senza, con il seme "forma predefinita" CreateFeature restituisce None; il tool usa il primo lato rettilineo del
+  confine (spigolo della faccia o segmento dello schizzo). (3) Alla creazione SolidWorks IGNORA le misure del seme (Diameter, Dimension,
+  Diagonal, OuterRadius...) e usa 8 mm di default: il tool le corregge con `GetDefinition` + `ModifyDefinition` subito dopo. (4) Leggere
+  `FeaturesToPatternType` da una definizione nuova (non ancora creata) da' errore COM; sulle definizioni lette da feature esistenti servono
+  `AccessSelections(doc, VARIANT nullo)` e `ReleaseSelectionAccess`. (5) Il margine e' misurato dal BORDO dell'istanza al confine (verificato
+  col conteggio a mano). (6) `PatternLayoutType`: 0 = concentrico, 1 = quadrato, 2 = poligono, 3 = perforazione. (7) Il seme e' al centro
+  del confine; con feature esistente e' quella feature. (8) Un `create_sketch` + `FeatureFillPattern` con tanti fori (concentrico, passo 8)
+  e' lentissimo (minuti): il laboratorio sembra appeso.
+- Conteggio istanze: facce create / facce di una istanza (cerchio 1, quadrato/rombo 4, poligono n lati; per feature esistenti, facce create dal seme).
+- Test: M2.
+
+### list_bodies / delete_body / combine_bodies / insert_part  [x]
+- `list_bodies`: `GetBodies2(-1, False)`; volume/area/baricentro da `Body2.GetMassProperties(1000)`, ingombro `GetBodyBox`, punto di faccia scelto lontano
+  (> 0,1 mm) dalle facce degli altri corpi (un punto sul bordo comune identificherebbe due corpi).
+- `delete_body`: corpi selezionati con `Body2.Select2(append, SelectData marca 0)` + `FeatureManager.InsertDeleteBody2(keep)`; feature `DeleteBody`.
+- `combine_bodies`: `InsertCombineFeature` NON crea nulla con i valori di `swCombineBodiesOperationType_e` (0/1/2): servono quelli di
+  **`swBodyOperationType_e`: intersect 15901, cut 15902, add 15903**. Add e common: corpo principale **nullo** e TUTTI i corpi nell'array;
+  subtract: principale + strumenti. Feature `CombineBodies` ("Abbina1" in italiano).
+- `insert_part`: `PartDoc.InsertPart3(path, opzioni, config)` con opzioni 1|2 (solidi+superfici) + 512 (rompi il collegamento). Il corpo inserito NON si
+  fonde con quelli esistenti (anche se sovrapposto: volumi sommati, nome `<corpo>_<file>`). Posizione: `InsertMoveCopyBody2` con il corpo selezionato
+  con **marca 1**; traslazione e rotazione non stanno nella stessa feature (si creano due feature: prima rotazione, poi traslazione).
+  TRAPPOLA: i parametri `RotAngleX/Y/Z` ruotano attorno agli assi **Z/Y/X** (misurato su un blocco 10x20x30): il tool li inverte, cosi' `rotate=[rx,ry,rz]` e' attorno a X,Y,Z.
+- Test: M3.
+
+### get_feature_definition  [x]
+- `feat.GetDefinition` + `AccessSelections`; il lettore e' scelto dal nome del tipo (`CosmeticThread`, `RefPlane`) o riconoscendo i membri dell'oggetto
+  (`GetEndCondition` estrusione/taglio, `GetRevolutionAngle`, `FastenerSize` Hole Wizard, `D1Spacing` ripetizione lineare, `TotalInstances` circolare,
+  `PatternLayoutType` riempimento, `DefaultRadius` raccordo, `EdgeChamferAngle` smusso, `Thickness` shell, `GetProfileCount` loft, `Profile` sweep).
+  `GetTypeName2` delle estrusioni: `Extrusion`, ma nei file aperti da SW anche `ICE`: per questo il riconoscimento e' dai membri.
+- Piano di riferimento: `GetSpecificFeature2` -> `Transform.ArrayData` (9 della rotazione, poi traslazione): gli assi sono le RIGHE (misurato: piano
+  frontale spostato di 10 in X -> origine [10,0,0], normale [1,0,0]).
+- Genitori/figlie con `GetParents`/`GetChildren`, quote con `_sketch_dimensions`. Tipi non gestiti: tipo + genitori + quote + nota.
+- Letti dai file originali: `Filter_1` Fill Pattern1 (circolare, su feature Cut-Extrude1, quote 3/3 mm), `FilterPlate_1` Fill Pattern18 (circolare, seme
+  cerchio Ø0,4, confine Sketch6), Cosmetic Thread Boiler M56/Valve M8/Knob M6 (vedi sopra). Hole Wizard legacy: tutto zero (gia' noto).
+- Test: M4.
+
+### Toolbox (vite ISO 7046-1 M5x12)  [~] NON FATTO
+- Prove: `C:\SOLIDWORKS Data\browser\ISO\bolts and screws\cross-recessed head screws\countersunk flat head cross recess screw_iso.sldprt` esiste
+  (Toolbox installato, 1885 file), ma e' il MODELLO con sole configurazioni `Default` e `PreviewCfg` guidato da quote/equazioni (`Length@BodySke`...),
+  la misura vera viene dal database Toolbox. `toolboxapi.chm` documenta solo l'add-in di configurazione (nessuna API di inserimento);
+  `app.GetAddInObject` con i ProgID plausibili restituisce None nell'istanza dedicata (add-in non caricato).
+  Alternativa praticabile senza tool nuovo: `insert_part` del file Toolbox copiato + `set_dimension_value` sulle quote del modello, oppure ricostruire la vite
+  con rivoluzione + taglio di loft + ripetizione circolare (come nel piano).
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool (test offline: "N tool esposti" 210 -> 217 e i due di execute_python) e `EXPECTED_TOOLS` in `tests/live_common.py`.
+- Aggiornare ATLANTE.md (ext_moka.py, tools_ext/moka.py, test_ext_moka2_live.py) e le voci di PIANO_MOKA.md 1, 2, 6, 8, 10.
+- Niente modifiche necessarie ai file non miei.
+
+#### Esito (2026-10-19)
+- `tests/test_ext_moka2_live.py`: **49/49 PASS** (M1 10, M2 15, M3 17 con insert_part, M4 11, + esposizione tool e PID).
+- Numeri chiave misurati: cosmetica M8 interna Ø8,0 prof. 12; M56 esterna Ø49,97075 (SW originale 49,971), M56x4 Ø51,611; fill_pattern quadrata su feature 45 istanze
+  (volume 27172,57 = 30000 - 45 x 62,83), perforazione Ø4 43 istanze (27298,23), quadrato 4x4 45 (26400,00), rombo d=6 45 (25950,00), confine da schizzo 45;
+  combine subtract/add/common 24000/56000/8000 mm3; insert_part con traslazione [20,5,0] ingombro [20,5,0,30,25,30], rotazione X 90 ingombro [0,-30,0,10,0,20].
+- Offline: 145/148 (i 3 che falliscono sono i conteggi dei tool: 239 esposti, execute_python); pyflakes 0 sui 3 file miei + test.
+- Laboratorio `moka2` chiuso (`labrun.py moka2 --quit` -> "chiuso"); PID del test chiuso.
+
+### Lotto sketch2
+
+File: `solidworks_mcp/automation/ext_sketch2.py` (mixin `Sketch2Operations`), `solidworks_mcp/tools_ext/sketch2.py` (schemi),
+`tests/test_ext_sketch2_live.py` (50/50 PASS, istanza dedicata), prove in `scripts_tmp/sk2_*.py`.
+Offline: 145/148 (i 3 falliti sono solo i conteggi dei tool: "210 tool esposti" e i due di execute_python). pyflakes 0.
+Tool aggiunti: 16 (vedi sotto). Nessuna richiesta di modifica ad altri file.
+
+#### Tool e stato
+
+| Tool | API | Stato |
+|---|---|---|
+| `trim_sketch_entities` (power, closest, corner, two_entities, inside, outside) | `SketchManager.SketchTrim` | [x] power/closest/inside/outside misurati; corner e two_entities [~] (vedi trappole) |
+| `extend_sketch_entity` | `SketchManager.SketchExtend` | [x] estremo misurato (40,0), anche dal lato sinistro |
+| `sketch_chamfer` (distance_distance, distance_angle, equal, corner=[x,y]) | `SketchManager.CreateChamfer` | [x] lato 11.1803 (5x10), 5.6569 (4 uguale), 6.9282 (6 e 30 gradi), tagli misurati |
+| `sketch_linear_pattern` | `ModelDoc.CreateLinearSketchStepAndRepeat` | [x] 4 cerchi -> ultimo (30,0); 3x2; a 30 gradi (17.3205, 10) |
+| `sketch_circular_pattern` | `ModelDoc.CreateCircularSketchStepAndRepeat` (+ fallback RotateOrCopy) | [x] 4 cerchi attorno all'origine, linea 3x60 gradi, rettangolo 180 |
+| `transform_sketch_entities` (move, rotate, scale + copy/copies) | `ModelDocExtension.MoveOrCopy/RotateOrCopy/ScaleOrCopy` | [x] coordinate riletta in tutti i casi, anche piano Top |
+| `draw_center_rectangle`, `draw_3point_rectangle` (+center), `draw_parallelogram` | `CreateCenterRectangle`, `Create3PointCornerRectangle/CenterRectangle`, `CreateParallelogram` | [x] vertici riletti |
+| `draw_tangent_arc` | `CreateTangentArc` (tipo 1) | [x] centro (20,15), R 10, scarto di tangenza 0 gradi |
+| `draw_parabola` | `CreateParabola` | [x] lunghezza 22.9559 = 10*(sqrt2+asinh1) |
+| `draw_equation_curve` (y=f(x) o parametrica) | `CreateEquationSpline2` | [x] estremi e punto medio verificati, anche con rotazione, offset e unit=inch |
+| `create_3d_sketch`, `draw_3d_line`, `draw_3d_spline`, `draw_3d_point` | `Insert3DSketch`, `CreateLine`, `CreateSpline2`, `CreatePoint` | [x] estremi riletti; sweep d=4 lungo polilinea: 658.079 mm3 vs pi r^2 L = 657.984 (0.0145 %) |
+| `close_3d_sketch` | - | non serve: `close_sketch` chiude lo schizzo 3D (verificato) |
+| `draw_conic` | `CreateConic` | NON esposto, [~]: l'API crea una curva (tipo 5) ma i 4 punti non sono "fuoco, vertice, estremi" come per la parabola |
+| `intersection_curve` | `SketchManager.IntersectCurves` | NON fatto, [~]: 3 approcci, nessuna curva creata |
+| `silhouette_entities` | - | non provato (richiede viste/disegno) |
+
+Solo `trim_sketch_entities` e' registrato come distruttivo (`DESTRUCTIVE` in `tools_ext/sketch2.py`).
+
+#### Trappole misurate (il docstring in cima a `ext_sketch2.py` le riassume)
+
+- **SketchTrim**: il ritorno non e' affidabile (False con lavoro fatto, True senza effetto). Serve SEMPRE una selezione.
+  Misure su orizzontale 0..40 + verticale x=20, entita' selezionata con `Select4`:
+  - codice 0 (Closest) = vero power trim: pick (30,0) -> resta 0..20; pick (5..10,0) -> resta 20..40; un'entita' senza
+    intersezioni viene cancellata; funziona anche sui cerchi (toglie il quarto cliccato). Il tool lo usa per `power` e `closest`.
+  - codice 3 (EntityPoint) NON e' un power trim: taglia l'entita' nel punto (30,0) e toglie il lato iniziale (resta 30..40).
+  - codice 4 (Entities): toglie sempre 0..20 qualunque sia il pick. Non esposto.
+  - codici 1 (Corner) e 2 (TwoEntities) IGNORANO il punto di pick (nemmeno `SelectData.X/Y/Z` e `SelectByID2` con coordinate lo
+    registrano). Corner: ha tenuto sempre 0..20 e -10..0; TwoEntities dipende dall'ordine di selezione. Il lato che resta lo
+    sceglie SolidWorks: il tool lo dichiara e restituisce `segments`. Per controllare il lato usare due power trim.
+  - codici 5 (Outside) e 6 (Inside): selezionare i due confini e poi l'entita' (marchi 0, qualunque marcatura funziona).
+  - `x,y` di SketchTrim sono nelle coordinate dello SCHIZZO (provato su Top e Right).
+- **SketchExtend(x,y,0)** funziona con l'entita' selezionata e (x,y) vicino all'estremo; senza intersezione ritorna False e non cambia nulla.
+- **CreateChamfer(tipo, Distance, AngleORdist)**: tipo 0 distanza-angolo (angolo in radianti), 1 distanza-distanza, 2 uguale
+  (il terzo argomento non puo' essere 0 nemmeno per il tipo 2 -> eccezione COM). La PRIMA entita' selezionata riceve il TERZO
+  argomento; per distanza-angolo la distanza va sulla SECONDA (l'angolo e' fra lo smusso e quella linea) -> il tool inverte
+  l'ordine di selezione cosi' che `distance` sia sempre lungo entity1. Il ritorno e' il segmento dello smusso. Selezionando il
+  solo vertice la distribuzione fra le due linee e' casuale: il tool risolve le due linee e le seleziona lui.
+- **Ripetizione lineare**: angoli in radianti; `DeleteInstances` non ha avuto effetto con "2", "2,1", "3 1", "1;" (omesso, non
+  esposto). Con count_y > 1 SolidWorks crea 2 linee di costruzione (listate in `construction_ids`).
+- **Ripetizione circolare**: centro = centro del riquadro della selezione + R*(cos A, sin A), passo POSITIVO = ORARIO, con
+  `PatternRotate=False` le istanze escono sbagliate (risolutore), con True giuste. Il tool calcola R e A dal `center` richiesto,
+  passa il passo con il segno cambiato (antiorario positivo) e verifica le istanze; se non tornano le cancella e usa il
+  fallback RotateOrCopy. In tutti i test e' bastato il metodo nativo.
+- **MoveOrCopy/RotateOrCopy/ScaleOrCopy**: coordinate nello spazio dello SCHIZZO anche su Top/Right (verificato). `RotateOrCopy`
+  ruota attorno all'ASSE base->dest (dest = base + (0,0,0.01) = normale dello schizzo), non attorno a un punto. Con base != origine
+  lo schizzo diventa "soluzione non valida" e la geometria sparisce (misurato: 0 segmenti): il tool sposta il centro
+  nell'origine, ruota e riporta. Con base=dest=origine nessun effetto. `KeepRelations=True` lascia le relazioni inferite
+  (orizzontale, coincidente con l'origine) che deformano o bloccano il risultato: default False. Con `NumCopies=n` le copie
+  sono cumulative (30, 60, 90 gradi). `ScaleOrCopy(copy=True)` NON copia: il tool copia sul posto con `MoveOrCopy` a spostamento
+  nullo (duplica) e scala la copia (k-esima copia = scala^k). `SketchModifyRotate/Translate` non fanno nulla; `SketchModifyScale`
+  scala tutto lo schizzo attorno all'origine (non usato).
+- **Rettangoli**: `CreateCenterRectangle(cx,cy,..,x2,y2)` = centro + angolo, crea anche 2 diagonali di costruzione
+  (nei `construction_ids`). `Create3PointCornerRectangle(p1,p2,p3)`: spigolo p1-p2, la larghezza e' la distanza di p3 dalla
+  retta p1p2. `Create3PointCenterRectangle(c, p2, p3)`: c centro, p2 meta' di un lato, p3 un angolo. `CreateParallelogram`:
+  quarto vertice p1 + p3 - p2.
+- **CreateTangentArc**: tipo 1 (forward) e 3 (back) danno l'arco tangente (relazione inferita, scarto misurato 0 gradi), tipi 2 e 4
+  danno un arco normale (centro sulla direzione della linea). Il punto di partenza deve essere un estremo di un'entita'.
+- **Parabola/conica**: `CreateParabola` ok (tipo 5). `GetCurve.Evaluate2` sulla parabola da' valori assurdi: si verifica con
+  `GetLength` e con gli estremi. `CreateConic`: con i punti della parabola ritorna None; con altri crea curve di tipo 5 senza
+  `GetFocalPoint2/GetApexPoint2`; le lunghezze misurate (18.5964 per fuoco (6,0), vertice (10,0), estremi (0,+-8)) non coincidono
+  ne' con la mezza ellisse a=10 b=8 (28.36) ne' con una conica razionale quadratica semplice: la dipendenza dal 1o punto e'
+  forte, il 2o conta solo se vicino al 1o. Non esposto (3 approcci falliti).
+- **CreateEquationSpline2(X,Y,Z,t0,t1, IsAngleRange, rot[rad], xOff[m], yOff[m], lock, lock)**: espressioni e intervalli
+  nell'unita' di lunghezza del DOCUMENTO (mm) e stringhe; offset in METRI; rotazione in radianti; seno/coseno in radianti;
+  espressione sbagliata -> None. L'oggetto spline NON ha GetStartPoint2: si legge con `GetCurve.GetEndParams` (VARIANT per
+  riferimento) + `Evaluate2` (il parametro NON va da 0 a 1: leggerlo da GetEndParams). Il tool converte `unit` -> unita' del
+  documento moltiplicando le espressioni, riscrive la variabile `x` in `t` per il caso esplicito, e verifica gli estremi
+  valutando l'equazione in Python (solo funzioni ammesse, `eval` con namespace ristretto).
+- **Schizzo 3D**: `Insert3DSketch(True)` apre, `close_sketch` (InsertSketch) chiude; il nome (`Schizzo3D1`, tipo
+  `3DProfileFeature`) esiste gia' durante la modifica. `sweep` accetta il nome come `path_sketch` senza modifiche. Il solo
+  `CreatePoint` va usato nello schizzo 3D: dopo un `doc.CreatePoint2` il punto restava a (0,0,0) o con Z=0.
+  Sweep con spigolo: scarto 0.0145 % su pi r^2 L (sfera/tappo dello spigolo), ben sotto la tolleranza 0.5 % del test.
+- `list_sketch_entities` classifica i cerchi come `arc` (start == end): nel test un cerchio e' un arco con inizio = fine.
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool (+16: trim_sketch_entities, extend_sketch_entity, sketch_chamfer, sketch_linear_pattern,
+  sketch_circular_pattern, transform_sketch_entities, draw_center_rectangle, draw_3point_rectangle, draw_parallelogram,
+  draw_tangent_arc, draw_parabola, draw_equation_curve, create_3d_sketch, draw_3d_line, draw_3d_spline, draw_3d_point = 16).
+- (facoltativo) `_active_sketch_name` in `sketch_constraints.py` cerca solo `ProfileFeature`: sugli schizzi 3D da' il nome sbagliato
+  (l'ultimo schizzo 2D). Il mio modulo usa `_s2_name`, che li gestisce, ma `list_sketch_entities` & co. restano da correggere.
+- `LIMITI.md` / `STATO.md`: copiare dallo stato sopra; `ATLANTE.md` gia' elencava il mixin?: aggiungere `ext_sketch2.py`.

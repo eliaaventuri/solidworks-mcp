@@ -13,11 +13,24 @@ from .modeling import ModelingOperations
 from .assembly import AssemblyOperations
 from .data_export import DataExportOperations
 from .simulation import SimulationOperations
+from .ext_moka import MokaOperations
+from .ext_sketch2 import Sketch2Operations
+from .ext_features2 import Features2Operations
+from .ext_bodies2 import Bodies2Operations
+from .ext_curves import CurvesOperations
+from .ext_surfaces1 import Surfaces1Operations
+from .ext_surfaces2 import Surfaces2Operations
+from .ext_manage import ManageOperations
+from .ext_sheetmetal import SheetMetalOperations
+from .ext_weldments import WeldmentsOperations
+from .ext_mold import MoldOperations
 
 
 class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOperations, DocumentOperations, 
                            SketchOperations, FeatureOperations, DrawingOperations,
-                           ModelingOperations, AssemblyOperations):
+                           ModelingOperations, AssemblyOperations, MokaOperations, Sketch2Operations,
+                           Features2Operations, Bodies2Operations, CurvesOperations, Surfaces1Operations, Surfaces2Operations,
+                           ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations):
     """
     Complete SolidWorks automation class
     

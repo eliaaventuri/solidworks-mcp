@@ -10,6 +10,7 @@ import json
 import asyncio
 import logging
 import subprocess
+import time
 import traceback
 import concurrent.futures
 from typing import Dict
@@ -40,10 +41,31 @@ LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "solidworks-mcp"
 LOG_FILE = Path(config.log_file) if Path(config.log_file).is_absolute() else LOG_DIR / config.log_file
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+
+class _SharedRotatingFileHandler(RotatingFileHandler):
+    """Piu' server MCP (una sessione ciascuno) scrivono lo stesso file: su Windows la rotazione fallisce con PermissionError
+    finche' un altro processo lo tiene aperto (regressione del 2026-10-18 sera). Allora si salta la rotazione per 10 minuti
+    e si continua a scrivere nel file attuale, invece di stampare un errore a ogni riga."""
+    _retry_at = 0.0
+
+    def shouldRollover(self, record):
+        if time.time() < self._retry_at:
+            return False
+        return super().shouldRollover(record)
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except OSError:
+            self._retry_at = time.time() + 600
+            if self.stream is None:
+                self.stream = self._open()
+
+
 logging.basicConfig(
     level=config.get_log_level_int(),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[RotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8')]
+    handlers=[_SharedRotatingFileHandler(LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8')]
 )
 logger = logging.getLogger("SolidWorksMCP")
 

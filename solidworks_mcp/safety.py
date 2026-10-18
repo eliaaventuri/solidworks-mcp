@@ -16,6 +16,8 @@ from typing import Dict, List, Optional
 
 from mcp.types import Tool, ToolAnnotations
 
+from .tools_ext import EXT_DESTRUCTIVE, EXT_OVERWRITE
+
 # tool che scrivono un file: nome -> argomento col percorso
 OVERWRITE_GUARDS: Dict[str, str] = {
     "save_document": "filepath",
@@ -55,6 +57,10 @@ DESTRUCTIVE_TOOLS: Dict[str, str] = {
     "delete_simulation_load": "deletes a load/fixture of the study",
     "execute_python": "runs arbitrary code with the user's permissions",
 }
+
+# tool aggiunti per lotti (tools_ext/*.py)
+OVERWRITE_GUARDS.update(EXT_OVERWRITE)
+DESTRUCTIVE_TOOLS.update(EXT_DESTRUCTIVE)
 
 
 DOCUMENT_PARAM = {"type": "string", "description": "Optional: title of an open document to make active before this tool "

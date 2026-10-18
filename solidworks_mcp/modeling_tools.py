@@ -13,15 +13,20 @@ Convenzioni valide per tutti i tool:
 
 from mcp.types import Tool
 
+from .tools_ext import EXT_TOOLS
+
 S, N, B, A, O = "string", "number", "boolean", "array", "object"
 _UNIT = (S, "Length unit (default mm)")
 _SK = (S, "Sketch name (default: active/last)")
 _ENT = (None, "Sketch entity: draw_* id, '@x,y' (segment), 'pt@x,y' (point), 'origin'; add_sketch_dimension also accepts a MODEL "
               "edge/vertex/face as {\"edge\": [x,y,z]} (`unit`, a point on it)")
-_ENT2 = (None, "Sketch entity (as entity1)")
+_ENT2 = (None, "Sketch entity (as entity1), or an external one for add_sketch_relation: {\"edge\"|\"vertex\":[x,y,z]} | "
+              "{\"axis\":name} | {\"sketch\":name,\"entity\":id}")
 _PT3 = (A, "Point [x,y,z] (`unit`) ON the entity")
 _PTS3 = (A, "Points [[x,y,z],...] (`unit`), one ON each entity")
 _DIR = (None, "{\"edge\":[x,y,z]} | {\"face\":[x,y,z]} | {\"plane\":name} | {\"axis\":name} | name")
+_AXIS = (None, "Revolve axis: sketch segment id | reference axis name or {\"axis\":name} | {\"edge\":[x,y,z]} | "
+               "{\"sketch\":name,\"entity\":id}")
 _EC = "blind | through_all | through_all_both | mid_plane | up_to_next | up_to_surface | offset_from_surface"
 
 _TOOLS = {
@@ -36,9 +41,16 @@ _TOOLS = {
          "name": (S, "Dimension name, e.g. 'width' -> 'width@Sketch1'"),
          "position": (A, "[x,y] position of the dimension text (`unit`)"), "sketch": _SK}, []),
     "add_sketch_relation": ("add_sketch_relation",
-        "Add a sketch relation.",
+        "Add a sketch relation. Entities may also be OUTSIDE the active sketch: a model edge/vertex {\"edge\":[x,y,z]} / "
+        "{\"vertex\":[x,y,z]} (`unit`, point ON it), a reference axis {\"axis\":\"Axis1\"}, or an entity of ANOTHER sketch "
+        "{\"sketch\":\"Sketch1\",\"entity\":\"S0-1-2\"} (point \"P0-1\", \"pt@x,y\" or \"@x,y\" in that sketch's coordinates). "
+        "pierce: a point of the active sketch pierces a curve (model edge, axis, line/arc/circle of another sketch); "
+        "with another sketch's curve SolidWorks refuses the native relation, so the point is moved to the computed "
+        "piercing position and made coincident with the projected curve (result key pierce_method). The result lists "
+        "relations_added and the final coordinates of the sketch points. "
+        "Example: {\"relation\":\"pierce\",\"entity1\":\"pt@5,5\",\"entity2\":{\"sketch\":\"Sketch1\",\"entity\":\"S0-0-1\"}}.",
         {"relation": (S, "horizontal | vertical | coincident | tangent | concentric | equal | parallel | perpendicular | "
-                         "symmetric (two entities + axis) | fixed | collinear | midpoint"),
+                         "symmetric (two entities + axis) | fixed | collinear | on_line | midpoint | pierce"),
          "entity1": _ENT, "entity2": _ENT2, "entity3": _ENT2,
          "unit": _UNIT, "sketch": _SK}, ["relation"]),
     "list_sketch_relations": ("list_sketch_relations",
@@ -142,31 +154,42 @@ _TOOLS = {
         ["text", "x", "y"]),
     # ---------------------------------------------------------------- features
     "extrude_boss": ("extrude_boss",
-        "Boss extrude from a sketch (end conditions, draft, second direction). "
-        "Example: {\"sketch\":\"Sketch1\",\"depth\":20,\"end_condition\":\"blind\"}.",
+        "Boss extrude from a sketch (end conditions, draft, second direction). start_from sets where the extrusion "
+        "starts: sketch_plane (default) | offset (start_offset from the sketch plane, positive along the sketch normal) "
+        "| surface (start_ref {\"face\":[x,y,z]}, a point ON a face) | vertex (start_ref {\"vertex\":[x,y,z]}); the "
+        "extrusion keeps its direction and starts on the plane parallel to the sketch through that face/vertex. "
+        "Example: {\"sketch\":\"Sketch1\",\"depth\":20,\"end_condition\":\"blind\"}; "
+        "{\"depth\":10,\"start_from\":\"surface\",\"start_ref\":{\"face\":[10,20,25]}}.",
         {"sketch": _SK, "depth": (N, "Depth (`unit`, default 10)"), "end_condition": (S, _EC),
          "depth2": (N, "Depth, direction 2 (`unit`)"),
          "end_condition2": (S, "End condition, direction 2 (as end_condition)"),
          "draft_angle": (N, "Draft angle in degrees"), "draft_outward": (B, "Draft outward"),
          "up_to_face_point": _PT3, "offset": (N, "Offset from target surface (`unit`)"),
          "reverse": (B, "Reverse the direction"), "merge": (B, "Merge with the existing body (default true)"),
-         "start_offset": (N, "Start plane offset from sketch (`unit`)"), "unit": _UNIT}, []),
-    "extrude_cut": ("extrude_cut", "Extruded cut (same options as extrude_boss).",
+         "start_offset": (N, "Start plane offset from sketch (`unit`), used with start_from=offset (or alone)"), "unit": _UNIT,
+         "start_from": (S, "sketch_plane (default) | offset | surface | vertex"),
+         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)")}, []),
+    "extrude_cut": ("extrude_cut", "Extruded cut (same options as extrude_boss, including start_from/start_ref).",
         {"sketch": _SK, "depth": (N, "Depth (`unit`, default 10)"), "end_condition": (S, "As in extrude_boss"),
          "depth2": (N, "Depth, direction 2 (`unit`)"),
          "end_condition2": (S, "End condition, direction 2"),
          "draft_angle": (N, "Draft angle in degrees"), "draft_outward": (B, "Draft outward"),
          "up_to_face_point": _PT3, "offset": (N, "Offset from target surface (`unit`)"),
          "reverse": (B, "Cut on the other side"),
-         "start_offset": (N, "Start plane offset (`unit`)"), "unit": _UNIT}, []),
+         "start_offset": (N, "Start plane offset (`unit`)"), "unit": _UNIT,
+         "start_from": (S, "sketch_plane (default) | offset | surface | vertex"),
+         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)")}, []),
     "revolve_boss": ("revolve_boss",
-        "Revolve about the sketch centerline (or `axis`). thin_thickness makes a thin-wall feature.",
-        {"sketch": _SK, "angle": (N, "Revolve angle in degrees (default 360)"), "axis": (S, "Id of the sketch segment used as axis"),
+        "Revolve about the sketch centerline (or `axis`). thin_thickness makes a thin-wall feature. `axis` can be the id of "
+        "a sketch segment, the name of a reference axis (e.g. \"Axis1\" or {\"axis\":\"Axis1\"}), a straight model edge "
+        "{\"edge\":[x,y,z]} (`unit`, point ON it) or a line of another sketch {\"sketch\":\"Sketch1\",\"entity\":\"S0-1-2\"}. "
+        "Example: {\"sketch\":\"Sketch2\",\"axis\":{\"axis\":\"Axis1\"},\"angle\":360}.",
+        {"sketch": _SK, "angle": (N, "Revolve angle in degrees (default 360)"), "axis": _AXIS,
          "both_directions": (B, "Revolve in both directions"),
          "thin_thickness": (N, "Wall thickness (`unit`) for a thin feature"), "unit": _UNIT}, []),
     "revolve_cut": ("revolve_cut", "Revolved cut (grooves, relief cuts).",
         {"sketch": _SK, "angle": (N, "Revolve angle in degrees (default 360)"),
-         "axis": (S, "Id of the sketch segment used as axis"), "both_directions": (B, "Revolve in both directions"),
+         "axis": _AXIS, "both_directions": (B, "Revolve in both directions"),
          "unit": _UNIT}, []),
     "sweep": ("sweep", "Sweep (boss or cut): profile + path sketches, or path only with circular_diameter.",
         {"profile_sketch": (S, "Profile sketch name"), "path_sketch": (S, "Path sketch name"),
@@ -268,9 +291,23 @@ _TOOLS = {
         ["kind", "size"]),
     # ---------------------------------------------------------------- reference geometry
     "create_reference_plane": ("create_reference_plane",
-        "Reference plane: offset (base) | angle (base+edge_point) | three_points (points).",
-        {"mode": (S, "offset (default) | angle | three_points"),
-         "base": (None, "Base: 'front', 'top', 'right' or {\"face\":[x,y,z]}"),
+        "Reference plane: offset (base) | angle (base+edge_point) | three_points (points) | mid_plane (refs) | "
+        "line_point (line+point) | normal_to_curve (line+point) | parallel_point (base+point). The result reports the pose "
+        "(plane_origin, plane_normal). A reference is a plane name ('front', 'Plane1'), {\"face\":[x,y,z]}, "
+        "{\"edge\":[x,y,z]}, {\"vertex\":[x,y,z]}, {\"axis\":name}, {\"point\":name} (reference point) or a sketch entity "
+        "{\"sketch\":name,\"entity\":id}. mid_plane is built as an offset of half the distance from the first reference "
+        "(SolidWorks refuses the native mid-plane constraint through the API) and verified. "
+        "Examples: {\"mode\":\"mid_plane\",\"refs\":[{\"face\":[0,20,15]},{\"face\":[20,20,15]}]}; "
+        "{\"mode\":\"line_point\",\"line\":{\"edge\":[0,20,0]},\"point\":{\"vertex\":[20,0,30]}}; "
+        "{\"mode\":\"normal_to_curve\",\"line\":{\"edge\":[0,20,0]},\"point\":{\"vertex\":[0,40,0]}} (for a point inside "
+        "the curve create a reference point first); {\"mode\":\"parallel_point\",\"base\":{\"face\":[0,20,15]},"
+        "\"point\":{\"vertex\":[20,40,30]}}.",
+        {"mode": (S, "offset (default) | angle | three_points | mid_plane | line_point | normal_to_curve | parallel_point"),
+         "base": (None, "Base: 'front', 'top', 'right', a plane name or {\"face\":[x,y,z]} (offset, angle, parallel_point)"),
+         "refs": (A, "mid_plane: two parallel planes/planar faces, e.g. [{\"face\":[x,y,z]}, 'Plane1']"),
+         "line": (None, "line_point / normal_to_curve: {\"edge\":[x,y,z]} | {\"axis\":name} | {\"sketch\":name,\"entity\":id}"),
+         "point": (None, "line_point / normal_to_curve / parallel_point: {\"vertex\":[x,y,z]} | {\"point\":name} | "
+                         "{\"sketch\":name,\"entity\":\"P0-1\"}"),
          "distance": (N, "Offset distance (`unit`, default 10)"),
          "angle": (N, "Angle in degrees about the edge (default 45)"), "edge_point": _PT3,
          "points": (A, "3 vertices [[x,y,z],...] (`unit`)"),
@@ -316,14 +353,24 @@ _TOOLS = {
          "z": (N, "Z (`unit`)"), "unit": _UNIT,
          "append": (B, "Add to current selection"), "mark": (N, "Selection mark (integer index, default 0)"),
          "tolerance": (N, "Search tolerance in mm (default 0.05)")}, ["kind", "x", "y", "z"]),
-    "list_entities": ("list_entities", "List faces/edges/vertices with a selection point and type.",
+    "list_entities": ("list_entities",
+        "List faces/edges/vertices with a selection point and type. Faces: surface type (plane, cylinder, cone, sphere, "
+        "torus, bspline, ...) and parameters: plane normal (outward), point_on_plane and distance_from_origin; cylinder "
+        "radius, axis_origin, axis_dir; cone origin (on the axis), axis_dir, radius_at_origin, half_angle_deg, apex; sphere "
+        "center, radius; torus center, axis_dir, major_radius, minor_radius. Edges: curve type; line: line_point + "
+        "direction; circle: center, axis_dir, radius. Lengths in `unit`, directions are unit vectors, angles in degrees. "
+        "Example: {\"kind\":\"face\",\"limit\":20}.",
         {"kind": (S, "face (default) | edge | vertex"), "unit": _UNIT,
-         "limit": (N, "Max entities returned (count, default 60)")}, []),
+         "limit": (N, "Max entities returned (count, default 60)"),
+         "include_params": (B, "Include surface/curve parameters (default true; false = compact rows)")}, []),
     "get_mass_properties": ("get_mass_properties", "Volume, mass, area, center of mass.",
         {"unit": _UNIT}, []),
     "set_material": ("set_material", "Assign a material from the SolidWorks database (e.g. 'AISI 1020').",
         {"material": (S, "Material name (default 'AISI 1020')")}, []),
 }
+
+# tool aggiunti per lotti (tools_ext/*.py): stesso formato, stesso gruppo "modeling"
+_TOOLS.update(EXT_TOOLS)
 
 
 def _schema(props, required):

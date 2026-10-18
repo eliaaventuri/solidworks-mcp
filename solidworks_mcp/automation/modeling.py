@@ -26,7 +26,7 @@ from typing import Optional, Dict, List, Any
 
 
 from ..constants import SwErrors
-from .modeling_base import ModelingBase, r8_array
+from .modeling_base import ModelingBase, r8_array, null_variant
 from .sketch_constraints import SketchConstraintOperations
 from ..utils.sw_lang import lang_folders
 
@@ -232,12 +232,23 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     # ------------------------------------------------------------------ estrusioni avanzate
+    START_CONDITIONS = {"sketch_plane": 0, "surface": 1, "face": 1, "vertex": 2, "offset": 3}
+
     def _extrude_common(self, cut: bool, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                         draft_outward, up_to_face_point, offset, reverse, flip_side_to_cut, merge, unit,
-                        start_offset, label):
+                        start_offset, label, start_from=None, start_ref=None):
         doc, err = self._part()
         if err:
             return err
+        sf = (start_from or ("offset" if start_offset else "sketch_plane")).lower()
+        if sf not in self.START_CONDITIONS:
+            return self._result(False, f"start_from sconosciuto: {start_from}. Valide: sketch_plane | offset | surface | vertex",
+                                SwErrors.swInvalidInput)
+        t0 = self.START_CONDITIONS[sf]
+        if sf in ("surface", "face", "vertex") and not start_ref:
+            return self._result(False, f"start_from={sf} richiede start_ref: " +
+                                ("{\"face\":[x,y,z]} (punto sulla faccia o sulla superficie)" if sf != "vertex" else
+                                 "{\"vertex\":[x,y,z]}"), SwErrors.swInvalidInput)
         sk_name, err = self._resolve_sketch(doc, sketch)
         if err:
             return err
@@ -266,6 +277,17 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             ok, info = self._select_point(doc, "face", up_to_face_point, unit, True, 1)
             if not ok:
                 return self._result(False, info.get("error", "faccia di arresto non trovata"), SwErrors.swSelectionError)
+        if t0 in (1, 2):
+            # partenza da superficie / vertice: l'entita' si seleziona con Mark=32 (superficie) / 0 (vertice) DOPO lo schizzo
+            ref = start_ref
+            if isinstance(ref, (list, tuple)):
+                ref = {"face" if t0 == 1 else "vertex": ref}
+            if not isinstance(ref, dict) or ("face" if t0 == 1 else "vertex") not in ref:
+                return self._result(False, f"start_ref per start_from={sf}: " +
+                                    ("{\"face\":[x,y,z]}" if t0 == 1 else "{\"vertex\":[x,y,z]}"), SwErrors.swInvalidInput)
+            ok, msg, _ = self._select_any(doc, ref, unit, True, 32 if t0 == 1 else 0)
+            if not ok:
+                return self._result(False, f"Partenza ({sf}): {msg}", SwErrors.swSelectionError)
         d1 = self._mmu(offset if t1 == 5 else (depth or 0), unit)
         d2 = self._mmu(depth2 or 0, unit)
         dr = bool(draft_angle)
@@ -276,28 +298,32 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if cut:
                 feat = fm.FeatureCut4(sd, bool(reverse), False, t1, t2, d1, d2, dr, False, bool(draft_outward), False,
                                       ang, 0.0, False, False, False, False, False, True, True, False, False, False,
-                                      0, self._mmu(start_offset or 0, unit), False, False)
+                                      t0, self._mmu(start_offset or 0, unit), False, False)
             else:
                 feat = fm.FeatureExtrusion3(sd, bool(reverse), False, t1, t2, d1, d2, dr, False, bool(draft_outward),
                                             False, ang, 0.0, False, False, False, False, bool(merge), True, True,
-                                            0, self._mmu(start_offset or 0, unit), False)
+                                            t0, self._mmu(start_offset or 0, unit), False)
         except Exception as e:
             return self._result(False, f"{label} fallito: {e}", SwErrors.swFeatureError)
         doc.ClearSelection2(True)
         extra = {"sketch": sk_name, "end_condition": ec, "depth": depth, "unit": self._unit_name(unit),
-                 "draft_angle": draft_angle or 0}
+                 "draft_angle": draft_angle or 0, "start_from": sf}
+        if sf == "offset":
+            extra["start_offset"] = start_offset
         return self._finish(doc, label, feat, v0, before, extra, require_volume_change=True)
 
     def extrude_boss(self, sketch: str = None, depth: float = 10, end_condition: str = "blind",
                      depth2: float = None, end_condition2: str = None, draft_angle: float = 0,
                      draft_outward: bool = False, up_to_face_point: list = None, offset: float = 0,
-                     reverse: bool = False, merge: bool = True, start_offset: float = 0, unit: str = None) -> Dict:
+                     reverse: bool = False, merge: bool = True, start_offset: float = 0, unit: str = None,
+                     start_from: str = None, start_ref: Any = None) -> Dict:
         """Estrusione base/aggiunta con condizioni finali: blind | through_all | through_all_both | mid_plane |
-        up_to_next | up_to_surface | offset_from_surface; sformo (gradi) e seconda direzione."""
+        up_to_next | up_to_surface | offset_from_surface; sformo (gradi) e seconda direzione. Partenza `start_from`:
+        sketch_plane (default) | offset (start_offset) | surface (start_ref={"face":[x,y,z]}) | vertex (start_ref={"vertex":[..]})."""
         try:
             return self._extrude_common(False, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                                         draft_outward, up_to_face_point, offset, reverse, False, merge, unit,
-                                        start_offset, "Estrusione")
+                                        start_offset, "Estrusione", start_from, start_ref)
         except Exception as e:
             logger.error(f"extrude_boss: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -305,12 +331,14 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
     def extrude_cut(self, sketch: str = None, depth: float = 10, end_condition: str = "blind",
                     depth2: float = None, end_condition2: str = None, draft_angle: float = 0,
                     draft_outward: bool = False, up_to_face_point: list = None, offset: float = 0,
-                    reverse: bool = False, start_offset: float = 0, unit: str = None) -> Dict:
-        """Taglio estruso con le stesse condizioni finali di extrude_boss (reverse=True taglia dall'altra parte)."""
+                    reverse: bool = False, start_offset: float = 0, unit: str = None,
+                    start_from: str = None, start_ref: Any = None) -> Dict:
+        """Taglio estruso con le stesse condizioni finali e le stesse partenze di extrude_boss (reverse=True taglia
+        dall'altra parte)."""
         try:
             return self._extrude_common(True, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                                         draft_outward, up_to_face_point, offset, reverse, False, True, unit,
-                                        start_offset, "Taglio estruso")
+                                        start_offset, "Taglio estruso", start_from, start_ref)
         except Exception as e:
             logger.error(f"extrude_cut: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -328,21 +356,46 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         doc.ClearSelection2(True)
         if not self._select_feature(doc, sk_name, False, 0):
             return self._result(False, f"Schizzo '{sk_name}' non selezionabile", SwErrors.swSelectionError)
-        # asse: entita' indicata, altrimenti l'unica linea di costruzione/asse di mezzeria dello schizzo
+        # asse: id di un segmento dello schizzo, oppure asse di riferimento (nome o {"axis":nome}), spigolo lineare del
+        # modello ({"edge":[x,y,z]}), linea di un altro schizzo ({"sketch":..,"entity":..}); senza `axis` l'unica linea
+        # di costruzione/asse di mezzeria dello schizzo
         segs = self._sketch_segments_of(doc, sk_name)
         axis_seg = None
+        axis_kind = None
+        if isinstance(axis, dict) and "id" in axis:
+            axis = axis["id"]
         if axis:
-            for s in segs:
-                if self._seg_id(s) == axis:
-                    axis_seg = s
+            if isinstance(axis, str):
+                for s in segs:
+                    if self._seg_id(s) == axis:
+                        axis_seg = s
+                        axis_kind = "sketch_segment"
+            if axis_seg is None:
+                spec = axis if isinstance(axis, (dict, list, tuple)) else {"axis": axis}
+                if isinstance(spec, dict) and "sketch" in spec and "entity" in spec:
+                    # linea di un ALTRO schizzo: Select4 viene accettato ma FeatureRevolve2 non la usa (misurato);
+                    # funziona SelectByID2("<nome>@<schizzo>", "SKETCHSEGMENT", .., Mark=4) anche se restituisce False
+                    obj, desc, e = self._sketch_entity_obj(doc, spec["sketch"], spec["entity"], unit)
+                    if e:
+                        return self._result(False, f"Asse: {e}", SwErrors.swSelectionError)
+                    nm = self._com(obj, "GetName")
+                    doc.Extension.SelectByID2(f"{nm}@{spec['sketch']}", "SKETCHSEGMENT", 0, 0, 0, True, 4, null_variant(), 0)
+                    ok, msg = self._sel_count(doc) >= 2, "linea dell'altro schizzo non selezionata"
+                else:
+                    ok, msg, desc = self._select_any(doc, spec, unit, True, 4)
+                if not ok:
+                    return self._result(False, f"Asse '{axis}' non selezionabile: {msg} (id di un segmento dello schizzo "
+                                        f"{sk_name}, nome di un asse di riferimento, {{\"edge\":[x,y,z]}} o "
+                                        "{\"sketch\":nome,\"entity\":id})", SwErrors.swSelectionError)
+                axis_kind = ("model_edge" if isinstance(spec, (list, tuple)) or "edge" in spec else
+                             "other_sketch" if "sketch" in spec else "reference_axis")
         else:
             cl = [s for s in segs if int(s.GetType) == 0 and bool(s.ConstructionGeometry)]
             if len(cl) >= 1:
                 axis_seg = cl[0]
+                axis_kind = "sketch_centerline"
         if axis_seg is not None:
             axis_seg.Select4(True, self._sd(doc, 4))
-        elif axis:
-            return self._result(False, f"Asse '{axis}' non trovato nello schizzo {sk_name}", SwErrors.swSelectionError)
         ang = math.radians(angle)
         thin = thin_thickness is not None
         fm = doc.FeatureManager
@@ -355,7 +408,8 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             return self._result(False, f"Rivoluzione fallita: {e}", SwErrors.swFeatureError)
         doc.ClearSelection2(True)
         return self._finish(doc, "Taglio rivoluzione" if cut else "Rivoluzione", feat, v0, before,
-                            {"sketch": sk_name, "angle": angle, "axis_found": axis_seg is not None},
+                            {"sketch": sk_name, "angle": angle,
+                             "axis_found": axis_seg is not None or axis_kind is not None, "axis_kind": axis_kind},
                             require_volume_change=True)
 
     def revolve_boss(self, sketch: str = None, angle: float = 360, axis: str = None,
@@ -1271,11 +1325,99 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.debug(f"_plane_pose: {ex}")
             return {}
 
+    def _plane_ref_geom(self, doc, spec, unit):
+        """Normale (uscente per le facce) e un punto (m) di un piano di riferimento o di una faccia piana:
+        spec = nome del piano ("front", "Piano1") o {"plane":nome} o {"face":[x,y,z]}. -> (normale, punto, errore)."""
+        if isinstance(spec, dict) and "face" in spec:
+            p = [self._mmu(float(c), unit) for c in spec["face"]]
+            ent, d = self._find_entity(doc, "face", p, 0.0005)
+            if ent is None:
+                return None, None, f"nessuna faccia nel punto {list(spec['face'])}"
+            surf = self._com(ent, "GetSurface")
+            if not self._com(surf, "IsPlane"):
+                return None, None, f"la faccia nel punto {list(spec['face'])} non e' piana"
+            pp = [float(v) for v in self._com(surf, "PlaneParams")]
+            return [float(v) for v in self._com(ent, "Normal")], pp[3:6], None
+        name = spec.get("plane") if isinstance(spec, dict) else spec
+        feat = (self._find_feature(doc, name) or self._std_plane_feature(doc, name)) if name else None
+        if feat is None:
+            return None, None, f"piano '{name}' non trovato"
+        try:
+            t = [float(v) for v in self._com(feat, "GetSpecificFeature2").Transform.ArrayData]
+        except Exception:
+            return None, None, f"'{name}' non e' un piano di riferimento"
+        return t[6:9], t[9:12], None
+
+    def _plane_from_doc_call(self, doc, label: str, items: list, unit, call):
+        """Seleziona items [(nome, specifica per _select_any)] e chiama call(doc) (metodo CreatePlane... di
+        IModelDoc2). -> (feat, errore)."""
+        doc.ClearSelection2(True)
+        for i, (nm, spec) in enumerate(items):
+            ok, msg, _ = self._select_any(doc, spec, unit, i > 0, 0)
+            if not ok:
+                return None, self._result(False, f"{nm}: {msg}", SwErrors.swSelectionError)
+        try:
+            return call(doc), None
+        except Exception as ex:
+            return None, self._result(False, f"{label} fallito: {ex}", SwErrors.swFeatureError)
+
+    def _mid_plane(self, doc, refs, flip, unit):
+        """Piano di mezzeria fra due piani/facce piane parallele. InsertRefPlane con il vincolo MidPlane (128) non crea
+        nulla in SW 2026 (provati 128, 128|4, 128|8|256, 128|1/2, tutti i valori 0..42 e le coppie con 128 come secondo
+        vincolo: None) e RefPlaneFeatureData non permette di cambiare tipo/vincoli. Si crea quindi un piano a distanza d/2
+        dal primo riferimento e si CONTROLLA (rilettura del piano) che stia a meta' (verso scelto provando l'inversione).
+        -> (feat, errore, info)."""
+        if not isinstance(refs, (list, tuple)) or len(refs) != 2:
+            return None, self._result(False, "mid_plane: refs = lista di 2 riferimenti (nome di piano o {\"face\":[x,y,z]})",
+                                      SwErrors.swInvalidInput), None
+        g = []
+        for i, r in enumerate(refs):
+            n, pt, e = self._plane_ref_geom(doc, r, unit)
+            if e:
+                return None, self._result(False, f"mid_plane, riferimento {i + 1}: {e}", SwErrors.swInvalidInput), None
+            nn = math.sqrt(sum(c * c for c in n)) or 1.0
+            g.append(([c / nn for c in n], pt))
+        (n1, p1), (n2, p2) = g
+        cr = [n1[1] * n2[2] - n1[2] * n2[1], n1[2] * n2[0] - n1[0] * n2[2], n1[0] * n2[1] - n1[1] * n2[0]]
+        if math.sqrt(sum(c * c for c in cr)) > 1e-5:
+            return None, self._result(False, "mid_plane: i due riferimenti non sono paralleli.", SwErrors.swInvalidInput), None
+        d = sum((p2[i] - p1[i]) * n1[i] for i in range(3))
+        if abs(d) < 1e-9:
+            return None, self._result(False, "mid_plane: i due riferimenti sono coincidenti.", SwErrors.swInvalidInput), None
+        mid = [(p1[i] + p2[i]) / 2 for i in range(3)]
+        fm = doc.FeatureManager
+        for fl in ((True, False) if flip else (False, True)):
+            before = self._names(doc)
+            doc.ClearSelection2(True)
+            ok, msg, _ = self._select_any(doc, refs[0], unit, False, 0)
+            if not ok:
+                return None, self._result(False, f"mid_plane, riferimento 1: {msg}", SwErrors.swSelectionError), None
+            feat = fm.InsertRefPlane(8 | (256 if fl else 0), abs(d) / 2, 0, 0, 0, 0)
+            new = self._new_features(doc, before)
+            if feat is None and not new:
+                return None, self._result(False, "mid_plane: SolidWorks non ha creato il piano.", SwErrors.swFeatureError), None
+            try:
+                t = [float(v) for v in self._com(self._find_feature(doc, new[0]["name"]), "GetSpecificFeature2").Transform.ArrayData]
+                o, nn = t[9:12], t[6:9]
+            except Exception:
+                o = nn = None
+            if o and nn and abs(sum((mid[i] - o[i]) * nn[i] for i in range(3))) < 1e-6:
+                return feat, None, {"between_refs": round(self._from_m(abs(d), unit), 4),
+                                    "offset_each": round(self._from_m(abs(d) / 2, unit), 4),
+                                    "method": "offset_half_distance"}
+            self._delete_features(doc, [x["name"] for x in new])
+        return None, self._result(False, "mid_plane: il piano creato non e' a meta' fra i due riferimenti.",
+                                  SwErrors.swFeatureError), None
+
     def create_reference_plane(self, mode: str = "offset", base: Any = "front", distance: float = 10,
                                angle: float = 45, edge_point: list = None, points: list = None,
-                               flip: bool = False, unit: str = None) -> Dict:
+                               flip: bool = False, unit: str = None, refs: list = None, line: Any = None,
+                               point: Any = None) -> Dict:
         """Piano di riferimento. mode: offset (base = nome piano o {"face":[x,y,z]}) | angle (base + edge_point,
-        angolo in gradi attorno allo spigolo) | three_points (points = 3 vertici [[x,y,z],..])."""
+        angolo in gradi attorno allo spigolo) | three_points (points = 3 vertici [[x,y,z],..]) |
+        mid_plane (refs = 2 piani/facce piane parallele) | line_point (line = {"edge":[..]}/{"axis":nome}/schizzo +
+        point = {"vertex":[..]}/{"point":nome}/schizzo) | normal_to_curve (line = spigolo o curva, point = punto della
+        curva) | parallel_point (base = piano/faccia piana, point = vertice o punto)."""
         try:
             doc, err = self._part()
             if err:
@@ -1286,6 +1428,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             fm = doc.FeatureManager
             m = mode.lower()
             feat = None
+            mode_extra = {}
             try:
                 if m == "offset":
                     ok, msg = self._select_edge_or_axis(doc, base, unit, 0, False)
@@ -1309,16 +1452,39 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                         return self._result(False, msg, SwErrors.swSelectionError)
                     # InsertRefPlane(4,0,4,0,4,0) restituisce None (B2): serve CreatePlaneThru3Points3
                     feat = doc.CreatePlaneThru3Points3(True)
+                elif m in ("mid_plane", "midplane", "mezzeria"):
+                    feat, err, info = self._mid_plane(doc, refs, flip, unit)
+                    if err:
+                        return err
+                    mode_extra.update(info)
+                elif m in ("line_point", "line_and_point"):
+                    feat, err = self._plane_from_doc_call(doc, "Piano per linea e punto", [("Linea", line), ("Punto", point)],
+                                                          unit, lambda d: d.CreatePlaneThruLineAndPt(True))
+                    if err:
+                        return err
+                elif m in ("normal_to_curve", "normal_curve"):
+                    feat, err = self._plane_from_doc_call(doc, "Piano normale alla curva", [("Curva", line), ("Punto", point)],
+                                                          unit, lambda d: d.CreatePlanePerCurveAndPassPoint3(True, True))
+                    if err:
+                        return err
+                elif m in ("parallel_point", "parallel_through_point"):
+                    feat, err = self._plane_from_doc_call(doc, "Piano parallelo per un punto", [("Piano", base), ("Punto", point)],
+                                                          unit, lambda d: d.CreatePlaneThruPtParallelToPlane(True))
+                    if err:
+                        return err
                 else:
-                    return self._result(False, f"mode sconosciuto: {mode} (offset|angle|three_points)",
+                    return self._result(False, f"mode sconosciuto: {mode} "
+                                        "(offset|angle|three_points|mid_plane|line_point|normal_to_curve|parallel_point)",
                                         SwErrors.swInvalidInput)
             except Exception as ex:
                 return self._result(False, f"Piano fallito: {ex}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
             if feat is None and not self._new_features(doc, before):
-                return self._result(False, "InsertRefPlane non ha creato il piano (selezioni incompatibili)",
+                return self._result(False, "InsertRefPlane non ha creato il piano (selezioni incompatibili: per line_point "
+                                    "il punto non deve stare sulla linea; per parallel_point serve un punto fuori dal piano)",
                                     SwErrors.swFeatureError)
             extra = {"mode": m}
+            extra.update(mode_extra)
             new = self._new_features(doc, before)
             fname = None
             try:
