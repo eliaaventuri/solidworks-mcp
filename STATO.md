@@ -271,6 +271,11 @@ egr_f2.log`):
   appena `add_sketch_dimension(kind="angle", value=30)` applica il valore; poi 45 gradi la porta a (32,66; -32,66). Il valore e'
   corretto in modulo, il quadrante no: la quota angolare di SolidWorks misura nel verso opposto. Idea da provare: dopo aver applicato
   il valore, leggere il punto finale della seconda linea e, se il quadrante e' rovesciato, riapplicare con il valore col segno opposto.
+  **Provato dal vivo, NON funziona** (2026-10-18, `scripts_tmp/probe_bc.py`): (1) riapplicare con `SystemValue = -valore` lascia la linea
+  a -23,094; (2) spostare il testo della quota sotto l'asse (30, -12) non cambia nulla; (3) invertire l'ordine delle due linee
+  (l2, l1) rovescia comunque il verso. Il valore dell'angolo e' non orientato: il quadrante non si controlla con il segno.
+  Codice tentato ripristinato (nessuna modifica in `sketch_constraints.py`). Da decidere: muovere la linea dopo la quota
+  (ma la quota la riporta al rovescio), oppure accettare il quadrante di SolidWorks e documentarlo nel tool.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
