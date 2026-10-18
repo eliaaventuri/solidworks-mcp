@@ -287,7 +287,19 @@ egr_f2.log`):
   Prova: con Parte2 attiva, `create_sketch(plane="Top", document="Parte1")` crea lo schizzo su Parte1 e Parte1 diventa attiva.
   **Non provato dal vivo**: l'avviso "il documento attivo e' cambiato" tra due chiamate (serve un cambio fatto fuori dal server).
   Offline 148/148 (il test di coerenza degli schemi ammette `document`), pyflakes 0.
-- **Ancora da fare**: i nove strumenti nuovi (1-9 della lista) e le quote su spigoli del modello.
+- **Nuovi strumenti 1 e 2 (2026-10-18), provati dal vivo** (`scripts_tmp/probe_list.py`, `probe_del.py`, `probe_dim.py`):
+  - `list_sketch_relations(sketch)`: legge `sk.RelationManager.GetRelations(0)`; ogni relazione ha `GetRelationType` (intero) e
+    `GetEntities` (id). Provato: linea orizzontale -> [0] coincident (P2-3, P0-1), [1] horizontal (S0-0-1). **Codici di tipo
+    dedotti da questo solo caso**: 4 = horizontal, 9 = coincident. Gli altri restano "tipo N" finche' non vengono verificati.
+  - `delete_sketch_entities(entities, dimensions, relations, sketch)`: relazione per indice -> `RelationManager.DeleteRelation`
+    (provato: 2 -> 1 relazioni); entita' per id -> selezione + `DeleteSelection2` (provato: 0 segmenti, 0 punti);
+    quota per nome -> `SelectByID2` + `DeleteSelection2` (provato: da "completamente definito" a "sottodefinito", quote 0).
+  - **Anomalia**: in una sola esecuzione `GetRelations(0)` ha dato 0 relazioni con lo stesso schizzo (le altre 4 volte: 2).
+    Non capita piu' finora: da tenere d'occhio. Non c'e' ancora la cancellazione per "tipo + entita'" (spec 2 del brief).
+  - Conteggi tool: 205 (204 senza `execute_python`), `EXPECTED_TOOLS` aggiornati in `test_offline.py` e `live_common.py`.
+  - Registrati come distruttivi in `safety.py` (`delete_sketch_entities`). Offline 148/148, pyflakes 0.
+- **Ancora da fare**: i tool 3-9 (trim, split, move_sketch_point, toggle_construction, convert_entities come costruzione,
+  quote su spigoli del modello, delete_dimension/set_dimension_driven) e le quote su spigoli del modello.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.

@@ -41,6 +41,7 @@ DESTRUCTIVE_TOOLS: Dict[str, str] = {
     "delete_view": "deletes a drawing view",
     "delete_component": "deletes a component from the assembly",
     "delete_mate": "deletes a mate",
+    "delete_sketch_entities": "deletes sketch entities, dimensions or relations with no undo",
     "replace_component": "replaces an assembly component",
     "delete_custom_property": "deletes a custom property",
     "delete_global_variable": "deletes a global variable",

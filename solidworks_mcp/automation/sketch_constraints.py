@@ -496,6 +496,97 @@ class SketchConstraintOperations:
             logger.error(f"add_sketch_dimension: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
+    def delete_sketch_entities(self, entities: list = None, dimensions: list = None, relations: list = None,
+                               sketch: str = None) -> Dict:
+        """Cancella dallo schizzo: entita' (id, '@x,y', 'pt@x,y'), quote per nome ('D2@Schizzo34') e relazioni per indice
+        (da list_sketch_relations). Restituisce cosa e' stato cancellato e lo stato dello schizzo."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            if not (entities or dimensions or relations):
+                return self._result(False, "Indica almeno una cosa da cancellare: entities, dimensions o relations.",
+                                    SwErrors.swInvalidInput)
+            deleted = []
+            # 1. relazioni per indice: si cancellano per oggetto, prima di toccare le entita' (gli indici restano validi)
+            if relations:
+                rm = sk.RelationManager
+                rels = list(rm.GetRelations(0) or ())
+                for idx in relations:
+                    if not (0 <= int(idx) < len(rels)):
+                        return self._result(False, f"Relazione {idx} non trovata: lo schizzo ha {len(rels)} relazioni "
+                                            "(usa list_sketch_relations).", SwErrors.swSelectionError)
+                    if not rm.DeleteRelation(rels[int(idx)]):
+                        return self._result(False, f"Relazione {idx} non cancellata (SolidWorks ha rifiutato).",
+                                            SwErrors.swSketchError)
+                    deleted.append(f"relazione [{idx}]")
+            # 2. quote per nome
+            for name in dimensions or []:
+                doc.ClearSelection2(True)
+                if not doc.Extension.SelectByID2(str(name), "DIMENSION", 0, 0, 0, False, 0, null_variant(), 0):
+                    return self._result(False, f"Quota '{name}' non trovata (usa il formato D1@Schizzo1).",
+                                        SwErrors.swSelectionError)
+                doc.Extension.DeleteSelection2(0)
+                deleted.append(f"quota {name}")
+            # 3. entita' per id o coordinate
+            if entities:
+                doc.ClearSelection2(True)
+                for i, r in enumerate(entities):
+                    ok, msg = self._select_ref(doc, sk, r, append=(i > 0))
+                    if not ok:
+                        doc.ClearSelection2(True)
+                        return self._result(False, f"Entita' {r}: {msg}", SwErrors.swSelectionError)
+                doc.Extension.DeleteSelection2(0)
+                deleted.extend(f"entita' {r}" for r in entities)
+            doc.ClearSelection2(True)   # niente EditRebuild3: chiuderebbe lo schizzo attivo
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            return self._result(True, f"Cancellato da {sk_name}: {', '.join(deleted)}; schizzo {STATUS_NAMES.get(status)}",
+                                SwErrors.swSuccess, {"sketch": sk_name, "deleted": deleted,
+                                                     "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"delete_sketch_entities: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
+    # codici di tipo delle relazioni (GetRelationType): 4 e 9 dedotti dalla sonda 2026-10-18 (orizzontale su una linea,
+    # coincidenza con l'origine); gli altri restano "tipo N" finche' non vengono verificati dal vivo
+    REL_NAMES = {4: "horizontal", 9: "coincident"}
+
+    def list_sketch_relations(self, sketch: str = None) -> Dict:
+        """Relazioni geometriche dello schizzo: tipo, entita' coinvolte (id), indice. Serve a trovare la relazione
+        sbagliata e cancellarla con delete_sketch_entities."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            rels = sk.RelationManager.GetRelations(0) or ()
+            items = []
+            for i, r in enumerate(rels):
+                rtype = int(r.GetRelationType)
+                ents = []
+                for e in (r.GetEntities or ()):
+                    try:
+                        ents.append(self._seg_id(e))
+                    except Exception:
+                        ents.append(self._pt_id(e))     # i punti non hanno GetType
+                items.append({"index": i, "type_code": rtype, "type": self.REL_NAMES.get(rtype, f"tipo {rtype}"),
+                              "entities": ents})
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            names = ", ".join(f"[{it['index']}] {it['type']} {it['entities']}" for it in items) or "nessuna"
+            return self._result(True, f"Relazioni di {sk_name} ({len(items)}): {names}; schizzo {STATUS_NAMES.get(status)}",
+                                SwErrors.swSuccess, {"sketch": sk_name, "relations": items,
+                                                     "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"list_sketch_relations: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
     def _refs_center(self, sk, objs) -> Tuple[float, float]:
         xs, ys = [], []
         for o in objs:

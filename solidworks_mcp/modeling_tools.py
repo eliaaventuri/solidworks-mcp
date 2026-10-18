@@ -40,6 +40,17 @@ _TOOLS = {
                          "symmetric (two entities + axis) | fixed | collinear | midpoint"),
          "entity1": _ENT, "entity2": _ENT2, "entity3": _ENT2,
          "unit": _UNIT, "sketch": _SK}, ["relation"]),
+    "list_sketch_relations": ("list_sketch_relations",
+        "List the geometric relations of a sketch: type, entities (ids such as 'S0-1-2' or 'P0-1') and index, "
+        "to find a wrong relation (e.g. a 'fixed' added by mistake) and delete it with delete_sketch_entities.",
+        {"sketch": _SK}, []),
+    "delete_sketch_entities": ("delete_sketch_entities",
+        "Delete from a sketch what you pick: entities (ids such as 'S0-1-2', '@x,y' or 'pt@x,y'), dimensions by name "
+        "('D2@Sketch34') and relations by index (indices from list_sketch_relations). Reports what was deleted and the "
+        "sketch status. Destructive: no undo.",
+        {"entities": (A, "Entities to delete: ids, '@x,y' or 'pt@x,y'"),
+         "dimensions": (A, "Dimension names, e.g. 'D2@Sketch34'"),
+         "relations": (A, "Relation indices from list_sketch_relations (integers)"), "sketch": _SK}, []),
     "get_sketch_definition_status": ("get_sketch_definition_status",
         "Sketch status (fully/under/over-defined) with dimensions and entities.",
         {"sketch": _SK}, []),
