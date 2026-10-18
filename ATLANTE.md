@@ -3,13 +3,14 @@
 ## Documentazione
 ```
 CLAUDE.md                     istruzioni per Claude Code: cosa leggere, regole, test
-README.md                     cos'e' il progetto, installazione, tool, test
+README.md                     presentazione su GitHub, IN INGLESE: cos'e', funzioni, scenari, installazione, configurazione, limiti
+docs/img/                     due immagini del README (tavola d'assieme, mappa di von Mises), ridotte a 1400 px
 STATO.md                      stato attuale in breve: cosa funziona, esiti dei test, regole di lavoro, cosa e' aperto
 STATO_STORICO.md              diario completo: esiti per blocco, misure, trappole API di SolidWorks, incidenti
 LIMITI.md                     elenco di lavoro dei limiti noti per gruppo (A disegni, B modellazione, C assiemi, D dati, E simulazione, F sicurezza)
 PIANO_D_E.md                  piano di lavoro completo a fasi fino al server finito + schede tecniche di D, E, B4/C5/C3 (non ancora provato dal vivo)
 ATLANTE.md                    questo file
-LICENSE                       MIT (copyright dell'autore del progetto originale)
+LICENSE                       MIT (copyright dell'autore originale e di Elia)
 ```
 
 ## Server

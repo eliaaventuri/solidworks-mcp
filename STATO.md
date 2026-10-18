@@ -233,6 +233,9 @@ egr_f2.log`):
   -> ora `sysconfig.get_platform()` = `win-amd64`; (2) `apply_configuration_table` con un percorso .csv/.json inesistente rispondeva
   "tabella vuota" (lo leggeva come testo CSV): ora "file non trovato" (`utils/config_table.py`, test offline 148/148).
 - Il push e' bloccato dall'hook per l'agente: lo fa Elia.
+- README riscritto in inglese (scelta di Elia: solo inglese) con badge, due immagini in `docs/img/` (tavola d'assieme da
+  `qual_assieme.png`, von Mises di S6), tabelle funzioni/scenari/variabili, sicurezza, lingue, limiti noti. Residuo visivo visto
+  nelle tavole di S1/S6: sotto la nota dei fori c'e' un rettangolo vuoto (cornice della nota?), non indagato.
 
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
