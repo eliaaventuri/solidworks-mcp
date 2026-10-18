@@ -30,7 +30,7 @@ _TOOLS = {
         "(line/circle/arc) or 2 (distance/angle).",
         {"kind": (S, "auto | length | horizontal | vertical | distance | radius | diameter | angle"),
          "entity1": _ENT, "entity2": _ENT2, "entity3": _ENT2,
-         "value": (N, "Dimension value (`unit`); degrees for kind=angle"), "unit": _UNIT,
+         "value": (N, "Dimension value (`unit`); degrees for kind=angle. Angle quadrant: SolidWorks picks the side, a negative value does not flip it; check the endpoints with list_sketch_entities"), "unit": _UNIT,
          "orientation": (S, "horizontal | vertical, for kind=distance or length"),
          "name": (S, "Dimension name, e.g. 'width' -> 'width@Sketch1'"),
          "position": (A, "[x,y] position of the dimension text (`unit`)"), "sketch": _SK}, []),

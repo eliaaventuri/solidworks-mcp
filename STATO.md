@@ -274,8 +274,12 @@ egr_f2.log`):
   **Provato dal vivo, NON funziona** (2026-10-18, `scripts_tmp/probe_bc.py`): (1) riapplicare con `SystemValue = -valore` lascia la linea
   a -23,094; (2) spostare il testo della quota sotto l'asse (30, -12) non cambia nulla; (3) invertire l'ordine delle due linee
   (l2, l1) rovescia comunque il verso. Il valore dell'angolo e' non orientato: il quadrante non si controlla con il segno.
-  Codice tentato ripristinato (nessuna modifica in `sketch_constraints.py`). Da decidere: muovere la linea dopo la quota
-  (ma la quota la riporta al rovescio), oppure accettare il quadrante di SolidWorks e documentarlo nel tool.
+  Codice tentato ripristinato (nessuna modifica in `sketch_constraints.py`). **Scelta di Elia (2026-10-18): accettato il quadrante
+  di SolidWorks e documentato** nella descrizione del parametro `value` (`modeling_tools.py`); offline 148/148.
+- **E, prova dal vivo (2026-10-18, `scripts_tmp/probe_e.py`)**: su un blocco 40x30x10 la `select_at_point` di una faccia piana
+  funziona in 4 punti (distanza 0, area 1200 mm2). Il rifiuto "Select4 ha rifiutato il face" NON si riproduce su faccia piana:
+  resta da provare la faccia con foro al centro e la selezione con un altro documento aperto (legato a F).
+- **Ancora da fare**: F (parametro `document`), e i nove strumenti nuovi.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
