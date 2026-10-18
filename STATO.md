@@ -263,10 +263,14 @@ egr_f2.log`):
 - Barre di avanzamento per le attese: `scripts_tmp/avanzamento_log.py` (non versionato), si lancia in una scheda del terminale.
 
 ## Strumenti di schizzo: difetti (2026-10-18, sessione in corso)
-- **B corretto nel codice, NON provato dal vivo**: `set_dimension_value` decideva "angolo" solo con il tipo COM (GetType == 3);
-  quando non scattava, 30 gradi venivano letti come mm. Ora anche `unit="deg"` (e sinonimi) indica un angolo. Da provare:
-  linea a 30 gradi, `set_dimension_value(30, unit="deg")` deve restare a 30 gradi.
-- **C corretto nel codice, NON provato dal vivo**: `create_sketch` riporta il piano richiesto (Top, Plane8...), non piu' sempre "Front Plane".
+- **B `[x]` provato dal vivo** (2026-10-18, `scripts_tmp/probe_bc.py`, istanza dedicata PID 1568, 0 orfani): `set_dimension_value`
+  decideva "angolo" solo con il tipo COM (GetType == 3); ora anche `unit="deg"` indica un angolo. Prove: 30 -> 30, 30 -> 45, 45 -> 30 gradi,
+  tutte con `SUCCESS` e unita' `deg`.
+- **C `[x]` provato dal vivo**: `create_sketch(plane="Top")` risponde "Sketch created on Top".
+- **A riprodotto dal vivo, NON corretto**: una linea a +30 gradi (punto finale (40; 23,094)) diventa a -30 gradi (punto (40; -23,094))
+  appena `add_sketch_dimension(kind="angle", value=30)` applica il valore; poi 45 gradi la porta a (32,66; -32,66). Il valore e'
+  corretto in modulo, il quadrante no: la quota angolare di SolidWorks misura nel verso opposto. Idea da provare: dopo aver applicato
+  il valore, leggere il punto finale della seconda linea e, se il quadrante e' rovesciato, riapplicare con il valore col segno opposto.
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
