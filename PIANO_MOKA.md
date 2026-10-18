@@ -29,6 +29,11 @@ qui ce ne sono 8 in più (`move_faces`, `delete_dimension`, `delete_sketch_entit
 relazioni ed entità sono identici. Nessuno dei 10 strumenti qui sotto c'è nella copia pulita, che in più non ha `move_faces`
 (serve a Kettle e Knob).
 
+Confronto con il server `solidworks` collegato a Claude (2026-10-18): espone 209 tool, cioè gli stessi 210 di questo repository
+tranne `execute_python` (disattivato apposta); gli schemi di `revolve_cut`, `create_reference_plane`,
+`add_sketch_relation`, `loft`, `list_entities` ed `extrude_boss` sono identici a quelli del codice. Nessuno dei 10 strumenti
+qui sotto è presente. `execute_python` permetterebbe di aggirarli con codice libero, ma resta spento per sicurezza.
+
 ## Strumenti da creare (in ordine di priorità)
 
 1. **`add_cosmetic_thread`**: filettatura cosmetica su uno spigolo circolare scelto per coordinate, esterna o interna,
