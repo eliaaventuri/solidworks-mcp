@@ -598,7 +598,10 @@ def test_config_table(tmp):
     jd = parse_configuration_table({"Corta": {"D1@Schizzo1": 15}})
     record("D1: JSON a righe e a dizionario", not j["errors"] and [x["dimensions"]["D1@Schizzo1"] for x in j["configurations"]] == [15.0, 20.0]
            and jd["configurations"][0]["name"] == "Corta", str(j))
-    bad = parse_configuration_table("Configurazione,D1@Schizzo1,$STATO@Foro1,Lunghezza\nA,dieci,forse,1\nA,1,S,2\n,3,S,4\n")
+    miss = parse_configuration_table("$P/manca.csv")
+    record("D1: percorso inesistente -> 'file non trovato' (non 'tabella vuota')",
+           any("file non trovato" in x for x in miss["errors"]), str(miss["errors"]))
+    bad =parse_configuration_table("Configurazione,D1@Schizzo1,$STATO@Foro1,Lunghezza\nA,dieci,forse,1\nA,1,S,2\n,3,S,4\n")
     e = " | ".join(bad["errors"])
     record("D1: errori -> colonna sconosciuta, numero e stato non validi, nome ripetuto, nome vuoto",
            all(k in e for k in ("'Lunghezza' non riconosciuta", "'dieci' non e' un numero", "'forse' non e' uno stato", "ripetuta", "vuoto")), e)

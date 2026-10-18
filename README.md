@@ -59,7 +59,7 @@ cd solidworks-mcp
 python -m venv .venv
 .venv\Scripts\pip install -e .
 ```
-Il venv deve essere di un Python **x64** (`python -c "import platform; print(platform.machine())"` deve dire `AMD64`; su un PC
+Il venv deve essere di un Python **x64** (`python -c "import sysconfig; print(sysconfig.get_platform())"` deve dire `win-amd64`; `platform.machine()` non basta: su ARM64 dice `ARM64` anche per il Python x64 emulato; su un PC
 ARM64 installare il Python x64 da python.org). `pip install -e .` installa le dipendenze e il comando
 `.venv\Scripts\solidworks-mcp.exe`; in alternativa `pip install -r requirements.txt` e si avvia `solidworks_mcp_server.py`.
 L'installazione "modificabile" (`-e`) serve perche' il server scrive i formati dei fogli verticali nella cartella `formats/` del progetto.

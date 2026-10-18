@@ -1,6 +1,6 @@
 # STATO — SolidWorks MCP
 
-Ultimo aggiornamento: 2026-10-17. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
+Ultimo aggiornamento: 2026-10-18. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
 Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D_E.md`. Mappa dei file: `ATLANTE.md`.
 
 ## Ambiente di sviluppo
@@ -19,7 +19,7 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 | Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
 | Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 |
 | Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` (2026-10-18, per sezione) E3 42, E5 36, E1 53, E4 37, E2 25 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 147/147 (anche su GitHub Actions); `test_timeout_live` 18/18 |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 148/148 (anche su GitHub Actions); `test_timeout_live` 18/18 |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -218,6 +218,21 @@ egr_f2.log`):
 - Rosso del timeout, sezione C (istanza uccisa da fuori, il tool seguente la rilancia): il rilancio ha impiegato 23 s e il tool aveva solo
   i 15 s del test, perche' il tempo di avvio si aggiungeva solo con `_sw_app` vuoto. Corretto in `server.py` (`_dedicated_lost`: processo
   dedicato morto + AUTORESTART -> tempo di avvio in piu'). Dopo: `run_all.py timeout` 18/18 due volte, offline 147/147, pyflakes 0.
+
+## Installazione pulita e scenari (2026-10-18)
+- Licenza: aggiunta la riga di copyright di Elia sotto quella dell'autore originale (MIT).
+- Clone in `C:\Users\elia\Downloads\solidworks-mcp-pulito` (remote GitHub), venv nuovo con Python x64, `pip install -e .` come da README:
+  `solidworks-mcp.exe` creato, `test_offline` 147/147, il server espone 201 tool (202 meno `execute_python`, nascosto senza `SW_MCP_ALLOW_PYTHON=1`).
+- Scenari rifatti sull'installazione pulita con il ponte (istanza dedicata, copia del ponte nello scratchpad che lancia `solidworks-mcp.exe`):
+  S1 153317,58 mm3 / 1,22654 kg, PDF 1 pagina; S2 30356,6; S3 2 gradi di liberta', distinta 3 righe, 3 palloncini; S4 0,79697 mm,
+  30,049 MPa a meta', 60,345 all'incastro, FOS 5,826; S5 30000/40000/50000, 3 STEP validi; S7 rifiuto con spiegazione;
+  S6 in inglese: stessi numeri, 37 chiamate 0 errori, poi lingua rimessa in italiano (verificato al riavvio: italian, 83 e 262 False).
+  0 processi SolidWorks rimasti. Tempi: `save_document` dopo la simulazione (S5) 230 s, riuscito (lento ma senza blocco);
+  `insert_model_dimensions` ~88 s.
+- Trovati e corretti: (1) README, controllo del Python x64: `platform.machine()` dice `ARM64` anche con il Python x64 emulato su ARM64
+  -> ora `sysconfig.get_platform()` = `win-amd64`; (2) `apply_configuration_table` con un percorso .csv/.json inesistente rispondeva
+  "tabella vuota" (lo leggeva come testo CSV): ora "file non trovato" (`utils/config_table.py`, test offline 148/148).
+- Il push e' bloccato dall'hook per l'agente: lo fa Elia.
 
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.

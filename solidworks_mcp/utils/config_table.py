@@ -106,6 +106,9 @@ def load_rows(source: Any) -> List[Dict[str, Any]]:
             text = f.read()
         return _rows_from_json(json.loads(text)) if s.lower().endswith(".json") else _rows_from_csv(text)
     st = s.strip()
+    if "\n" not in st and st.lower().endswith((".csv", ".json")):
+        # un percorso sbagliato non e' una tabella CSV di una riga: dirlo invece di rispondere "tabella vuota"
+        raise OSError(f"file non trovato: {s}")
     if st.startswith("[") or st.startswith("{"):
         return _rows_from_json(json.loads(st))
     return _rows_from_csv(s)
