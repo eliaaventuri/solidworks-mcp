@@ -365,7 +365,10 @@ egr_f2.log`):
   - sketch2 (16 tool): trim (6 modi), extend, smusso, ripetizioni lineare/circolare, sposta/ruota/scala/copia, rettangoli da centro e
     3 punti, parallelogramma, arco tangente, parabola, curva da equazione, schizzo 3D (linea, spline, punto). Test 50/50.
     Non fatti: conica (i 4 punti non hanno il significato atteso), curva di intersezione (`IntersectCurves` non crea nulla).
-- Conteggio: 233 tool con `execute_python` (232 senza). In lavorazione: curve, superfici 1, estensioni ext1; poi feature avanzate,
+  - curves (6 tool): `create_helix` (passo/giri/altezza, spirale, conica), `create_variable_pitch_helix`, `project_curve`,
+    `split_line` (proiezione e silhouette; intersezione `[~]`), `composite_curve`, `curve_through_points` (file di punti). Test 89/89:
+    molla con sweep sull'elica 0,024 % dal calcolo. `sweep` accetta gia' il nome di una curva come percorso.
+- Conteggio: 239 tool con `execute_python` (238 senza). In lavorazione: superfici 1, estensioni ext1, feature avanzate; poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

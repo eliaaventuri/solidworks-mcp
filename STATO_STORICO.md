@@ -876,3 +876,92 @@ Solo `trim_sketch_entities` e' registrato come distruttivo (`DESTRUCTIVE` in `to
 - (facoltativo) `_active_sketch_name` in `sketch_constraints.py` cerca solo `ProfileFeature`: sugli schizzi 3D da' il nome sbagliato
   (l'ultimo schizzo 2D). Il mio modulo usa `_s2_name`, che li gestisce, ma `list_sketch_entities` & co. restano da correggere.
 - `LIMITI.md` / `STATO.md`: copiare dallo stato sopra; `ATLANTE.md` gia' elencava il mixin?: aggiungere `ext_sketch2.py`.
+
+### Lotto curves
+
+Moduli: `solidworks_mcp/automation/ext_curves.py` (mixin `CurvesOperations`), `solidworks_mcp/tools_ext/curves.py` (6 tool, nessuno distruttivo).
+Test: `tests/test_ext_curves_live.py` -> **89/89 PASS** (sezioni `H V P S C T`, circa 5 minuti). Offline: 145/148, i 3 che falliscono sono i
+conteggi dei tool ("N tool esposti", execute_python nascosto / riattivato; ora 239 tool con gli altri lotti). pyflakes 0 sui miei file.
+
+#### Come si misura una curva (nessun volume, nessuna faccia)
+`feat.GetSpecificFeature2` -> `IReferenceCurve.GetSegments` (spigoli) -> `edge.GetCurve`, `edge.GetCurveParams2` (indici 6 e 7 =
+parametri estremi) -> `ICurve.GetLength3(t0, t1)` = lunghezza; estremi dai vertici (`GetStartVertex.GetPoint`), se mancano `Evaluate2`.
+**Trappola**: `ICurve.Evaluate2(t)` e' affidabile solo per l'elica; su rette/curve proiettate/BCurve restituisce punti sbagliati
+(es. segmento da z=40 a z=10: Evaluate2 dava z=30..0). Per campionare una curva si usa `ICurve.GetTessPts(tol, tol, start, end)`
+(`_curve_sample`), per la distanza di un punto `edge.GetClosestPointOn` (`_curve_distance`). Tutte le curve riportano nel risultato
+`length`, `start_point`, `end_point`, `mid_point` (punto della tassellazione a meta'), `segments`.
+Sweep lungo una curva: `sweep(path_sketch=<nome feature della curva>, circular_diameter=d)` funziona senza modifiche (elica, composita):
+`_select_feature` seleziona qualunque feature con mark 4. Nessuna richiesta a Opus su `sweep`.
+
+#### Tool
+1. `create_helix` [x] - `InsertHelix(Reversed, Clockwised, Tapered, Outward, Helixdef, Height, Pitch, Revolution, TaperAngle, Startangle)`,
+   void: l'esito si legge dalla feature nuova (tipo `Helix`); metri e radianti; si seleziona la FEATURE schizzo (Select2 mark 0).
+   Definizioni 0 passo+giri, 1 altezza+giri, 2 altezza+passo, 3 spirale. Il risultato riporta passo/altezza/giri RISOLTI da SolidWorks
+   (leggendo `IHelixFeatureData`), lunghezza misurata, lunghezza calcolata (integrale numerico) e scarto, `handedness`.
+   Misure: R=10, passo 5, 8 giri: lunghezza 504.22658 vs 504.2439 (0.0034 %); molla = sweep di cerchio d=1: volume 395.938 vs pi r^2 L =
+   396.032 (0.0237 %). Conica 10 gradi: raggio finale 17.0531 = R + h tan(10) esatto, lunghezza 0.0028 %. Spirale (passo radiale 5, 4 giri):
+   raggio finale 30, lunghezza 0.0008 % vs forma chiusa di Archimede.
+   Trappole: (a) per la spirale `Outward` non cambia nulla: l'interno si ottiene con `Reversed=True` (se il raggio diventerebbe negativo
+   SolidWorks non crea nulla, il tool lo spiega); (b) `Clockwise=True` + `Reversed=False` da' un'elica SINISTRORSA rispetto alla direzione
+   di avanzamento (misurato con la tassellazione: default left, clockwise=False right, reverse left->right invertito, entrambi left),
+   `Reversed` porta l'elica dall'altra parte del piano dello schizzo (z finale -10); (c) il parametro `Height` passato viene ignorato con
+   definizioni a passo+giri (e viceversa), il tool passa 0.
+2. `create_variable_pitch_helix` [x] - `FeatureManager.InsertVariablePitchHelix(Reversed, Clockwise, Helixdef, Startangle)` +
+   `AddVariablePitchHelixSegment(a, diametro, passo)` x N + `EndVariablePitchHelix`.
+   Trappole: (a) `EndVariablePitchHelix` e' una PROPRIETA' in late binding (`fm.EndVariablePitchHelix`, chiamarla con `()` da' "NoneType
+   not callable" e la feature NON si chiude); (b) `AddVariablePitchHelixFirstPitchAndDiameter` seguito dai segmenti fa fallire la chiusura
+   (nessuna feature): la prima riga della tabella si da' come primo segmento con a=0; (c) il primo argomento di AddSegment e' CUMULATIVO:
+   giri totali (Helixdef 0) o altezza totale in metri (Helixdef 2); Helixdef 1 non crea nulla; (d) il passo varia linearmente con
+   l'angolo ma il diametro varia linearmente con l'ALTEZZA (misurato campionando la curva: z=11.2 -> r=12.66, lineare in z). Il tool
+   accetta segmenti per-segmento (non cumulativi) e li somma. Misure: 2 giri a passo 4 + 1 giro 4->8 con diametro 20->30: altezza 14,
+   raggio finale 15, lunghezza 203.09542 vs 203.1110 (0.0077 %), sweep d=1 volume 159.392 vs 159.511 (0.074 %); definizione altezza+passo:
+   altezza 30, lunghezza 0.0126 %.
+3. `project_curve` [x] - `InsertProjectedSketch2(Reverse)` con schizzo (mark 0) + facce (mark 0), oppure due schizzi (mark 0). Linea su
+   cilindro R=20: estremi a raggio 20 (x=10, y=+17.3205), `reverse` -> y=-17.3205; schizzo su schizzo (cerchio R=10 x retta z=x+10):
+   lunghezza 76.40396 = perimetro dell'ellisse (scarto 0.0000 %), punti iniziale e intermedio con raggio 10 e z=x+10.
+   `both_directions` [~]: `IProjectionCurveFeatureData.Bidirectional = True` + `ModifyDefinition` solleva un'eccezione RPC
+   (-2147417851) e `CreateDefinition(14)` + `CreateFeature` restituisce None (provati 3 approcci): il tool crea una SECONDA curva nel
+   verso opposto (`other_direction_feature`), cioe' lo stesso risultato visivo di "bidirezionale" con due feature.
+4. `split_line` projection [x] e silhouette [x], intersection [~] - `InsertSplitLineProject(IsDirectional, FlipDir)`, `InsertSplitLineSil()`,
+   `IFeatureManager.InsertSplitLineIntersect(CompleteOption)`. SONO VOID/SILENZIOSE: se i mark sono sbagliati non fanno nulla e non
+   danno errore (ritorno None, nessuna feature, nessun dialogo). **Mark misurati** (griglia di prove): proiezione = schizzo mark **4** +
+   facce mark **1**, `IsDirectional=False` (proietta in entrambi i versi: lo schizzo anche sotto al blocco taglia la faccia; `FlipDir`
+   non serve); silhouette = piano di direzione mark **2** + facce mark **1**. Con altri mark (0,1,2 per lo schizzo; 2 per le facce...)
+   nulla. Misure: cerchio r=10 sulla faccia superiore di un blocco 80x80x20: facce 6 -> 7, aree 314.1593 (= pi*100) e 6085.8407
+   (= 6400 - pi*100); silhouette di un cilindro R=20 h=50 rispetto al piano frontale: facce 3 -> 4, due meta' da 3141.5927 (= pi R h).
+   Intersezione: provati strumento = piano di riferimento con mark 1/2/4/8, bersaglio = faccia o corpo con mark 1/2/4, `CompleteOption`
+   0-3: mai una feature (in alcune combinazioni con mark 8/16 lo script si appende in attesa: evitare). Il tool restituisce errore con
+   "Limite noto". Verifica automatica: numero di facce prima/dopo e aree delle facce nuove (`new_face_areas`).
+   Attenzione: durante la ricerca dei mark il laboratorio si e' appeso piu' volte su combinazioni con mark 8/16 e `IsDirectional=True`.
+5. `composite_curve` [x] - `doc.InsertCompositeCurve` e' una PROPRIETA' (late binding: leggerla esegue il comando; chiamarla con `()`
+   da' "bool is not callable" dopo averla gia' eseguita). **Selezione con mark 1** (con mark 0 nessuna feature). Spigoli del modello via
+   `_select_point(kind=edge, mark=1)`, entita' di schizzo via `seg.Select4(append, sd mark 1)` anche su schizzi chiusi. Misure: 8 spigoli
+   superiori di un blocco con vertici raccordati r=10: lunghezza 302.83185 = 240 + 20 pi (esatta); retta 30 + arco r=10 (90 gradi) + retta 30
+   da schizzo: 75.70796 = 60 + 5 pi, sweep d=2 volume 237.844 = pi r^2 L (scarto 0.0000 %). Per un sweep sullo STESSO blocco il tubo si
+   fonde col blocco (volume aggiunto non confrontabile): per questo il test usa lo schizzo. Gli estremi `start_point/end_point` di una
+   composita multi-spigolo sono quelli del primo e ultimo spigolo nell'ordine di SolidWorks (non necessariamente gli estremi del percorso).
+6. `curve_through_points` [x] - `Begin/Point/End` NON funziona (`InsertCurveFilePoint` restituisce False, nessuna feature, provato aperta
+   e chiusa). Funziona `InsertCurveFile(percorso)` con un file di testo "x y z" una riga per punto **nelle unita' del documento**
+   (con file in metri su un documento in mm la curva e' 1000 volte piu' piccola: il tool legge `GetUserPreferenceInteger(47)` =
+   swUnitsLinear e converte). File temporaneo cancellato sempre. Chiusa = si ripete il primo punto in fondo (inizio = fine, misurato).
+   Misure: 5 punti (0,0,0)...(40,0,0): estremi esatti e `max_point_deviation` 0.0 mm (la spline passa per tutti i punti); 16 punti su un
+   cerchio R=20 chiusa: lunghezza 125.65941 vs 2 pi R = 125.66371 (0.0034 %), punto opposto (-20,0,5); 9 punti su una semicirconferenza.
+   Variante "per vertici": parametro `vertex_points` (coordinate di vertici esistenti, risolte con `_find_entity`) accodato a `points`,
+   stessa spline. `FeatureReferenceCurve` / `CreateDefinition(61)` (curva per punti di riferimento): `CreateDefinition(61)` restituisce
+   None, non implementata [~]: `vertex_points` copre il caso.
+
+#### Altre trappole
+- `CreateDefinition(i)` per i=0..259: solo 14 (swFmRefCurve = dati della curva proiettata, con FaceArray/Bidirectional) e 106 hanno
+  membri utili; non c'e' alcun ID per la linea di divisione.
+- Piani del modello di lab: "Front" e' il piano con normale X (non Z); "Top" ha normale Z (schizzo x = Y modello, y = -X). Nel test si usa
+  "Top" per gli schizzi dove serve l'asse Z, e "Right" (normale Y; x schizzo = -X) per le rette di proiezione.
+- Il laboratorio si e' appeso (script bloccato su una chiamata COM) 4 volte, sempre durante la ricerca dei mark della linea di divisione.
+  Dopo `labrun --kill` e riavvio e' sempre ripartito.
+- I test lasciano file in `test_output/` solo il log `crv_live.log`; i file temporanei delle curve per punti sono cancellati.
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool (6 nuovi: create_helix, create_variable_pitch_helix, project_curve, split_line, composite_curve,
+  curve_through_points) in test_offline / LIMITI / STATO.
+- Nessuna modifica a `sweep` necessaria. Nessun tool distruttivo (solo feature nuove, niente `DESTRUCTIVE`).
+- `LIMITI.md`: elica [x], passo variabile [x], proiezione [x] (bidirezionale come due curve), divisione per proiezione e silhouette [x],
+  per intersezione [~], composita [x], per punti [x] (per punti di riferimento [~]).
