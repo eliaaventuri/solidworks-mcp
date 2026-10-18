@@ -555,6 +555,59 @@ class SketchConstraintOperations:
     # coincidenza con l'origine); gli altri restano "tipo N" finche' non vengono verificati dal vivo
     REL_NAMES = {4: "horizontal", 9: "coincident"}
 
+    def split_sketch_entity(self, entity: str, x: float, y: float, unit: str = None, sketch: str = None) -> Dict:
+        """Divide una linea nel punto (x,y): la linea viene cancellata e ricostruita come due linee che si toccano nel punto.
+        Quote e relazioni della linea originale vanno perse (l'API qui non ha una divisione diretta). Solo linee."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            lst = self.list_sketch_entities(sketch=sk_name)
+            segs = (lst.get("data") or {}).get("segments", [])
+            seg = next((s for s in segs if s.get("id") == entity), None)
+            if seg is None:
+                return self._result(False, f"Segmento '{entity}' non trovato in {sk_name} (usa list_sketch_entities).",
+                                    SwErrors.swSelectionError)
+            if seg.get("type") != "line":
+                return self._result(False, f"split_sketch_entity: solo linee, '{entity}' e' {seg.get('type')}.",
+                                    SwErrors.swInvalidInput)
+            ax, ay = seg["start_mm"]
+            bx, by = seg["end_mm"]
+            px, py = self._mmu(x, unit) * 1000, self._mmu(y, unit) * 1000       # mm
+            dx, dy = bx - ax, by - ay
+            L2 = dx * dx + dy * dy
+            t = ((px - ax) * dx + (py - ay) * dy) / L2 if L2 else 0.0
+            if t <= 0.001 or t >= 0.999:
+                return self._result(False, f"Il punto e' a un estremo di '{entity}': niente da dividere.",
+                                    SwErrors.swInvalidInput)
+            qx, qy = ax + t * dx, ay + t * dy                                    # proiezione sul segmento
+            dist = math.hypot(px - qx, py - qy)
+            if dist > 0.05:
+                return self._result(False, f"Il punto e' a {dist:.3f} mm da '{entity}' (tolleranza 0.05 mm): "
+                                    "deve stare sulla linea.", SwErrors.swSelectionError,
+                                    {"distance_mm": round(dist, 4)})
+            d = self.delete_sketch_entities(entities=[entity], sketch=sk_name)
+            if not d.get("success"):
+                return d
+            l1 = self.draw_line(x1=ax, y1=ay, x2=qx, y2=qy, unit="mm")
+            l2 = self.draw_line(x1=qx, y1=qy, x2=bx, y2=by, unit="mm")
+            if not (l1.get("success") and l2.get("success")):
+                return self._result(False, f"Linea originale cancellata, ma la ricostruzione e' fallita: {l1.get('message')} / "
+                                    f"{l2.get('message')}. Controlla lo schizzo.", SwErrors.swSketchError)
+            ids = [l1["data"]["entity_id"], l2["data"]["entity_id"]]
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            return self._result(True, f"'{entity}' diviso in ({qx:.3f}; {qy:.3f}) mm: nuove linee {ids}. Quote e relazioni "
+                                "della linea originale sono state perse; schizzo " + STATUS_NAMES.get(status, "?"),
+                                SwErrors.swSuccess, {"sketch": sk_name, "split_point_mm": [round(qx, 4), round(qy, 4)],
+                                                     "new_entities": ids, "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"split_sketch_entity: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
     def list_sketch_relations(self, sketch: str = None) -> Dict:
         """Relazioni geometriche dello schizzo: tipo, entita' coinvolte (id), indice. Serve a trovare la relazione
         sbagliata e cancellarla con delete_sketch_entities."""

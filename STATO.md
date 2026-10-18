@@ -298,8 +298,16 @@ egr_f2.log`):
     Non capita piu' finora: da tenere d'occhio. Non c'e' ancora la cancellazione per "tipo + entita'" (spec 2 del brief).
   - Conteggi tool: 205 (204 senza `execute_python`), `EXPECTED_TOOLS` aggiornati in `test_offline.py` e `live_common.py`.
   - Registrati come distruttivi in `safety.py` (`delete_sketch_entities`). Offline 148/148, pyflakes 0.
-- **Ancora da fare**: i tool 3-9 (trim, split, move_sketch_point, toggle_construction, convert_entities come costruzione,
-  quote su spigoli del modello, delete_dimension/set_dimension_driven) e le quote su spigoli del modello.
+- **Tool 4 `split_sketch_entity` (2026-10-18), provato dal vivo** (`scripts_tmp/probe_split2.py`, `probe_split3.py`): solo linee.
+  La linea viene cancellata e ricostruita come due linee; quote e relazioni dell'originale vanno perse (dichiarato nel messaggio).
+  Prova: linea 0..40 divisa in (20,0) -> due segmenti che condividono il punto P1-5 (3 punti in tutto: il giunto e' vero, non solo
+  geometrico). Punto fuori linea (9 mm) e punto all'estremo: rifiutati con messaggio. Distruttivo, registrato in `safety.py`.
+  Conteggi tool: 206 (205 senza `execute_python`).
+- **Tool 3 `trim_sketch_entities` NON fatto**: l'API qui ha `SketchTrim` ed `SketchExtend`, ma i codici del tipo di taglio
+  (power trim, extend) non si leggono dalla libreria dei tipi con `scripts_tmp/tlbenum.py` (nessun enum trovato): da decidere con
+  Elia se provare i valori dal vivo o no.
+- **Ancora da fare**: trim (3), move_sketch_point (5), toggle_construction (6), convert_entities come costruzione (7),
+  quote su spigoli del modello (8), delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.

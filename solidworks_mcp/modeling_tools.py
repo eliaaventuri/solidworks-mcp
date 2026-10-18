@@ -51,6 +51,12 @@ _TOOLS = {
         {"entities": (A, "Entities to delete: ids, '@x,y' or 'pt@x,y'"),
          "dimensions": (A, "Dimension names, e.g. 'D2@Sketch34'"),
          "relations": (A, "Relation indices from list_sketch_relations (integers)"), "sketch": _SK}, []),
+    "split_sketch_entity": ("split_sketch_entity",
+        "Split a LINE of a sketch at a point lying on it: the line is rebuilt as two lines meeting at that point. "
+        "Dimensions and relations of the original line are lost. Lines only (arcs are refused). Destructive.",
+        {"entity": (S, "Line id, e.g. 'S0-1-2' (from list_sketch_entities)"),
+         "x": (N, "X of the split point (`unit`)"), "y": (N, "Y of the split point (`unit`)"),
+         "unit": _UNIT, "sketch": _SK}, ["entity", "x", "y"]),
     "get_sketch_definition_status": ("get_sketch_definition_status",
         "Sketch status (fully/under/over-defined) with dimensions and entities.",
         {"sketch": _SK}, []),
