@@ -1608,10 +1608,13 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if d is None:
                 return self._result(False, f"Quota '{name}' non trovata (usa il formato D1@Schizzo1).",
                                     SwErrors.swSelectionError)
+            # Angolo se SolidWorks lo dice (tipo 3) oppure se l'utente scrive l'unita' in gradi:
+            # senza questo, un angolo veniva letto/scritto come millimetri (523,6 "mm" per 30 gradi).
             try:
                 angular = int(self._com(d, "GetType")) == 3
             except Exception:
                 angular = False
+            angular = angular or str(unit or "").lower() in ("deg", "degree", "degrees", "gradi", "grado", "°")
             old = float(self._com(d, "SystemValue"))
             v0 = self._volume_m3(doc)
             si = math.radians(value) if angular else self._mmu(value, unit)

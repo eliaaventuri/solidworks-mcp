@@ -99,8 +99,10 @@ class SketchOperations:
                 axes = self._sketch_plane_info(doc)
             except Exception:
                 axes = {}
-            return self._result(True, f"Sketch created on {plane_name}",
-                              SwErrors.swSuccess, {"plane": plane_name, **axes})
+            # Il messaggio riporta il piano vero (Top, Plane8...), non sempre "Front Plane"
+            real_plane = plane
+            return self._result(True, f"Sketch created on {real_plane}",
+                              SwErrors.swSuccess, {"plane": real_plane, **axes})
             
         except Exception as e:
             logger.error(f"Create sketch error: {e}\n{traceback.format_exc()}")

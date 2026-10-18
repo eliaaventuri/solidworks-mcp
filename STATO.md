@@ -262,6 +262,15 @@ egr_f2.log`):
   Regressione completa non rifatta: cambiati solo `modeling.py`, `modeling_tools.py` e i conteggi dei tool nei test.
 - Barre di avanzamento per le attese: `scripts_tmp/avanzamento_log.py` (non versionato), si lancia in una scheda del terminale.
 
+## Strumenti di schizzo: difetti (2026-10-18, sessione in corso)
+- **B corretto nel codice, NON provato dal vivo**: `set_dimension_value` decideva "angolo" solo con il tipo COM (GetType == 3);
+  quando non scattava, 30 gradi venivano letti come mm. Ora anche `unit="deg"` (e sinonimi) indica un angolo. Da provare:
+  linea a 30 gradi, `set_dimension_value(30, unit="deg")` deve restare a 30 gradi.
+- **C corretto nel codice, NON provato dal vivo**: `create_sketch` riporta il piano richiesto (Top, Plane8...), non piu' sempre "Front Plane".
+- **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
+- **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
+  (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
+
 ## Prossimo passo
 Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
