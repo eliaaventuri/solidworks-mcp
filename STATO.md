@@ -314,8 +314,15 @@ egr_f2.log`):
   Conclusione: nessun codice dimostrato come power trim; il successo va verificato sulla geometria, non sul ritorno.
   Da decidere con Elia: confermare i valori numerici dell'enum (pagina della documentazione o prova controllata) prima
   di scrivere `trim_sketch_entities`.
-- **Ancora da fare**: trim (3), move_sketch_point (5), toggle_construction (6), convert_entities come costruzione (7),
-  quote su spigoli del modello (8), delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
+- **Tool 5 `move_sketch_point` e tool 6 `toggle_construction` (2026-10-18), provati dal vivo** (`scripts_tmp/probe_mv.py`):
+  - spostamento: il punto si imposta con `X`/`Y` (proprieta' scrivibili, nessun metodo dedicato trovato). Provato: `pt@40,0` ->
+    (45, 0), geometria riletta (`S0-0-1` 0..45). Con una relazione "fissa" sul punto lo spostamento viene RIFIUTATO e il punto
+    resta dov'era (messaggio con la posizione reale): la verifica sulla posizione rilegge il valore, non fida del silenzio.
+  - costruzione: `ConstructionGeometry` scrivibile. Provato: normale -> costruzione (`construction: true` in list) -> normale.
+    Con la linea di costruzione lo schizzo risulta "completamente definito" (SolidWorks conta la linea), da tenere presente.
+  - Conteggi tool: 208 (207 senza `execute_python`). Offline 148/148, pyflakes 0. Non sono distruttivi.
+- **Ancora da fare**: trim (3, vedi sopra), convert_entities come costruzione (7), quote su spigoli del modello (8),
+  delete_dimension/set_dimension_driven (9), sketch_offset/mirror/fillet (10).
 - **D**: le misure M3..M70 sono gia' in `modeling.py` (fatto con il commit c59b918): da verificare dal vivo con M56.
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.

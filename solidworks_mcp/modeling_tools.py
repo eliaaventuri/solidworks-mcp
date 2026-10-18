@@ -57,6 +57,16 @@ _TOOLS = {
         {"entity": (S, "Line id, e.g. 'S0-1-2' (from list_sketch_entities)"),
          "x": (N, "X of the split point (`unit`)"), "y": (N, "Y of the split point (`unit`)"),
          "unit": _UNIT, "sketch": _SK}, ["entity", "x", "y"]),
+    "move_sketch_point": ("move_sketch_point",
+        "Move a sketch point to new coordinates, like dragging it: point id 'P0-1' or 'pt@x,y' (the point at those "
+        "coordinates). Reads the position back: if the constraints block it, it is reported as a failure.",
+        {"point": (S, "Point id 'P0-1' or 'pt@x,y' (current coordinates, `unit`)"),
+         "x": (N, "New X (`unit`)"), "y": (N, "New Y (`unit`)"), "unit": _UNIT, "sketch": _SK}, ["point", "x", "y"]),
+    "toggle_construction": ("toggle_construction",
+        "Set entities to construction geometry (reference only) or back to normal. Entities: ids such as 'S0-1-2'. "
+        "Without `construction` the state is inverted.",
+        {"entities": (A, "Entity ids, e.g. ['S0-1-2']"),
+         "construction": (B, "true = construction, false = normal; omit to invert"), "sketch": _SK}, ["entities"]),
     "get_sketch_definition_status": ("get_sketch_definition_status",
         "Sketch status (fully/under/over-defined) with dimensions and entities.",
         {"sketch": _SK}, []),

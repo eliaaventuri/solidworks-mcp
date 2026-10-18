@@ -555,6 +555,80 @@ class SketchConstraintOperations:
     # coincidenza con l'origine); gli altri restano "tipo N" finche' non vengono verificati dal vivo
     REL_NAMES = {4: "horizontal", 9: "coincident"}
 
+    def move_sketch_point(self, point: str, x: float, y: float, unit: str = None, sketch: str = None) -> Dict:
+        """Sposta un punto dello schizzo (id 'P0-1' o 'pt@x,y' = il punto piu' vicino a quelle coordinate) a (x,y).
+        Dopo lo spostamento rilegge la posizione: se i vincoli la bloccano, non e' un successo."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            pts = self._points(sk)
+            target = None
+            if point.startswith("pt@"):
+                ax, ay = [float(v) for v in point[3:].split(",")]
+                ax, ay = self._mmu(ax, unit), self._mmu(ay, unit)     # m, come i punti COM
+                best = min(pts, key=lambda p: (p.X - ax) ** 2 + (p.Y - ay) ** 2, default=None)
+                if best is not None and math.hypot(best.X - ax, best.Y - ay) <= 0.05 / 1000:
+                    target = best
+            else:
+                target = next((p for p in pts if self._pt_id(p) == point), None)
+            if target is None:
+                return self._result(False, f"Punto '{point}' non trovato in {sk_name} (usa list_sketch_entities: id P..).",
+                                    SwErrors.swSelectionError)
+            nx, ny = self._mmu(x, unit), self._mmu(y, unit)
+            before = [round(target.X * 1000, 4), round(target.Y * 1000, 4)]
+            target.X, target.Y = nx, ny
+            after_x, after_y = target.X, target.Y
+            if math.hypot(after_x - nx, after_y - ny) > 0.01 / 1000:            # 0,01 mm
+                return self._result(False, f"Il punto {point} non si e' spostato: i vincoli lo bloccano "
+                                    f"(resta a {round(after_x * 1000, 4)}, {round(after_y * 1000, 4)} mm).",
+                                    SwErrors.swSketchError, {"sketch": sk_name, "before_mm": before})
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            return self._result(True, f"Punto {point} spostato da {before} a [{round(after_x * 1000, 4)}, "
+                                f"{round(after_y * 1000, 4)}] mm; schizzo {STATUS_NAMES.get(status)}",
+                                SwErrors.swSuccess, {"sketch": sk_name, "point": point, "before_mm": before,
+                                                     "after_mm": [round(after_x * 1000, 4), round(after_y * 1000, 4)],
+                                                     "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"move_sketch_point: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
+    def toggle_construction(self, entities: list, construction: bool = None, sketch: str = None) -> Dict:
+        """Imposta la geometria di costruzione per le linee/archi indicati (id 'S0-1-2'). Senza `construction` inverte lo stato."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            sk, err = self._active_sketch(doc, sketch)
+            if err:
+                return err
+            sk_name = self._active_sketch_name(doc, sk)
+            segs = {self._seg_id(s): s for s in self._segments(sk)}
+            changed = []
+            for ent in entities or []:
+                seg = segs.get(ent)
+                if seg is None:
+                    return self._result(False, f"Entita' '{ent}' non trovata in {sk_name} (usa list_sketch_entities).",
+                                        SwErrors.swSelectionError)
+                cur = bool(seg.ConstructionGeometry)
+                want = (not cur) if construction is None else bool(construction)
+                seg.ConstructionGeometry = want
+                if bool(seg.ConstructionGeometry) != want:
+                    return self._result(False, f"'{ent}': SolidWorks non ha cambiato la geometria di costruzione.",
+                                        SwErrors.swSketchError)
+                changed.append({"id": ent, "construction": want})
+            status = int(self._com(sk, "GetConstrainedStatus"))
+            desc = ", ".join(f"{c['id']} -> {'costruzione' if c['construction'] else 'normale'}" for c in changed)
+            return self._result(True, f"{desc}; schizzo {STATUS_NAMES.get(status)}", SwErrors.swSuccess,
+                                {"sketch": sk_name, "changed": changed, "sketch_status": STATUS_NAMES.get(status)})
+        except Exception as e:
+            logger.error(f"toggle_construction: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
     def split_sketch_entity(self, entity: str, x: float, y: float, unit: str = None, sketch: str = None) -> Dict:
         """Divide una linea nel punto (x,y): la linea viene cancellata e ricostruita come due linee che si toccano nel punto.
         Quote e relazioni della linea originale vanno perse (l'API qui non ha una divisione diretta). Solo linee."""
