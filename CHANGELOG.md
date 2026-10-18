@@ -59,12 +59,20 @@ Il server arriva a 202 tool (201 + `execute_python`, che e' disattivato di defau
 - Nomi italiani fissi tolti dai test e dal server: regressione in inglese verde (G1). Peso del cartiglio d'assieme 563,51 g in italiano e in inglese.
 - Box dell'assieme: ora calcolato dai pezzi (`GetBox` sovrastimava di 0,165 mm in X).
 - Import non usati e variabili inutilizzate tolti dal pacchetto.
+- Ripresa automatica (`SW_MCP_AUTORESTART=1`): se l'istanza dedicata era morta, il tool che la rilancia riceveva solo il tempo
+  normale del tool e poteva scadere durante l'avvio (23 s contro 15 nel test); ora riceve anche il tempo di avvio.
+- Descrizioni chiarite dopo le prove d'uso: `create_hole` (ogni punto dato, anche `face_point`, diventa un foro), `save_drawing`
+  (`filepath` obbligatorio), `rebuild_model` (solo pezzi).
 
 ### Limiti noti
 - C3: nei passi di traslazione dell'esploso la rotazione non si puo' impostare (`AddExplodeStep2` non la memorizza in SolidWorks 2026). Si ottiene solo con un passo radiale a distanza 0, attorno alla direzione radiale (45,0000 gradi misurati); il tool lo suggerisce in `rotation_note`.
 - D2: lo STEP AP242 non si scrive con l'edizione Student: il file resta AP203 anche con la preferenza a 242. AP214 funziona; `export_model` lo dichiara in `warning`.
 - Contatto locale senza compenetrazione in trazione: se il pezzo e' tenuto solo dal contatto e si stacca, il solutore puo' bloccarsi fino al timeout (una prova ha finito, una no). L'avviso e' nella descrizione di `add_simulation_contact`; il caso e' fuori dal test di default (`SX_E1_TRAZIONE=1`).
-- Ultima regressione completa in italiano: chiusura del gruppo D (2026-10-18); le sezioni del gruppo E sono provate una per una (E3 42, E5 36, E1 53, E4 37, E2 25 controlli).
+- In tavola la quota del cerchio dei fori (es. Ø90 di una flangia) non viene messa da `insert_model_dimensions`: si aggiunge con una nota.
+
+Regressione completa in italiano del 2026-10-18 (`test_output/regressione_20261018_1148.md`): offline 147/147, modeling 175/175,
+modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113, assembly_extra 214/214, data 183/183, data_extra 110/110,
+simulation 120/120, simulation_extra 181/181; timeout 15/18, poi 18/18 due volte dopo la correzione della ripresa automatica. 0 processi rimasti.
 
 ## [5.0.0] - 2026-10-12
 

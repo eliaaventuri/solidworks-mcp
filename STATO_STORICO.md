@@ -585,3 +585,5 @@ Trappole e nomi verificati (SW 2026 SP4.1, istanza dedicata nascosta, late bindi
   Piastra 40x100x5 foro D4, 2000 N, mesh standard 2 mm: nodi entro 2 mm dal foro 549 -> 4157, lontani (|z| > 30) 11697 -> 11756, nodi sulla
   faccia del foro 102 -> 1026, Kt 2,487 -> 2,725 (Peterson 2,721).
 - Sonde: una chiamata `execute_python` per passo (se una si blocca, l'output delle altre resta); `SW_MCP_TOOL_TIMEOUT=120` per non aspettare 300 s.
+
+- 2026-10-18, regressione di rilascio: rilancio dell'istanza dedicata dopo la morte del processo = 23 s (15 s nella fase 5): il tempo concesso al tool di ripresa ora include SW_MCP_STARTUP_TIMEOUT + 60 quando il processo dedicato risulta terminato (`Popen.poll()`, senza COM).

@@ -208,10 +208,18 @@ egr_f2.log`):
   oltre 300 s (non ripetuto in 4 prove, `scripts_tmp/eprobe.py SAVE`).
 - `docs/esempi/` e sezione Esempi del README: in scrittura da un sotto-agente al momento dello stop (controllare `git status`).
 
+## Fase 7 (2026-10-18) — pronta per il rilascio
+- `docs/esempi/` (S1-S7) e sezione Esempi del README committati.
+- Regressione completa in italiano (`test_output/regressione_20261018_1148.md`, log `%TEMP%\regr_f7.log`): offline 147/147, modeling 175/175,
+  modeling_extra 259/259, drawings 65/65, drawing_quality 139/139, assembly 113/113, assembly_extra 214/214, data 183/183,
+  data_extra 110/110, simulation 120/120, simulation_extra 181/181, timeout 15/18; 0 processi SolidWorks rimasti.
+  Un primo tentativo (09:32) si era interrotto: l'istanza dedicata e' morta durante drawing_quality fra la tavola della flangia e quella
+  del perno (non ripetuto nel secondo giro, 139/139).
+- Rosso del timeout, sezione C (istanza uccisa da fuori, il tool seguente la rilancia): il rilancio ha impiegato 23 s e il tool aveva solo
+  i 15 s del test, perche' il tempo di avvio si aggiungeva solo con `_sw_app` vuoto. Corretto in `server.py` (`_dedicated_lost`: processo
+  dedicato morto + AUTORESTART -> tempo di avvio in piu'). Dopo: `run_all.py timeout` 18/18 due volte, offline 147/147, pyflakes 0.
+
 ## Prossimo passo
-1. Controllare `docs/esempi/` e la sezione Esempi del README (git diff), poi commit.
-2. Regressione completa in italiano: `.venv\Scripts\python.exe tests\run_all.py > %TEMP%\regr_f7.log` in background, barra
-   `scripts_tmp\regr.ps1` (conteggi gia' aggiornati: simulation_extra 181) in una scheda del Terminale. Esiti qui e in CHANGELOG.
-3. Fase 7, passi di Elia: tag `v6.0.0`, push, installazione su un PC pulito seguendo il README.
+Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
 Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
 di Elia. Per le prove d'uso serve un server con l'istanza dedicata (vedi la sezione Fase 6 quando c'e').

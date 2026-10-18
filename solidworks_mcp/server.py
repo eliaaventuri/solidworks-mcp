@@ -395,7 +395,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                                                   "controllare la finestra di SolidWorks e riprovare piu' tardi.")]
         _active_job = _SW_EXECUTOR.submit(_dispatch_tool, name, arguments or {})
         timeout = _tool_timeout()
-        if sw_automation._sw_app is None:               # il tool dovra' prima avviare/collegare SolidWorks: si aggiunge il tempo di avvio
+        if sw_automation._sw_app is None or _dedicated_lost():   # il tool dovra' prima avviare/rilanciare SolidWorks: tempo di avvio in piu'
             timeout += _startup_allowance()
         try:
             result = await asyncio.wait_for(asyncio.wrap_future(_active_job), timeout=timeout)
@@ -440,6 +440,17 @@ def _startup_allowance() -> float:
         return float(os.environ.get("SW_MCP_STARTUP_TIMEOUT", "240")) + 60
     except ValueError:
         return 300.0
+
+
+def _dedicated_lost() -> bool:
+    """Istanza dedicata morta (crash o chiusa da fuori) con SW_MCP_AUTORESTART=1: il prossimo tool la rilancera'.
+    Controllo senza COM: solo lo stato del processo lanciato dal server."""
+    proc = getattr(sw_automation, "_dedicated_proc", None)
+    try:
+        return (sw_automation.is_dedicated_mode() and sw_automation.autorestart_enabled()
+                and proc is not None and proc.poll() is not None)
+    except Exception:
+        return False
 
 
 def _timeout_message(name: str, timeout: float) -> str:
