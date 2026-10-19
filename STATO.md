@@ -368,7 +368,12 @@ egr_f2.log`):
   - curves (6 tool): `create_helix` (passo/giri/altezza, spirale, conica), `create_variable_pitch_helix`, `project_curve`,
     `split_line` (proiezione e silhouette; intersezione `[~]`), `composite_curve`, `curve_through_points` (file di punti). Test 89/89:
     molla con sweep sull'elica 0,024 % dal calcolo. `sweep` accetta gia' il nome di una curva come percorso.
-- Conteggio: 239 tool con `execute_python` (238 senza). In lavorazione: superfici 1, estensioni ext1, feature avanzate; poi feature avanzate,
+  - ext1 (estensioni, nessun tool nuovo): estrusioni a parete sottile + `up_to_vertex`/`up_to_body`; sweep con guide, parete sottile,
+    tangenze e percorso = qualunque curva; loft con condizioni di partenza/arrivo, parete sottile, linea d'asse; smusso a vertice;
+    `shell_body.multi_thickness` (shell + move_faces: la API nativa non funziona, solo facce piane); sistema di coordinate numerico;
+    asole ad arco; `bodies` in specchia/ripetizioni (Mark 256); schizzi 3D riconosciuti dagli helper. Test 134/134; loft con tangenti
+    normali verificato solo per disuguaglianze (formula esatta non riprodotta).
+- Conteggio: 239 tool con `execute_python` (238 senza). In lavorazione: superfici 1, feature avanzate, corpi 2, gestione; poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

@@ -194,10 +194,40 @@ class ModelingBase:
         names = self._feature_names(doc, type_name)
         return names[-1] if names else None
 
+    SKETCH_TYPES = ("ProfileFeature", "3DProfileFeature")      # schizzo 2D, schizzo 3D (GetTypeName2)
+
+    def _last_sketch(self, doc) -> Optional[str]:
+        """Nome dell'ultimo schizzo del modello, 2D o 3D (il piu' in basso nell'albero)."""
+        last = None
+        for n, t, f in self._features(doc):
+            if t in self.SKETCH_TYPES:
+                last = n
+        return last
+
+    def _sketch_name_of(self, doc, sk) -> Optional[str]:
+        """Nome della feature schizzo (2D o 3D) che possiede l'ISketch `sk`: confronto d'identita' COM; se fallisce, l'ultimo
+        schizzo dello stesso tipo (3D / 2D) secondo ISketch.Is3D."""
+        if sk is None:
+            return None
+        for n, t, f in self._features(doc):
+            if t not in self.SKETCH_TYPES:
+                continue
+            try:
+                if self._com(f, "GetSpecificFeature2") == sk:
+                    return n
+            except Exception:
+                continue
+        try:
+            is3d = bool(self._com(sk, "Is3D"))
+        except Exception:
+            is3d = False
+        return self._last_of_type(doc, "3DProfileFeature" if is3d else "ProfileFeature")
+
     def _exit_sketch(self, doc) -> Optional[str]:
         """Chiude lo schizzo attivo (se c'e') e ne restituisce il nome (la chiusura lo lascia selezionato)."""
         sm = doc.SketchManager
-        if self._com(sm, "ActiveSketch") is None:
+        active = self._com(sm, "ActiveSketch")
+        if active is None:
             return None
         doc.ClearSelection2(True)
         sm.InsertSketch(True)
@@ -207,7 +237,7 @@ class ModelingBase:
                 name = self._com(doc.SelectionManager.GetSelectedObject6(1, -1), "Name")
         except Exception:
             name = None
-        return name or self._last_of_type(doc, "ProfileFeature")
+        return name or self._sketch_name_of(doc, active)
 
     def _resolve_sketch(self, doc, sketch: Optional[str]) -> Tuple[Optional[str], Optional[Dict]]:
         """Nome dello schizzo da usare: quello indicato, o l'attivo (che viene chiuso), o l'ultimo."""
@@ -215,10 +245,10 @@ class ModelingBase:
         if sketch:
             if self._find_feature(doc, sketch) is None:
                 return None, self._result(False, f"Schizzo '{sketch}' non trovato. "
-                                          f"Schizzi: {self._feature_names(doc, 'ProfileFeature')}",
+                                          f"Schizzi: {self._feature_names(doc, 'ProfileFeature') + self._feature_names(doc, '3DProfileFeature')}",
                                           SwErrors.swSelectionError)
             return sketch, None
-        name = closed or self._last_of_type(doc, "ProfileFeature")
+        name = closed or self._last_sketch(doc)
         if not name:
             return None, self._result(False, "Nessuno schizzo nel modello.", SwErrors.swSketchError)
         return name, None
@@ -376,7 +406,7 @@ class ModelingBase:
         """Entita' (segmento o punto) di uno schizzo QUALSIASI del modello, senza aprirlo: -> (oggetto, descrizione, errore).
         ref = id ('S0-1-2', 'P0-1'), 'pt@x,y' o '@x,y' nelle coordinate di quello schizzo."""
         f = self._find_feature(doc, sketch_name)
-        if f is None or self._com(f, "GetTypeName2") != "ProfileFeature":
+        if f is None or self._com(f, "GetTypeName2") not in self.SKETCH_TYPES:
             return None, "", f"schizzo '{sketch_name}' non trovato"
         sk = self._com(f, "GetSpecificFeature2")
         obj, desc, e = self._resolve_entity(doc, sk, ref, unit)

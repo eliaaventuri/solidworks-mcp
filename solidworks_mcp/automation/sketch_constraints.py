@@ -89,19 +89,11 @@ class SketchConstraintOperations:
         return sk, None
 
     def _active_sketch_name(self, doc, sk=None) -> Optional[str]:
-        """Nome dello schizzo attivo: confronto d'identita' COM fra ISketch attivo e quello di ogni feature."""
+        """Nome dello schizzo attivo (2D o 3D): confronto d'identita' COM fra ISketch attivo e quello di ogni feature."""
         sk = sk or self._com(doc.SketchManager, "ActiveSketch")
         if sk is None:
             return None
-        for n, t, f in self._features(doc):
-            if t != "ProfileFeature":
-                continue
-            try:
-                if self._com(f, "GetSpecificFeature2") == sk:
-                    return n
-            except Exception:
-                continue
-        return self._last_of_type(doc, "ProfileFeature")
+        return self._sketch_name_of(doc, sk)
 
     def _segments(self, sk) -> list:
         return list(self._com(sk, "GetSketchSegments") or [])
@@ -340,7 +332,7 @@ class SketchConstraintOperations:
                 reopened = False
                 if err:
                     # nessuno schizzo attivo: usa l'ultimo
-                    name = self._last_of_type(doc, "ProfileFeature")
+                    name = self._last_sketch(doc)
                     if not name:
                         return err
                     sk, err = self._active_sketch(doc, name)
@@ -1051,25 +1043,65 @@ class SketchConstraintOperations:
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def draw_slot(self, x1: float, y1: float, x2: float, y2: float, width: float, unit: str = None,
-                  slot_type: str = "center_to_center") -> Dict:
-        """Asola retta: centri dei due estremi (center_to_center) o estremi (overall); width = larghezza."""
+    def draw_slot(self, x1: float = None, y1: float = None, x2: float = None, y2: float = None, width: float = None,
+                  unit: str = None, slot_type: str = "center_to_center", cx: float = None, cy: float = None,
+                  radius: float = None, start_angle: float = None, end_angle: float = None, clockwise: bool = False,
+                  x3: float = None, y3: float = None) -> Dict:
+        """Asola retta: centri dei due estremi (center_to_center) o estremi (overall); width = larghezza.
+        Asola AD ARCO: slot_type=arc_center (cx, cy centro; radius = raggio dell'arco centrale; start_angle, end_angle in
+        gradi; antiorario salvo clockwise) oppure arc_3point ((x1,y1) centro dell'estremo iniziale, (x2,y2) centro
+        dell'estremo finale, (x3,y3) punto sull'arco centrale; misurato: l'ordine e' inizio, fine, punto sull'arco).
+        Area = width * lunghezza dell'arco centrale + pi (width/2)^2."""
         try:
             doc, sm, err = self._sketch_ready()
             if err:
                 return err
-            t = 0 if slot_type.lower().startswith("center") else 1   # swSketchSlotCreationType_e
-            before = {self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))}
-            res = sm.CreateSketchSlot(t, 0, self._mmu(width, unit),
-                                      self._mmu(x1, unit), self._mmu(y1, unit), 0,
-                                      self._mmu(x2, unit), self._mmu(y2, unit), 0, 0, 0, 0, 1, False)
+            st = (slot_type or "center_to_center").lower()
+            if width is None or float(width) <= 0:
+                return self._result(False, "width obbligatoria (> 0).", SwErrors.swInvalidInput)
+            m = lambda v: self._mmu(float(v), unit)
+            if st in ("arc_center", "arc_3point"):
+                if st == "arc_center":
+                    if None in (cx, cy, radius, start_angle, end_angle) or float(radius) <= 0:
+                        return self._result(False, "arc_center richiede cx, cy, radius (> 0), start_angle, end_angle (gradi).",
+                                            SwErrors.swInvalidInput)
+                    a1, a2 = math.radians(float(start_angle)), math.radians(float(end_angle))
+                    p = [(cx, cy), (float(cx) + float(radius) * math.cos(a1), float(cy) + float(radius) * math.sin(a1)),
+                         (float(cx) + float(radius) * math.cos(a2), float(cy) + float(radius) * math.sin(a2))]
+                    code, direction = 2, (-1 if clockwise else 1)
+                else:
+                    if None in (x1, y1, x2, y2, x3, y3):
+                        return self._result(False, "arc_3point richiede x1,y1 (inizio), x2,y2 (fine), x3,y3 (punto sull'arco).",
+                                            SwErrors.swInvalidInput)
+                    p = [(x1, y1), (x2, y2), (x3, y3)]
+                    code, direction = 3, 1
+                args = [m(c) for pt in p for c in (pt[0], pt[1])]
+                before = {self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))}
+                res = sm.CreateSketchSlot(code, 0, m(width), args[0], args[1], 0, args[2], args[3], 0, args[4], args[5], 0,
+                                          direction, False)
+            else:
+                if None in (x1, y1, x2, y2):
+                    return self._result(False, "x1, y1, x2, y2 obbligatori.", SwErrors.swInvalidInput)
+                t = 0 if st.startswith("center") else 1   # swSketchSlotCreationType_e
+                before = {self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))}
+                res = sm.CreateSketchSlot(t, 0, m(width), m(x1), m(y1), 0, m(x2), m(y2), 0, 0, 0, 0, 1, False)
             if res is None:
                 return self._result(False, "CreateSketchSlot fallito", SwErrors.swSketchError)
             segs = [self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))
                     if self._seg_id(s) not in before and not s.ConstructionGeometry]
-            return self._result(True, "Asola creata", SwErrors.swSuccess,
-                                {"width": width, "unit": self._unit_name(unit), "segment_ids": segs,
-                                 "note": "linea centrale (costruzione) + 2 linee + 2 archi"})
+            data = {"width": width, "unit": self._unit_name(unit), "segment_ids": segs, "slot_type": st}
+            if st.startswith("arc"):
+                cl = [s for s in self._segments(self._com(sm, "ActiveSketch"))
+                      if self._seg_id(s) not in before and s.ConstructionGeometry]
+                if cl:
+                    try:
+                        data["centerline_length"] = round(self._from_m(float(cl[0].GetLength), unit), 5)
+                    except Exception:
+                        pass
+                data["note"] = "arco centrale (costruzione) + 2 archi laterali + 2 semicerchi"
+            else:
+                data["note"] = "linea centrale (costruzione) + 2 linee + 2 archi"
+            return self._result(True, "Asola creata", SwErrors.swSuccess, data)
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 

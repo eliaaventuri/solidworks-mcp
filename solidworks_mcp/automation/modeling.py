@@ -34,8 +34,11 @@ logger = logging.getLogger(__name__)
 
 END_CONDITIONS = {
     "blind": 0, "through_all": 1, "through_all_both": 9, "up_to_next": 2, "up_to_surface": 4,
-    "offset_from_surface": 5, "mid_plane": 6, "symmetric": 6, "up_to_body": 7,
+    "offset_from_surface": 5, "mid_plane": 6, "symmetric": 6, "up_to_body": 7, "up_to_vertex": 3,
 }
+# parete sottile: swThinWallType_e (misurato su FeatureExtrusionThin2.RevThinDir: 0 verso l'esterno del profilo,
+# 1 verso l'interno, 2 mezzeria, 3 due direzioni con Thk1 + Thk2)
+THIN_TYPES = {"one_direction": 0, "opposite_direction": 1, "mid_plane": 2, "two_directions": 3}
 
 # Misure metriche M3..M70 (ISO 261, serie grossa): Ø di passaggio ISO 273 fine/media/grossa, punta per maschiatura
 # (D - P) e passo grosso. M70 non e' nella serie grossa ne' in ISO 273: passo 6 (ISO 261, terza scelta), punta 64,
@@ -141,6 +144,21 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                                 SwErrors.swFeatureError, info)
         return self._result(True, msg, SwErrors.swSuccess, info)
 
+    def _readback(self, doc, feature: str, props: Dict[str, str]) -> Dict:
+        """Rilegge dalla definizione della feature le proprieta' indicate {chiave risultato: nome proprieta'}."""
+        out = {}
+        try:
+            f = self._find_feature(doc, feature)
+            d = f.GetDefinition if f is not None else None
+            for key, prop in props.items():
+                try:
+                    out[key] = self._com(d, prop)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return out
+
     def _delete_features(self, doc, names: List[str]):
         doc.ClearSelection2(True)
         for i, n in enumerate(names):
@@ -236,7 +254,8 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
 
     def _extrude_common(self, cut: bool, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                         draft_outward, up_to_face_point, offset, reverse, flip_side_to_cut, merge, unit,
-                        start_offset, label, start_from=None, start_ref=None):
+                        start_offset, label, start_from=None, start_ref=None, thin_thickness=None, thin_type=None,
+                        thin_thickness2=None, cap_ends=False, cap_thickness=None, up_to_vertex_point=None):
         doc, err = self._part()
         if err:
             return err
@@ -277,6 +296,23 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             ok, info = self._select_point(doc, "face", up_to_face_point, unit, True, 1)
             if not ok:
                 return self._result(False, info.get("error", "faccia di arresto non trovata"), SwErrors.swSelectionError)
+        if t1 == 3:
+            if not up_to_vertex_point:
+                return self._result(False, "Per up_to_vertex serve up_to_vertex_point=[x,y,z] (punto SUL vertice di arresto).",
+                                    SwErrors.swInvalidInput)
+            ok, info = self._select_point(doc, "vertex", up_to_vertex_point, unit, True, 1)
+            if not ok:
+                return self._result(False, info.get("error", "vertice di arresto non trovato"), SwErrors.swSelectionError)
+        if t1 == 7:
+            if not up_to_face_point:
+                return self._result(False, "Per up_to_body serve up_to_face_point=[x,y,z] (punto su una faccia del corpo "
+                                    "di arresto).", SwErrors.swInvalidInput)
+            body = self._body_of_point(doc, up_to_face_point, unit)
+            if body is None:
+                return self._result(False, f"Nessun corpo ha una faccia nel punto {list(up_to_face_point)}.",
+                                    SwErrors.swSelectionError)
+            if not body.Select2(True, self._sd(doc, 1)):
+                return self._result(False, "Corpo di arresto non selezionabile.", SwErrors.swSelectionError)
         if t0 in (1, 2):
             # partenza da superficie / vertice: l'entita' si seleziona con Mark=32 (superficie) / 0 (vertice) DOPO lo schizzo
             ref = start_ref
@@ -294,8 +330,28 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         ang = math.radians(draft_angle or 0)
         fm = doc.FeatureManager
         feat = None
+        thin = thin_thickness is not None and float(thin_thickness) > 0
+        tt = (thin_type or "one_direction").lower()
+        if thin and tt not in THIN_TYPES:
+            return self._result(False, f"thin_type sconosciuto: {thin_type}. Valide: {sorted(THIN_TYPES)}", SwErrors.swInvalidInput)
         try:
-            if cut:
+            if thin:
+                thk1 = self._mmu(thin_thickness, unit)
+                thk2 = self._mmu(thin_thickness2 if thin_thickness2 is not None else 0, unit)
+                if tt == "two_directions" and thk2 <= 0:
+                    return self._result(False, "thin_type=two_directions richiede thin_thickness2 > 0.", SwErrors.swInvalidInput)
+                endthk = self._mmu(cap_thickness if cap_thickness is not None else thin_thickness, unit)
+                cap = 1 if cap_ends else 0
+                if cut:
+                    feat = fm.FeatureCutThin2(sd, bool(reverse), False, t1, t2, d1, d2, dr, False, bool(draft_outward), False,
+                                              ang, 0.0, False, False, False, False, thk1, thk2, endthk, THIN_TYPES[tt], cap,
+                                              False, 0.0, True, True, t0, self._mmu(start_offset or 0, unit), False)
+                else:
+                    feat = fm.FeatureExtrusionThin2(sd, bool(reverse), False, t1, t2, d1, d2, dr, False, bool(draft_outward),
+                                                    False, ang, 0.0, False, False, False, False, bool(merge), thk1, thk2,
+                                                    endthk, THIN_TYPES[tt], cap, False, 0.0, True, True, t0,
+                                                    self._mmu(start_offset or 0, unit), False)
+            elif cut:
                 feat = fm.FeatureCut4(sd, bool(reverse), False, t1, t2, d1, d2, dr, False, bool(draft_outward), False,
                                       ang, 0.0, False, False, False, False, False, True, True, False, False, False,
                                       t0, self._mmu(start_offset or 0, unit), False, False)
@@ -308,22 +364,44 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         doc.ClearSelection2(True)
         extra = {"sketch": sk_name, "end_condition": ec, "depth": depth, "unit": self._unit_name(unit),
                  "draft_angle": draft_angle or 0, "start_from": sf}
+        if thin:
+            extra.update({"thin_thickness": thin_thickness, "thin_type": tt, "cap_ends": bool(cap_ends)})
+            if tt == "two_directions":
+                extra["thin_thickness2"] = thin_thickness2
         if sf == "offset":
             extra["start_offset"] = start_offset
         return self._finish(doc, label, feat, v0, before, extra, require_volume_change=True)
+
+    def _body_of_point(self, doc, pt, unit=None, tol_mm: float = 0.05):
+        """Corpo che ha una faccia passante per il punto `pt` (modello, `unit`); None se non c'e'."""
+        p = [self._mmu(float(c), unit) for c in pt]
+        for body in self._bodies(doc):
+            try:
+                for f in (self._com(body, "GetFaces") or []):
+                    if self._closest(f, "face", p) <= max(tol_mm, 0.001) / 1000.0:
+                        return body
+            except Exception:
+                continue
+        return None
 
     def extrude_boss(self, sketch: str = None, depth: float = 10, end_condition: str = "blind",
                      depth2: float = None, end_condition2: str = None, draft_angle: float = 0,
                      draft_outward: bool = False, up_to_face_point: list = None, offset: float = 0,
                      reverse: bool = False, merge: bool = True, start_offset: float = 0, unit: str = None,
-                     start_from: str = None, start_ref: Any = None) -> Dict:
+                     start_from: str = None, start_ref: Any = None, thin_thickness: float = None,
+                     thin_type: str = None, thin_thickness2: float = None, cap_ends: bool = False,
+                     cap_thickness: float = None, up_to_vertex_point: list = None) -> Dict:
         """Estrusione base/aggiunta con condizioni finali: blind | through_all | through_all_both | mid_plane |
-        up_to_next | up_to_surface | offset_from_surface; sformo (gradi) e seconda direzione. Partenza `start_from`:
-        sketch_plane (default) | offset (start_offset) | surface (start_ref={"face":[x,y,z]}) | vertex (start_ref={"vertex":[..]})."""
+        up_to_next | up_to_surface | offset_from_surface | up_to_vertex (up_to_vertex_point) | up_to_body (up_to_face_point =
+        punto su una faccia del corpo); sformo (gradi) e seconda direzione. Partenza `start_from`:
+        sketch_plane (default) | offset (start_offset) | surface (start_ref={"face":[x,y,z]}) | vertex (start_ref={"vertex":[..]}).
+        Parete sottile: thin_thickness (+ thin_type one_direction | opposite_direction | mid_plane | two_directions con
+        thin_thickness2; cap_ends/cap_thickness per chiudere i profili chiusi)."""
         try:
             return self._extrude_common(False, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                                         draft_outward, up_to_face_point, offset, reverse, False, merge, unit,
-                                        start_offset, "Estrusione", start_from, start_ref)
+                                        start_offset, "Estrusione", start_from, start_ref, thin_thickness, thin_type,
+                                        thin_thickness2, cap_ends, cap_thickness, up_to_vertex_point)
         except Exception as e:
             logger.error(f"extrude_boss: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -332,13 +410,16 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                     depth2: float = None, end_condition2: str = None, draft_angle: float = 0,
                     draft_outward: bool = False, up_to_face_point: list = None, offset: float = 0,
                     reverse: bool = False, start_offset: float = 0, unit: str = None,
-                    start_from: str = None, start_ref: Any = None) -> Dict:
-        """Taglio estruso con le stesse condizioni finali e le stesse partenze di extrude_boss (reverse=True taglia
-        dall'altra parte)."""
+                    start_from: str = None, start_ref: Any = None, thin_thickness: float = None,
+                    thin_type: str = None, thin_thickness2: float = None, cap_ends: bool = False,
+                    cap_thickness: float = None, up_to_vertex_point: list = None) -> Dict:
+        """Taglio estruso con le stesse condizioni finali, partenze e parete sottile di extrude_boss (reverse=True
+        taglia dall'altra parte)."""
         try:
             return self._extrude_common(True, sketch, depth, end_condition, depth2, end_condition2, draft_angle,
                                         draft_outward, up_to_face_point, offset, reverse, False, True, unit,
-                                        start_offset, "Taglio estruso", start_from, start_ref)
+                                        start_offset, "Taglio estruso", start_from, start_ref, thin_thickness, thin_type,
+                                        thin_thickness2, cap_ends, cap_thickness, up_to_vertex_point)
         except Exception as e:
             logger.error(f"extrude_cut: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -431,11 +512,44 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     # ------------------------------------------------------------------ sweep / loft
+    # swTangencyType_e (sweep: partenza/arrivo; loft: condizione iniziale/finale)
+    TANGENCY = {"none": 0, "normal_to_profile": 1, "path_tangent": 1, "tangent": 1, "direction_vector": 2, "all_faces": 3}
+
+    def _tangency(self, value, what: str):
+        """-> (codice swTangencyType_e, errore). value: nome, bool (True = normal_to_profile) o None."""
+        if value is None or value is False:
+            return 0, None
+        if value is True:
+            return 1, None
+        key = str(value).lower()
+        if key not in self.TANGENCY:
+            return None, self._result(False, f"{what} sconosciuta: {value}. Valide: {sorted(self.TANGENCY)}",
+                                      SwErrors.swInvalidInput)
+        return self.TANGENCY[key], None
+
+    def _thin_args(self, thin_thickness, thin_thickness2, thin_type, unit):
+        """-> (is_thin, spessore1, spessore2, tipo swThinWallType_e, errore)."""
+        if thin_thickness is None or float(thin_thickness) <= 0:
+            return False, 0.0, 0.0, 0, None
+        tt = (thin_type or "one_direction").lower()
+        if tt not in THIN_TYPES:
+            return False, 0.0, 0.0, 0, self._result(False, f"thin_type sconosciuto: {thin_type}. Valide: {sorted(THIN_TYPES)}",
+                                                    SwErrors.swInvalidInput)
+        t2 = self._mmu(thin_thickness2, unit) if thin_thickness2 else 0.0
+        if tt == "two_directions" and t2 <= 0:
+            return False, 0.0, 0.0, 0, self._result(False, "thin_type=two_directions richiede thin_thickness2 > 0.",
+                                                    SwErrors.swInvalidInput)
+        return True, self._mmu(thin_thickness, unit), t2, THIN_TYPES[tt], None
+
     def sweep(self, profile_sketch: str = None, path_sketch: str = None, cut: bool = False,
               circular_diameter: float = None, twist_angle: float = 0, keep_normal: bool = True,
-              unit: str = None) -> Dict:
-        """Sweep (base o taglio): schizzo profilo + schizzo percorso; oppure solo percorso con
-        circular_diameter (profilo circolare)."""
+              unit: str = None, guide_sketches: list = None, thin_thickness: float = None,
+              thin_type: str = None, thin_thickness2: float = None, start_tangency=None, end_tangency=None,
+              merge: bool = True) -> Dict:
+        """Sweep (base o taglio): schizzo profilo + percorso; oppure solo percorso con circular_diameter (profilo
+        circolare). Il percorso e' uno schizzo (anche 3D) o QUALUNQUE feature curva (elica, curva composita, curva per punti).
+        guide_sketches = curve guida (nomi di schizzi/curve); thin_thickness (+ thin_type, thin_thickness2) = parete sottile;
+        start_tangency / end_tangency = none | path_tangent | all_faces; merge = unisci al corpo esistente (solo base)."""
         try:
             doc, err = self._part()
             if err:
@@ -443,6 +557,15 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             self._exit_sketch(doc)
             if not path_sketch:
                 return self._result(False, "path_sketch obbligatorio", SwErrors.swInvalidInput)
+            st, e1 = self._tangency(start_tangency, "start_tangency")
+            if e1:
+                return e1
+            et, e2 = self._tangency(end_tangency, "end_tangency")
+            if e2:
+                return e2
+            is_thin, thk1, thk2, thin_code, e3 = self._thin_args(thin_thickness, thin_thickness2, thin_type, unit)
+            if e3:
+                return e3
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
@@ -452,30 +575,55 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                     return self._result(False, f"Profilo '{profile_sketch}' non trovato", SwErrors.swSelectionError)
             if not self._select_feature(doc, path_sketch, not circ, 4):
                 return self._result(False, f"Percorso '{path_sketch}' non trovato", SwErrors.swSelectionError)
+            for g in (guide_sketches or []):
+                if not self._select_feature(doc, g, True, 2):
+                    return self._result(False, f"Guida '{g}' non trovata", SwErrors.swSelectionError)
             fm = doc.FeatureManager
             dia = self._mmu(circular_diameter or 0, unit)
             tw = 1 if twist_angle else 0     # 0 segui percorso, 1 = torsione
+            if guide_sketches:
+                tw = 2                       # segui percorso e prima guida (le guide scalano il profilo)
+            elif keep_normal:
+                tw = 0
             try:
                 if cut:
-                    feat = fm.InsertCutSwept5(False, 0, 0 if keep_normal else tw, False, False, 0, 0, False, 0.0, 0.0, 0, 0,
+                    feat = fm.InsertCutSwept5(False, 0, tw, False, False, st, et, is_thin, thk1, thk2, thin_code, 0,
                                               True, True, math.radians(twist_angle), True, False, False, False,
                                               circ, dia, 0)
                 else:
-                    feat = fm.InsertProtrusionSwept4(False, 0, 0 if keep_normal else tw, False, False, 0, 0, False,
-                                                     0.0, 0.0, 0, 0, True, True, True, math.radians(twist_angle), True,
+                    feat = fm.InsertProtrusionSwept4(False, 0, tw, False, False, st, et, is_thin, thk1, thk2, thin_code, 0,
+                                                     bool(merge), True, True, math.radians(twist_angle), True,
                                                      circ, dia, 0)
             except Exception as e:
                 return self._result(False, f"Sweep fallito: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
-            return self._finish(doc, "Sweep taglio" if cut else "Sweep", feat, v0, before,
-                                {"profile": profile_sketch, "path": path_sketch}, require_volume_change=True)
+            extra = {"profile": profile_sketch, "path": path_sketch, "guides": guide_sketches or []}
+            if is_thin:
+                extra.update({"thin_thickness": thin_thickness, "thin_type": (thin_type or "one_direction").lower()})
+            if st or et:
+                extra.update({"start_tangency": st, "end_tangency": et})
+            res = self._finish(doc, "Sweep taglio" if cut else "Sweep", feat, v0, before, extra,
+                               require_volume_change=True)
+            if res.get("success"):
+                res["data"].update(self._readback(doc, res["data"].get("feature"),
+                                                  {"start_tangency_readback": "StartTangencyType",
+                                                   "end_tangency_readback": "EndTangencyType",
+                                                   "guide_count": "GetGuideCurvesCount"}))
+            return res
         except Exception as e:
             logger.error(f"sweep: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     def loft(self, profile_sketches: list, guide_sketches: list = None, closed: bool = False,
-             cut: bool = False, start_tangency: bool = False) -> Dict:
-        """Loft fra 2 o piu' profili (schizzi in ordine) con guide opzionali."""
+             cut: bool = False, start_tangency: bool = False, start_condition=None, end_condition=None,
+             start_direction=None, end_direction=None, start_tangent_length: float = 1.0,
+             end_tangent_length: float = 1.0, thin_thickness: float = None, thin_type: str = None,
+             thin_thickness2: float = None, merge: bool = True, centerline_sketch: str = None,
+             unit: str = None, start_reverse: bool = False, end_reverse: bool = False) -> Dict:
+        """Loft fra 2 o piu' profili (schizzi in ordine) con guide opzionali, condizione iniziale/finale
+        (start_condition / end_condition = none | normal_to_profile | direction_vector con start_direction /
+        end_direction = riferimento {"edge"|"plane"|"axis"...} e lunghezza tangente), parete sottile, merge e curva
+        centrale (centerline_sketch)."""
         try:
             doc, err = self._part()
             if err:
@@ -483,6 +631,15 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             self._exit_sketch(doc)
             if not profile_sketches or len(profile_sketches) < 2:
                 return self._result(False, "Servono almeno 2 profili.", SwErrors.swInvalidInput)
+            sc, e1 = self._tangency(start_condition if start_condition is not None else start_tangency, "start_condition")
+            if e1:
+                return e1
+            ec, e2 = self._tangency(end_condition, "end_condition")
+            if e2:
+                return e2
+            is_thin, thk1, thk2, thin_code, e3 = self._thin_args(thin_thickness, thin_thickness2, thin_type, unit)
+            if e3:
+                return e3
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
@@ -492,31 +649,72 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             for n in (guide_sketches or []):
                 if not self._select_feature(doc, n, True, 2):
                     return self._result(False, f"Guida '{n}' non trovata", SwErrors.swSelectionError)
+            if centerline_sketch and not self._select_feature(doc, centerline_sketch, True, 4):
+                return self._result(False, f"Curva centrale '{centerline_sketch}' non trovata", SwErrors.swSelectionError)
+            for code, ref, what, mk in ((sc, start_direction, "start_direction", 8), (ec, end_direction, "end_direction", 16)):
+                if code == 2:
+                    ok, msg, _ = self._select_any(doc, ref, unit, True, mk)
+                    if not ok:
+                        return self._result(False, f"{what}: {msg}", SwErrors.swSelectionError)
             fm = doc.FeatureManager
             try:
                 if cut:
-                    feat = fm.InsertCutBlend(closed, False, False, 1.0, 0, 0, False, 0.0, 0.0, 0, True, True)
+                    feat = fm.InsertCutBlend(closed, False, False, 1.0, sc, ec, is_thin, thk1, thk2, thin_code, True, True)
                 else:
-                    feat = fm.InsertProtrusionBlend2(closed, False, False, 1.0, 0, 0, 0.0, 0.0, 0, 0, False, 0.0, 0.0, 0,
-                                                     True, True, True, 0)
+                    feat = fm.InsertProtrusionBlend2(closed, False, False, 1.0, sc, ec, float(start_tangent_length),
+                                                     float(end_tangent_length), bool(start_reverse), bool(end_reverse), is_thin, thk1, thk2, thin_code,
+                                                     bool(merge), True, True, 0)
             except Exception as e:
                 return self._result(False, f"Loft fallito: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
-            return self._finish(doc, "Loft taglio" if cut else "Loft", feat, v0, before,
-                                {"profiles": profile_sketches, "guides": guide_sketches or []},
-                                require_volume_change=True)
+            extra = {"profiles": profile_sketches, "guides": guide_sketches or [], "start_condition": sc, "end_condition": ec}
+            if centerline_sketch:
+                extra["centerline"] = centerline_sketch
+            if is_thin:
+                extra.update({"thin_thickness": thin_thickness, "thin_type": (thin_type or "one_direction").lower()})
+            res = self._finish(doc, "Loft taglio" if cut else "Loft", feat, v0, before, extra,
+                               require_volume_change=True)
+            if res.get("success"):
+                res["data"].update(self._readback(doc, res["data"].get("feature"),
+                                                  {"start_condition_readback": "StartTangencyType",
+                                                   "end_condition_readback": "EndTangencyType",
+                                                   "profile_count": "GetProfileCount",
+                                                   "guide_count": "GetGuideCurvesCount"}))
+            return res
         except Exception as e:
             logger.error(f"loft: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     # ------------------------------------------------------------------ shell / nervatura / sformo
-    def shell_body(self, thickness: float, remove_faces: list, outward: bool = False, unit: str = None) -> Dict:
-        """Shell: spessore e facce da rimuovere indicate da un punto su ciascuna faccia [[x,y,z],...]."""
+    def shell_body(self, thickness: float, remove_faces: list, outward: bool = False, unit: str = None,
+                   multi_thickness: list = None) -> Dict:
+        """Shell: spessore e facce da rimuovere indicate da un punto su ciascuna faccia [[x,y,z],...].
+        multi_thickness = [{"face":[x,y,z],"thickness":t}, ...]: facce PIANE (punto sulla faccia esterna del corpo di
+        partenza) con spessore diverso. IShellFeatureData.SetMultipleThicknessAtIndex non ha effetto in SW 2026 (late
+        binding: lo spessore resta 0 e la parete sparisce; provati CreateDefinition = None, indici 0/1/-1, tipi
+        VT_R8/VT_R4/BYREF, InsertFeatureShellAddThickness): lo spessore diverso si ottiene con lo shell uniforme
+        `thickness` + spostamento (InsertMoveFace3) della faccia interna della parete di (t_faccia - thickness)."""
         try:
             doc, err = self._part()
             if err:
                 return err
             self._exit_sketch(doc)
+            mt = list(multi_thickness or [])
+            if mt and outward:
+                return self._result(False, "multi_thickness non e' disponibile con outward=true.", SwErrors.swInvalidInput)
+            plan = []
+            for m in mt:
+                if not isinstance(m, dict) or "face" not in m or m.get("thickness") is None or float(m["thickness"]) <= 0:
+                    return self._result(False, "multi_thickness: lista di {\"face\":[x,y,z],\"thickness\":t > 0}.",
+                                        SwErrors.swInvalidInput)
+                p = [self._mmu(float(c), unit) for c in m["face"]]
+                ent, d = self._find_entity(doc, "face", p, 0.00005)
+                if ent is None:
+                    return self._result(False, f"multi_thickness: nessuna faccia nel punto {m['face']}.", SwErrors.swSelectionError)
+                if int(self._com(self._com(ent, "GetSurface"), "Identity")) != 4001:
+                    return self._result(False, f"multi_thickness: la faccia in {m['face']} non e' piana (solo facce piane).",
+                                        SwErrors.swInvalidInput)
+                plan.append((p, [float(c) for c in self._com(ent, "Normal")], float(m["thickness"]), m["face"]))
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
@@ -525,9 +723,43 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 return self._result(False, msg, SwErrors.swSelectionError)
             doc.InsertFeatureShell(self._mmu(thickness, unit), bool(outward))
             doc.ClearSelection2(True)
-            return self._finish(doc, "Shell", None, v0, before,
-                                {"thickness": thickness, "unit": self._unit_name(unit), "faces_removed": len(remove_faces or [])},
-                                require_volume_change=True)
+            res = self._finish(doc, "Shell", None, v0, before,
+                               {"thickness": thickness, "unit": self._unit_name(unit), "faces_removed": len(remove_faces or [])},
+                               require_volume_change=True)
+            if not res.get("success") or not plan:
+                return res
+            t0 = self._mmu(thickness, unit)
+            applied = []
+            for p, n, tf_user, pt in plan:
+                tf = self._mmu(tf_user, unit)
+                if abs(tf - t0) < 1e-9:
+                    applied.append({"face": pt, "thickness": tf_user})
+                    continue
+                q = [p[i] - n[i] * t0 for i in range(3)]          # faccia interna della parete
+                inner, _ = self._find_entity(doc, "face", q, 0.00005)
+                if inner is None:
+                    res["success"] = False
+                    res["message"] = f"Shell creato, ma la faccia interna della parete in {pt} non e' stata trovata."
+                    res["data"]["multi_thickness_applied"] = applied
+                    return res
+                area = float(self._com(inner, "GetArea"))
+                vb = self._volume_m3(doc)
+                r = self.move_faces([[self._from_m(c, unit) for c in q]], mode="offset",
+                                    distance=self._from_m(tf - t0, unit), unit=unit)
+                if not r.get("success"):
+                    res["success"] = False
+                    res["message"] = (f"Shell creato ma lo spessore {tf_user} sulla faccia {pt} non e' applicabile: "
+                                      f"{r.get('message')}")
+                    res["data"]["multi_thickness_applied"] = applied
+                    return res
+                applied.append({"face": pt, "thickness": tf_user,
+                                "volume_delta_mm3": round((self._volume_m3(doc) - vb) * 1e9, 3),
+                                "expected_delta_mm3": round(area * (tf - t0) * 1e9, 3)})
+            vol = self._volume_m3(doc)
+            res["data"].update({"multi_thickness_applied": applied, "volume_mm3": round(vol * 1e9, 3),
+                                "volume_delta_mm3": round((vol - v0) * 1e9, 3),
+                                "method": "shell uniforme + move_faces (SetMultipleThicknessAtIndex non funziona)"})
+            return res
         except Exception as e:
             logger.error(f"shell_body: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -740,33 +972,59 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.error(f"fillet_variable_radius: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
-    def chamfer_at_points(self, distance: float, edge_points: list, angle: float = 45.0,
-                          distance2: float = None, unit: str = None) -> Dict:
-        """Smusso sugli spigoli indicati da un punto sullo spigolo. distance + angle (default 45) oppure
-        distance + distance2."""
+    def chamfer_at_points(self, distance: float = None, edge_points: list = None, angle: float = 45.0,
+                          distance2: float = None, unit: str = None, vertex_point: list = None,
+                          vertex_distances: list = None, equal_distance: bool = False) -> Dict:
+        """Smusso sugli spigoli indicati da un punto sullo spigolo: distance + angle (default 45), distance + distance2,
+        oppure equal_distance=True (stessa distanza sui due lati). Smusso a VERTICE: vertex_point (punto SUL vertice) +
+        vertex_distances [d1,d2,d3] (distanze lungo i tre spigoli; se manca, tre volte `distance`)."""
         try:
             doc, err = self._part()
             if err:
                 return err
             self._exit_sketch(doc)
+            vertex_mode = vertex_point is not None
+            if not vertex_mode and (distance is None or not edge_points):
+                return self._result(False, "Servono distance + edge_points (smusso di spigoli) oppure vertex_point + "
+                                    "vertex_distances (smusso a vertice).", SwErrors.swInvalidInput)
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
+            fm = doc.FeatureManager
+            if vertex_mode:
+                vd = list(vertex_distances) if vertex_distances else ([distance] * 3 if distance else None)
+                if not vd or len(vd) != 3 or min(vd) <= 0:
+                    return self._result(False, "vertex_distances deve essere [d1,d2,d3] con valori > 0.", SwErrors.swInvalidInput)
+                ok, info = self._select_point(doc, "vertex", vertex_point, unit, False, 0)
+                if not ok:
+                    return self._result(False, info.get("error", "vertice non trovato"), SwErrors.swSelectionError)
+                try:
+                    feat = fm.InsertFeatureChamfer(0, 3, 0.0, 0.0, 0.0, self._mmu(vd[0], unit), self._mmu(vd[1], unit),
+                                                   self._mmu(vd[2], unit))
+                except Exception as e:
+                    return self._result(False, f"Smusso a vertice fallito: {e}", SwErrors.swFeatureError)
+                doc.ClearSelection2(True)
+                return self._finish(doc, "Smusso a vertice", feat, v0, before,
+                                    {"vertex_distances": vd, "unit": self._unit_name(unit), "mode": "vertex"},
+                                    require_volume_change=True)
             ok, msg = self._select_points(doc, "edge", edge_points or [], unit)
             if not ok:
                 return self._result(False, msg, SwErrors.swSelectionError)
-            fm = doc.FeatureManager
             d1 = self._mmu(distance, unit)
+            mode = "distance_distance" if distance2 else ("equal_distance" if equal_distance else "distance_angle")
             try:
                 if distance2:
                     feat = fm.InsertFeatureChamfer(0, 2, d1, 0.0, self._mmu(distance2, unit), 0.0, 0.0, 0.0)
+                elif equal_distance:
+                    # il tipo 16 (EqualDistance) crea una feature che non scava (misurato): distanza-distanza con d1 = d2
+                    feat = fm.InsertFeatureChamfer(0, 2, d1, 0.0, d1, 0.0, 0.0, 0.0)
                 else:
                     feat = fm.InsertFeatureChamfer(0, 1, d1, math.radians(angle), 0.0, 0.0, 0.0, 0.0)
             except Exception as e:
                 return self._result(False, f"Smusso fallito: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
             return self._finish(doc, "Smusso", feat, v0, before,
-                                {"distance": distance, "angle": angle, "distance2": distance2,
+                                {"distance": distance, "angle": angle, "distance2": distance2, "mode": mode,
                                  "unit": self._unit_name(unit), "edges": len(edge_points or [])},
                                 require_volume_change=True)
         except Exception as e:
@@ -803,6 +1061,20 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         except Exception:
             return 0.0
 
+    def _select_bodies(self, doc, points, unit, mark: int, append: bool = False):
+        """Seleziona i corpi indicati da un punto SU una loro faccia ([[x,y,z],...]). -> (ok, errore, numero di corpi)."""
+        seen = []
+        for i, pt in enumerate(points or []):
+            body = self._body_of_point(doc, pt, unit)
+            if body is None:
+                return False, f"Nessun corpo ha una faccia nel punto {list(pt)} (punto SU una faccia del corpo).", 0
+            if any(self._com(body, "Name") == self._com(b, "Name") for b in seen):
+                continue
+            if not body.Select2(append or bool(seen), self._sd(doc, mark)):
+                return False, f"Corpo in {list(pt)} non selezionabile (mark {mark}).", 0
+            seen.append(body)
+        return True, None, len(seen)
+
     def _pattern_ok(self, doc, v0: float, seed: float, n_instances: int) -> bool:
         """True se il volume e' cambiato come atteso per n_instances-1 copie (tolleranza 1%)."""
         if abs(seed) < 1e-15 or n_instances <= 1:
@@ -811,17 +1083,26 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         expected = seed * (n_instances - 1)
         return abs(delta_cut - expected) <= 0.01 * abs(expected) + 1e-15
 
-    def linear_pattern(self, features: list, direction1, count1: int, spacing1: float,
+    def linear_pattern(self, features: list = None, direction1=None, count1: int = 2, spacing1: float = 10,
                        direction2=None, count2: int = 1, spacing2: float = 0, reverse1: bool = False,
-                       reverse2: bool = False, geometry_pattern: bool = False, unit: str = None) -> Dict:
-        """Ripetizione lineare di feature (nomi) in 1 o 2 direzioni. direction = {"edge":[x,y,z]} (spigolo
-        parallelo alla direzione) oppure {"face":[x,y,z]} (faccia piana: direzione = normale) oppure nome di asse."""
+                       reverse2: bool = False, geometry_pattern: bool = False, unit: str = None,
+                       bodies: list = None) -> Dict:
+        """Ripetizione lineare di feature (nomi) e/o di CORPI (`bodies` = [[x,y,z],...], un punto SU una faccia di ciascun
+        corpo) in 1 o 2 direzioni. direction = {"edge":[x,y,z]} (spigolo parallelo alla direzione) oppure
+        {"face":[x,y,z]} (faccia piana: direzione = normale) oppure nome di asse."""
         try:
             doc, err = self._part()
             if err:
                 return err
             self._exit_sketch(doc)
+            if not features and not bodies:
+                return self._result(False, "Servono features (nomi) e/o bodies (punti su una faccia dei corpi).",
+                                    SwErrors.swInvalidInput)
+            if direction1 is None:
+                return self._result(False, "direction1 obbligatoria.", SwErrors.swInvalidInput)
+            features = features or []
             v0 = self._volume_m3(doc)
+            n_bodies0 = len(self._bodies(doc))
             before = self._names(doc)
             two = direction2 is not None and count2 and count2 > 1
             combos = [(bool(reverse1), bool(reverse2))]
@@ -831,13 +1112,18 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             feat = None
             used = None
             fm = doc.FeatureManager
-            seed = 0.0 if geometry_pattern else self._seed_effect(doc, features)
+            seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
             n_tot = int(count1) * (int(count2) if two else 1)
+            n_sel = 0
             for (r1, r2) in combos:
                 doc.ClearSelection2(True)
                 e = self._select_features_mark(doc, features, 4)
                 if e:
                     return self._result(False, e, SwErrors.swSelectionError)
+                if bodies:
+                    okb, eb, n_sel = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
+                    if not okb:
+                        return self._result(False, eb, SwErrors.swSelectionError)
                 ok, msg = self._select_edge_or_axis(doc, direction1, unit, mark=1, append=True)
                 if not ok:
                     return self._result(False, f"Direzione 1: {msg}", SwErrors.swSelectionError)
@@ -853,7 +1139,11 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 except Exception as ex:
                     return self._result(False, f"Ripetizione lineare fallita: {ex}", SwErrors.swFeatureError)
                 if feat is not None or self._new_features(doc, before):
-                    if self._pattern_ok(doc, v0, seed, n_tot):
+                    if bodies and not features:
+                        ok_inst = len(self._bodies(doc)) > n_bodies0
+                    else:
+                        ok_inst = self._pattern_ok(doc, v0, seed, n_tot)
+                    if ok_inst:
                         used = (r1, r2)
                         break
                     # istanze mancanti (direzione sbagliata): elimina e riprova con le direzioni invertite
@@ -865,31 +1155,48 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 return self._result(False, "Ripetizione lineare fallita (anche invertendo le direzioni): le istanze "
                                     "devono cadere sul corpo e non sovrapporsi.", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
-            return self._finish(doc, "Ripetizione lineare", feat, v0, before,
-                                {"count1": count1, "spacing1": spacing1, "count2": count2 if two else 1,
-                                 "spacing2": spacing2 if two else 0, "unit": self._unit_name(unit),
-                                 "reversed": {"dir1": used[0], "dir2": used[1]}})
+            extra = {"count1": count1, "spacing1": spacing1, "count2": count2 if two else 1,
+                     "spacing2": spacing2 if two else 0, "unit": self._unit_name(unit),
+                     "reversed": {"dir1": used[0], "dir2": used[1]}}
+            if bodies:
+                nb = len(self._bodies(doc))
+                extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
+                              "bodies_expected_if_separate": n_bodies0 + (n_tot - 1) * n_sel})
+            return self._finish(doc, "Ripetizione lineare", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"linear_pattern: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
-    def circular_pattern(self, features: list, axis, count: int, angle: float = 360.0,
+    def circular_pattern(self, features: list = None, axis=None, count: int = 2, angle: float = 360.0,
                          equal_spacing: bool = True, reverse: bool = False, geometry_pattern: bool = False,
-                         unit: str = None) -> Dict:
-        """Ripetizione circolare attorno a un asse: {"edge":[x,y,z]} (spigolo circolare/lineare), {"face":[x,y,z]}
+                         unit: str = None, bodies: list = None) -> Dict:
+        """Ripetizione circolare di feature (nomi) e/o di CORPI (`bodies` = [[x,y,z],...], un punto SU una faccia di ciascun
+        corpo) attorno a un asse: {"edge":[x,y,z]} (spigolo circolare/lineare), {"face":[x,y,z]}
         (faccia cilindrica), nome di asse di riferimento ("Asse1") o asse temporaneo."""
         try:
             doc, err = self._part()
             if err:
                 return err
             self._exit_sketch(doc)
+            if not features and not bodies:
+                return self._result(False, "Servono features (nomi) e/o bodies (punti su una faccia dei corpi).",
+                                    SwErrors.swInvalidInput)
+            if axis is None:
+                return self._result(False, "axis obbligatorio.", SwErrors.swInvalidInput)
+            features = features or []
             v0 = self._volume_m3(doc)
+            n_bodies0 = len(self._bodies(doc))
             before = self._names(doc)
             doc.ClearSelection2(True)
-            seed = 0.0 if geometry_pattern else self._seed_effect(doc, features)
+            seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
             e = self._select_features_mark(doc, features, 4)
             if e:
                 return self._result(False, e, SwErrors.swSelectionError)
+            n_sel = 0
+            if bodies:
+                okb, eb, n_sel = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
+                if not okb:
+                    return self._result(False, eb, SwErrors.swSelectionError)
             ok, msg = self._select_edge_or_axis(doc, axis, unit, mark=1, append=True)
             if not ok:
                 return self._result(False, f"Asse: {msg}", SwErrors.swSelectionError)
@@ -904,16 +1211,25 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if seed and not self._pattern_ok(doc, v0, seed, int(count)):
                 return self._result(False, f"Ripetizione circolare: il volume non corrisponde a {count} istanze "
                                     "(alcune cadono fuori dal corpo?).", SwErrors.swFeatureError)
-            return self._finish(doc, "Ripetizione circolare", feat, v0, before,
-                                {"count": count, "angle": angle, "equal_spacing": equal_spacing})
+            extra = {"count": count, "angle": angle, "equal_spacing": equal_spacing}
+            if bodies:
+                nb = len(self._bodies(doc))
+                extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
+                              "bodies_expected_if_separate": n_bodies0 + (int(count) - 1) * n_sel})
+                if nb <= n_bodies0 and not features:
+                    return self._result(False, "Ripetizione di corpi: il numero di corpi non e' aumentato (istanze fuse o "
+                                        "fuori posto?).", SwErrors.swFeatureError, extra)
+            return self._finish(doc, "Ripetizione circolare", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"circular_pattern: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     def mirror_feature(self, features: list = None, plane=None, mirror_body: bool = False,
-                       merge: bool = True, geometry_pattern: bool = False, unit: str = None) -> Dict:
-        """Specchia feature (nomi) oppure l'intero corpo (mirror_body=True) rispetto a un piano di riferimento
-        (nome, es. 'Piano destro') o a una faccia piana ({"face":[x,y,z]})."""
+                       merge: bool = True, geometry_pattern: bool = False, unit: str = None,
+                       bodies: list = None) -> Dict:
+        """Specchia feature (nomi), l'intero primo corpo (mirror_body=True) oppure i CORPI scelti (`bodies` = [[x,y,z],...],
+        un punto SU una faccia di ciascun corpo) rispetto a un piano di riferimento (nome, es. 'Piano destro') o a una
+        faccia piana ({"face":[x,y,z]})."""
         try:
             doc, err = self._part()
             if err:
@@ -925,11 +1241,17 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             ok, msg = self._select_edge_or_axis(doc, plane, unit, mark=2, append=False)
             if not ok:
                 return self._result(False, f"Piano di specchiatura: {msg}", SwErrors.swSelectionError)
-            if mirror_body:
-                bodies = self._bodies(doc)
-                if not bodies:
+            n_bodies0 = len(self._bodies(doc))
+            if bodies:
+                mirror_body = True
+                okb, eb, _ = self._select_bodies(doc, bodies, unit, 256, append=True)
+                if not okb:
+                    return self._result(False, eb, SwErrors.swSelectionError)
+            elif mirror_body:
+                bl = self._bodies(doc)
+                if not bl:
                     return self._result(False, "Nessun corpo da specchiare", SwErrors.swFeatureError)
-                bodies[0].Select2(True, self._sd(doc, 256))   # corpi da specchiare: Mark 256 (non 1)
+                bl[0].Select2(True, self._sd(doc, 256))   # corpi da specchiare: Mark 256 (non 1)
             else:
                 e = self._select_features_mark(doc, features or [], 1, append=True)
                 if e:
@@ -940,8 +1262,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             except Exception as ex:
                 return self._result(False, f"Specchiatura fallita: {ex}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
-            return self._finish(doc, "Specchiatura", feat, v0, before,
-                                {"features": features or [], "mirror_body": mirror_body})
+            extra = {"features": features or [], "mirror_body": mirror_body}
+            if bodies:
+                extra.update({"bodies_before": n_bodies0, "bodies_after": len(self._bodies(doc)), "merge": bool(merge)})
+            return self._finish(doc, "Specchiatura", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"mirror_feature: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
@@ -1577,10 +1901,26 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.error(f"create_reference_point: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
+    def _cs_result(self, doc, feat, before, unit, extra: Dict) -> Dict:
+        """Esito di un sistema di coordinate: feature + origine e assi riletti dall'API."""
+        new = self._new_features(doc, before)
+        fname = (self._com(feat, "Name") if feat is not None else None) or (new[0]["name"] if new else None)
+        try:
+            t = list(doc.Extension.GetCoordinateSystemTransformByName(fname).ArrayData)
+            extra.update({"origin": [round(self._from_m(v, unit), 4) for v in t[9:12]],
+                          "x_axis": [round(v, 6) for v in t[0:3]], "y_axis": [round(v, 6) for v in t[3:6]],
+                          "z_axis": [round(v, 6) for v in t[6:9]], "pose_unit": self._unit_name(unit)})
+        except Exception as ex:
+            logger.debug(f"coordinate system pose: {ex}")
+        return self._finish(doc, "Sistema di coordinate", feat, self._volume_m3(doc), before, extra)
+
     def create_coordinate_system(self, origin_point: list = None, x_edge_point: list = None,
                                  y_edge_point: list = None, z_edge_point: list = None, unit: str = None,
-                                 x_flip: bool = False, y_flip: bool = False, z_flip: bool = False) -> Dict:
+                                 x_flip: bool = False, y_flip: bool = False, z_flip: bool = False,
+                                 origin: list = None, rotation: list = None) -> Dict:
         """Sistema di coordinate: origine = vertice (origin_point), assi X/Y/Z = spigoli (punti su di essi).
+        Modo NUMERICO: origin [x,y,z] (`unit`, rispetto all'origine del modello) e/o rotation [rx,ry,rz] (gradi, attorno
+        a X, Y, Z) con CreateCoordinateSystemUsingNumericalValues.
         x_flip/y_flip/z_flip invertono il verso dell'asse (il verso di partenza e' quello dello spigolo).
         Il risultato riporta origine e assi letti dall'API (origin, x_axis, y_axis, z_axis)."""
         try:
@@ -1590,6 +1930,24 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             self._exit_sketch(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
+            numeric = origin is not None or rotation is not None
+            if numeric:
+                if (origin is not None and len(origin) != 3) or (rotation is not None and len(rotation) != 3):
+                    return self._result(False, "origin e rotation devono avere 3 valori ([x,y,z], [rx,ry,rz] gradi).",
+                                        SwErrors.swInvalidInput)
+                if origin_point or x_edge_point or y_edge_point or z_edge_point:
+                    return self._result(False, "Modo numerico (origin/rotation) e modo per selezione (origin_point, "
+                                        "*_edge_point) non si combinano.", SwErrors.swInvalidInput)
+                o = [self._mmu(float(c), unit) for c in (origin or [0, 0, 0])]
+                r = [math.radians(float(c)) for c in (rotation or [0, 0, 0])]
+                try:
+                    feat = doc.FeatureManager.CreateCoordinateSystemUsingNumericalValues(
+                        origin is not None, o[0], o[1], o[2], rotation is not None, r[0], r[1], r[2])
+                except Exception as ex:
+                    return self._result(False, f"Sistema di coordinate numerico fallito: {ex}", SwErrors.swFeatureError)
+                extra = {"mode": "numeric", "requested_origin": list(origin) if origin is not None else None,
+                         "requested_rotation_deg": list(rotation) if rotation is not None else None}
+                return self._cs_result(doc, feat, before, unit, extra)
             first = True
             if origin_point:
                 ok, info = self._select_point(doc, "vertex", origin_point, unit, False, 1)
@@ -1608,17 +1966,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             except Exception as ex:
                 return self._result(False, f"Sistema di coordinate fallito: {ex}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
-            extra = {}
-            new = self._new_features(doc, before)
-            fname = (self._com(feat, "Name") if feat is not None else None) or (new[0]["name"] if new else None)
-            try:
-                t = list(doc.Extension.GetCoordinateSystemTransformByName(fname).ArrayData)
-                extra = {"origin": [round(self._from_m(v, unit), 4) for v in t[9:12]],
-                         "x_axis": [round(v, 6) for v in t[0:3]], "y_axis": [round(v, 6) for v in t[3:6]],
-                         "z_axis": [round(v, 6) for v in t[6:9]], "pose_unit": self._unit_name(unit)}
-            except Exception as ex:
-                logger.debug(f"coordinate system pose: {ex}")
-            return self._finish(doc, "Sistema di coordinate", feat, self._volume_m3(doc), before, extra)
+            return self._cs_result(doc, feat, before, unit, {})
         except Exception as e:
             logger.error(f"create_coordinate_system: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)

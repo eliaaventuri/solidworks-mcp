@@ -24,10 +24,19 @@ _ENT2 = (None, "Sketch entity (as entity1), or an external one for add_sketch_re
               "{\"axis\":name} | {\"sketch\":name,\"entity\":id}")
 _PT3 = (A, "Point [x,y,z] (`unit`) ON the entity")
 _PTS3 = (A, "Points [[x,y,z],...] (`unit`), one ON each entity")
+_BODIES = (A, "Bodies to repeat/mirror: points [[x,y,z],...] (`unit`), one ON a face of each body (instead of features)")
 _DIR = (None, "{\"edge\":[x,y,z]} | {\"face\":[x,y,z]} | {\"plane\":name} | {\"axis\":name} | name")
 _AXIS = (None, "Revolve axis: sketch segment id | reference axis name or {\"axis\":name} | {\"edge\":[x,y,z]} | "
                "{\"sketch\":name,\"entity\":id}")
-_EC = "blind | through_all | through_all_both | mid_plane | up_to_next | up_to_surface | offset_from_surface"
+_EC = ("blind | through_all | through_all_both | mid_plane | up_to_next | up_to_surface | offset_from_surface | "
+       "up_to_vertex (needs up_to_vertex_point) | up_to_body (up_to_face_point = a point on a face of the target body)")
+_THIN = {"thin_thickness": (N, "Thin-wall thickness (`unit`): makes a thin feature from the profile"),
+         "thin_type": (S, "one_direction (default: outside of a closed profile) | opposite_direction (inside) | mid_plane | "
+                          "two_directions (thin_thickness outside + thin_thickness2 inside)"),
+         "thin_thickness2": (N, "Second wall thickness (`unit`) for thin_type=two_directions"),
+         "cap_ends": (B, "Thin feature: close both ends of a closed profile with a cap"),
+         "cap_thickness": (N, "Cap thickness (`unit`, default = thin_thickness)"),
+         "up_to_vertex_point": (A, "Point [x,y,z] (`unit`) ON the stop vertex, for end_condition=up_to_vertex")}
 
 _TOOLS = {
     # ---------------------------------------------------------------- sketches: dimensions, relations, status
@@ -111,13 +120,24 @@ _TOOLS = {
     "draw_spline": ("draw_spline", "Draw a spline through points (at least 2).",
         {"points": (A, "Points [[x,y],...] (`unit`)"), "unit": _UNIT, "closed": (B, "Close the spline")},
         ["points"]),
-    "draw_slot": ("draw_slot", "Draw a straight slot.",
-        {"x1": (N, "X of end 1 (`unit`): arc center, or outer end if overall"),
+    "draw_slot": ("draw_slot",
+        "Draw a slot: straight (center_to_center | overall) or along an ARC (arc_center | arc_3point). Arc slot area = "
+        "width * centerline arc length + pi*(width/2)^2. "
+        "Examples: {\"slot_type\":\"arc_center\",\"cx\":0,\"cy\":0,\"radius\":20,\"start_angle\":0,\"end_angle\":90,\"width\":4}; "
+        "{\"slot_type\":\"arc_3point\",\"x1\":20,\"y1\":0,\"x2\":0,\"y2\":20,\"x3\":14.142,\"y3\":14.142,\"width\":4}.",
+        {"x1": (N, "X of end 1 (`unit`): end-cap center, or outer end if overall; arc_3point: start-cap center"),
          "y1": (N, "Y of end 1 (`unit`)"),
-         "x2": (N, "X of end 2 (`unit`)"), "y2": (N, "Y of end 2 (`unit`)"),
+         "x2": (N, "X of end 2 (`unit`); arc_3point: end-cap center"), "y2": (N, "Y of end 2 (`unit`)"),
          "width": (N, "Slot width (`unit`)"), "unit": _UNIT,
-         "slot_type": (S, "center_to_center (default) | overall")},
-        ["x1", "y1", "x2", "y2", "width"]),
+         "slot_type": (S, "center_to_center (default) | overall | arc_center | arc_3point"),
+         "cx": (N, "arc_center: arc center X (`unit`)"), "cy": (N, "arc_center: arc center Y (`unit`)"),
+         "radius": (N, "arc_center: radius of the centerline arc (`unit`)"),
+         "start_angle": (N, "arc_center: start angle in degrees (from +X)"),
+         "end_angle": (N, "arc_center: end angle in degrees (counter-clockwise from start unless clockwise)"),
+         "clockwise": (B, "arc_center: go clockwise from start to end angle (default false)"),
+         "x3": (N, "arc_3point: X of a point on the centerline arc (`unit`)"),
+         "y3": (N, "arc_3point: Y of a point on the centerline arc (`unit`)")},
+        ["width"]),
     "draw_ellipse": ("draw_ellipse", "Draw an ellipse.",
         {"cx": (N, "Center X (`unit`)"), "cy": (N, "Center Y (`unit`)"),
          "semi_major": (N, "Semi-major axis (`unit`)"),
@@ -158,8 +178,10 @@ _TOOLS = {
         "starts: sketch_plane (default) | offset (start_offset from the sketch plane, positive along the sketch normal) "
         "| surface (start_ref {\"face\":[x,y,z]}, a point ON a face) | vertex (start_ref {\"vertex\":[x,y,z]}); the "
         "extrusion keeps its direction and starts on the plane parallel to the sketch through that face/vertex. "
+        "Thin wall: thin_thickness (+ thin_type, thin_thickness2, cap_ends, cap_thickness), e.g. a tube from a circle. "
         "Example: {\"sketch\":\"Sketch1\",\"depth\":20,\"end_condition\":\"blind\"}; "
-        "{\"depth\":10,\"start_from\":\"surface\",\"start_ref\":{\"face\":[10,20,25]}}.",
+        "{\"depth\":10,\"start_from\":\"surface\",\"start_ref\":{\"face\":[10,20,25]}}; "
+        "tube: {\"depth\":20,\"thin_thickness\":2}; stop at a vertex: {\"end_condition\":\"up_to_vertex\",\"up_to_vertex_point\":[20,20,25]}.",
         {"sketch": _SK, "depth": (N, "Depth (`unit`, default 10)"), "end_condition": (S, _EC),
          "depth2": (N, "Depth, direction 2 (`unit`)"),
          "end_condition2": (S, "End condition, direction 2 (as end_condition)"),
@@ -168,8 +190,10 @@ _TOOLS = {
          "reverse": (B, "Reverse the direction"), "merge": (B, "Merge with the existing body (default true)"),
          "start_offset": (N, "Start plane offset from sketch (`unit`), used with start_from=offset (or alone)"), "unit": _UNIT,
          "start_from": (S, "sketch_plane (default) | offset | surface | vertex"),
-         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)")}, []),
-    "extrude_cut": ("extrude_cut", "Extruded cut (same options as extrude_boss, including start_from/start_ref).",
+         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)"),
+         **_THIN}, []),
+    "extrude_cut": ("extrude_cut", "Extruded cut (same options as extrude_boss, including start_from/start_ref, thin wall, "
+                                   "up_to_vertex and up_to_body).",
         {"sketch": _SK, "depth": (N, "Depth (`unit`, default 10)"), "end_condition": (S, "As in extrude_boss"),
          "depth2": (N, "Depth, direction 2 (`unit`)"),
          "end_condition2": (S, "End condition, direction 2"),
@@ -178,7 +202,8 @@ _TOOLS = {
          "reverse": (B, "Cut on the other side"),
          "start_offset": (N, "Start plane offset (`unit`)"), "unit": _UNIT,
          "start_from": (S, "sketch_plane (default) | offset | surface | vertex"),
-         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)")}, []),
+         "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)"),
+         **_THIN}, []),
     "revolve_boss": ("revolve_boss",
         "Revolve about the sketch centerline (or `axis`). thin_thickness makes a thin-wall feature. `axis` can be the id of "
         "a sketch segment, the name of a reference axis (e.g. \"Axis1\" or {\"axis\":\"Axis1\"}), a straight model edge "
@@ -191,20 +216,61 @@ _TOOLS = {
         {"sketch": _SK, "angle": (N, "Revolve angle in degrees (default 360)"),
          "axis": _AXIS, "both_directions": (B, "Revolve in both directions"),
          "unit": _UNIT}, []),
-    "sweep": ("sweep", "Sweep (boss or cut): profile + path sketches, or path only with circular_diameter.",
-        {"profile_sketch": (S, "Profile sketch name"), "path_sketch": (S, "Path sketch name"),
+    "sweep": ("sweep",
+        "Sweep (boss or cut): profile sketch + path, or path only with circular_diameter. The path can be a sketch (also 3D) "
+        "or ANY curve feature (helix, composite curve, curve through points): pass its feature name as path_sketch. "
+        "guide_sketches: guide curves that scale/steer the profile (the profile must touch them). thin_thickness makes a "
+        "thin wall (thin_type, thin_thickness2). start_tangency/end_tangency: none | path_tangent | all_faces. "
+        "Examples: spring {\"path_sketch\":\"Helix/Spiral1\",\"circular_diameter\":2}; with a guide "
+        "{\"profile_sketch\":\"Sketch2\",\"path_sketch\":\"Sketch1\",\"guide_sketches\":[\"Sketch3\"]}; "
+        "thin tube {\"profile_sketch\":\"Sketch2\",\"path_sketch\":\"Sketch1\",\"thin_thickness\":1}.",
+        {"profile_sketch": (S, "Profile sketch name"),
+         "path_sketch": (S, "Path: sketch name or name of any curve feature (e.g. a helix)"),
          "cut": (B, "Cut, not boss"),
          "circular_diameter": (N, "Circular profile diameter (`unit`), replaces profile_sketch"),
          "twist_angle": (N, "Twist along the path in degrees (default 0)"),
-         "keep_normal": (B, "Keep profile normal to path (default true)"), "unit": _UNIT}, ["path_sketch"]),
-    "loft": ("loft", "Loft between 2+ profile sketches with optional guides.",
+         "keep_normal": (B, "Keep profile normal to path (default true)"), "unit": _UNIT,
+         "guide_sketches": (A, "Guide curve names (sketches or curve features), e.g. [\"Sketch3\"]"),
+         "thin_thickness": (N, "Thin-wall thickness (`unit`)"),
+         "thin_type": (S, "one_direction (default) | opposite_direction | mid_plane | two_directions"),
+         "thin_thickness2": (N, "Second wall thickness (`unit`) for thin_type=two_directions"),
+         "start_tangency": (S, "Start condition: none (default) | path_tangent | all_faces"),
+         "end_tangency": (S, "End condition: none (default) | path_tangent | all_faces"),
+         "merge": (B, "Merge with the existing body (default true; boss only)")}, ["path_sketch"]),
+    "loft": ("loft",
+        "Loft between 2+ profile sketches with optional guide curves and centerline. start_condition / end_condition: "
+        "none (default) | normal_to_profile | direction_vector (then start_direction / end_direction = reference such as "
+        "{\"edge\":[x,y,z]}, {\"plane\":name}, {\"axis\":name}); start_tangent_length / end_tangent_length scale the tangent. "
+        "thin_thickness makes a thin wall. Example: {\"profile_sketches\":[\"Sketch1\",\"Sketch2\"],"
+        "\"start_condition\":\"normal_to_profile\",\"end_condition\":\"normal_to_profile\"}.",
         {"profile_sketches": (A, "Profile sketch names, in order"), "guide_sketches": (A, "Guide curve sketch names"),
          "closed": (B, "Close loft to first profile"), "cut": (B, "Cut, not boss"),
-         "start_tangency": (B, "Tangent start condition")}, ["profile_sketches"]),
-    "shell_body": ("shell_body", "Shell the body: thickness + faces to remove (by coordinates).",
-        {"thickness": (N, "Wall thickness (`unit`)"),
+         "start_tangency": (B, "Legacy: true = start_condition normal_to_profile"),
+         "start_condition": (S, "Start condition: none (default) | normal_to_profile | direction_vector"),
+         "end_condition": (S, "End condition: none (default) | normal_to_profile | direction_vector"),
+         "start_direction": (None, "Reference for start_condition=direction_vector: {\"edge\":[x,y,z]} | {\"plane\":name} | {\"axis\":name}"),
+         "end_direction": (None, "Reference for end_condition=direction_vector (as start_direction)"),
+         "start_reverse": (B, "Reverse the start tangent direction (default false)"),
+         "end_reverse": (B, "Reverse the end tangent direction (default false)"),
+         "start_tangent_length": (N, "Start tangent length (ratio, default 1)"),
+         "end_tangent_length": (N, "End tangent length (ratio, default 1)"),
+         "thin_thickness": (N, "Thin-wall thickness (`unit`)"),
+         "thin_type": (S, "one_direction (default) | opposite_direction | mid_plane | two_directions"),
+         "thin_thickness2": (N, "Second wall thickness (`unit`) for thin_type=two_directions"),
+         "merge": (B, "Merge with the existing body (default true; boss only)"),
+         "centerline_sketch": (S, "Centerline curve (sketch or curve feature name) that steers the profiles"),
+         "unit": _UNIT}, ["profile_sketches"]),
+    "shell_body": ("shell_body",
+        "Shell the body: thickness + faces to remove (by coordinates). multi_thickness gives PLANAR walls a different "
+        "thickness: list of {\"face\":[x,y,z],\"thickness\":t} where the point is ON the outer face of the original body. "
+        "(SolidWorks ignores the per-face thickness of the API, so it is built as a uniform shell plus a face move of the "
+        "inner wall face; the result lists multi_thickness_applied with measured and expected volume change.) "
+        "Example: {\"thickness\":2,\"remove_faces\":[[0,0,30]],\"multi_thickness\":[{\"face\":[20,0,15],\"thickness\":5}]}.",
+        {"thickness": (N, "Wall thickness (`unit`), used for all walls not listed in multi_thickness"),
          "remove_faces": (A, "Points [[x,y,z],...] (`unit`), one ON each face to remove"),
-         "outward": (B, "Thicken outward instead of inward"), "unit": _UNIT}, ["thickness", "remove_faces"]),
+         "outward": (B, "Thicken outward instead of inward"), "unit": _UNIT,
+         "multi_thickness": (A, "Walls with a different thickness: [{\"face\":[x,y,z],\"thickness\":t}] (`unit`, point ON the outer planar face)")},
+        ["thickness", "remove_faces"]),
     "rib": ("rib", "Rib from a sketch with an open line touching the walls (material side automatic).",
         {"sketch": _SK, "thickness": (N, "Rib thickness (`unit`, default 3)"),
          "both_sides": (B, "Symmetric about the sketch (default true)"),
@@ -235,34 +301,50 @@ _TOOLS = {
         {"edge_point": _PT3, "radius_start": (N, "Radius at the edge start (`unit`)"),
          "radius_end": (N, "Radius at the edge end (`unit`)"), "unit": _UNIT},
         ["edge_point", "radius_start", "radius_end"]),
-    "chamfer_at_points": ("chamfer_at_points", "Chamfer edges picked by coordinates: distance+angle or distance+distance2.",
-        {"distance": (N, "Chamfer distance (`unit`)"), "edge_points": _PTS3,
+    "chamfer_at_points": ("chamfer_at_points",
+        "Chamfer edges picked by coordinates: distance+angle, distance+distance2, or equal_distance (same distance on both "
+        "sides). VERTEX chamfer: vertex_point (a point ON the vertex) + vertex_distances [d1,d2,d3] along the three edges "
+        "(removed volume of a right-angle corner = d1*d2*d3/6). "
+        "Examples: {\"distance\":2,\"edge_points\":[[10,0,5]]}; {\"vertex_point\":[20,40,30],\"vertex_distances\":[3,4,5]}.",
+        {"distance": (N, "Chamfer distance (`unit`); in vertex mode used three times if vertex_distances is missing"),
+         "edge_points": _PTS3,
          "angle": (N, "Angle in degrees (default 45)"),
-         "distance2": (N, "Second distance (`unit`); replaces angle"), "unit": _UNIT},
-        ["distance", "edge_points"]),
+         "distance2": (N, "Second distance (`unit`); replaces angle"),
+         "equal_distance": (B, "Equal distance on both sides (instead of distance+angle)"),
+         "vertex_point": (A, "Vertex chamfer: point [x,y,z] (`unit`) ON the vertex"),
+         "vertex_distances": (A, "Vertex chamfer: [d1,d2,d3] (`unit`), distances along the three edges"),
+         "unit": _UNIT}, []),
     # ---------------------------------------------------------------- patterns and mirrors
     "linear_pattern": ("linear_pattern",
-        "Linear pattern of features (by name) in 1 or 2 directions; direction = {\"edge\":[x,y,z]} (parallel to edge) | "
-        "{\"face\":[x,y,z]} (face normal) | axis name. If instances leave the body, reverse. "
-        "Example: {\"features\":[\"Cut1\"],\"direction1\":{\"edge\":[10,0,5]},\"count1\":4,\"spacing1\":15}.",
+        "Linear pattern of features (by name) and/or BODIES (bodies = one point ON a face of each body) in 1 or 2 "
+        "directions; direction = {\"edge\":[x,y,z]} (parallel to edge) | {\"face\":[x,y,z]} (face normal) | axis name. "
+        "If instances leave the body, reverse. Body patterns report bodies_before/bodies_after. "
+        "Examples: {\"features\":[\"Cut1\"],\"direction1\":{\"edge\":[10,0,5]},\"count1\":4,\"spacing1\":15}; "
+        "bodies: {\"bodies\":[[5,0,5]],\"direction1\":{\"edge\":[5,0,0]},\"count1\":3,\"spacing1\":20}.",
         {"features": (A, "Feature names to repeat"), "direction1": _DIR,
+         "bodies": _BODIES,
          "count1": (N, "Instances in dir. 1 (count, incl. original)"),
          "spacing1": (N, "Spacing, dir. 1 (`unit`)"), "direction2": (None, "As direction1"),
          "count2": (N, "Instances in dir. 2 (count, incl. original)"),
          "spacing2": (N, "Spacing, dir. 2 (`unit`)"),
          "reverse1": (B, "Reverse dir. 1"), "reverse2": (B, "Reverse dir. 2"),
          "geometry_pattern": (B, "Geometry pattern (faster)"), "unit": _UNIT},
-        ["features", "direction1", "count1", "spacing1"]),
+        ["direction1", "count1", "spacing1"]),
     "circular_pattern": ("circular_pattern",
-        "Circular pattern of features about an axis (same forms as direction in linear_pattern; face must be cylindrical).",
+        "Circular pattern of features (by name) and/or BODIES (bodies = one point ON a face of each body) about an axis "
+        "(same forms as direction in linear_pattern; face must be cylindrical). "
+        "Example: {\"bodies\":[[5,0,5]],\"axis\":{\"axis\":\"Axis1\"},\"count\":4}.",
         {"features": (A, "Feature names to repeat"), "axis": _DIR,
+         "bodies": _BODIES,
          "count": (N, "Instances (count, incl. original)"),
          "angle": (N, "Total angle in degrees (default 360)"),
          "equal_spacing": (B, "Space instances equally"), "reverse": (B, "Reverse the direction"),
          "geometry_pattern": (B, "Geometry pattern (faster)"), "unit": _UNIT},
-        ["features", "axis", "count"]),
-    "mirror_feature": ("mirror_feature", "Mirror features (by name) or the whole body about a plane or planar face.",
-        {"features": (A, "Feature names to mirror"), "plane": _DIR,
+        ["axis", "count"]),
+    "mirror_feature": ("mirror_feature",
+        "Mirror features (by name), the whole body, or chosen BODIES (bodies = one point ON a face of each body) about a "
+        "plane or planar face. Example: {\"bodies\":[[5,0,5]],\"plane\":\"right\"}.",
+        {"features": (A, "Feature names to mirror"), "plane": _DIR, "bodies": _BODIES,
          "mirror_body": (B, "Mirror whole body"), "merge": (B, "Merge result into body"),
          "geometry_pattern": (B, "Geometry pattern (faster)"), "unit": _UNIT}, ["plane"]),
     # ---------------------------------------------------------------- Hole Wizard
@@ -320,9 +402,14 @@ _TOOLS = {
     "create_reference_point": ("create_reference_point", "Reference point: face_center | edge_center | on_edge (percent).",
         {"mode": (S, "face_center (default) | edge_center | on_edge"), "face_point": _PT3, "edge_point": _PT3,
          "percent": (N, "Position along the edge, percent 0-100 (default 50)"), "unit": _UNIT}, []),
-    "create_coordinate_system": ("create_coordinate_system", "Coordinate system: origin (vertex) and X/Y/Z axes (edges).",
+    "create_coordinate_system": ("create_coordinate_system",
+        "Coordinate system: by selection (origin vertex + X/Y/Z edges) or NUMERIC: origin [x,y,z] (`unit`) and rotation "
+        "[rx,ry,rz] (degrees about X, Y, Z). The result reports the origin and axes read back from SolidWorks. "
+        "Example: {\"origin\":[10,20,30],\"rotation\":[0,0,90]}.",
         {"origin_point": _PT3, "x_edge_point": _PT3, "y_edge_point": _PT3, "z_edge_point": _PT3, "unit": _UNIT,
-         "x_flip": (B, "Flip the X axis"), "y_flip": (B, "Flip the Y axis"), "z_flip": (B, "Flip the Z axis")}, []),
+         "x_flip": (B, "Flip the X axis"), "y_flip": (B, "Flip the Y axis"), "z_flip": (B, "Flip the Z axis"),
+         "origin": (A, "Numeric mode: origin [x,y,z] (`unit`) relative to the model origin"),
+         "rotation": (A, "Numeric mode: rotation [rx,ry,rz] in degrees about X, Y, Z")}, []),
     # ---------------------------------------------------------------- feature management
     "list_model_features": ("list_model_features", "List features: type, suppression, errors, optional dimensions.",
         {"include_dimensions": (B, "Include dimensions")}, []),

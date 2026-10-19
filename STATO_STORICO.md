@@ -965,3 +965,123 @@ Sweep lungo una curva: `sweep(path_sketch=<nome feature della curva>, circular_d
 - Nessuna modifica a `sweep` necessaria. Nessun tool distruttivo (solo feature nuove, niente `DESTRUCTIVE`).
 - `LIMITI.md`: elica [x], passo variabile [x], proiezione [x] (bidirezionale come due curve), divisione per proiezione e silhouette [x],
   per intersezione [~], composita [x], per punti [x] (per punti di riferimento [~]).
+
+### Lotto ext1 (estensioni dei tool esistenti)
+
+Test: `tests/test_ext_ext1_live.py` (E1..E9, per sezione da argv). Nessun tool nuovo: cambiano solo i parametri (tutti facoltativi,
+default invariati). File toccati: `automation/modeling.py`, `automation/modeling_base.py`, `automation/sketch_constraints.py`,
+`modeling_tools.py`.
+
+#### Helper nuovi
+- `ModelingBase._last_sketch(doc)`, `_sketch_name_of(doc, sk)`, `SKETCH_TYPES` = ("ProfileFeature", "3DProfileFeature").
+- `ModelingOperations._body_of_point`, `_select_bodies` (corpi scelti da un punto su una faccia; Mark 256), `_tangency`, `_thin_args`,
+  `_readback(doc, feature, {chiave: proprieta'})` (rilettura dalla definizione della feature), `_cs_result`, costante `THIN_TYPES`.
+
+#### 1. extrude_boss / extrude_cut: parete sottile, up_to_vertex, up_to_body  [x]
+- `FeatureExtrusionThin2` / `FeatureCutThin2` (30 / 29 argomenti, stesso ordine dei normali + Thk1, Thk2, EndThk, RevThinDir, CapEnds, AddBends,
+  BendRad). **RevThinDir = swThinWallType_e**: 0 verso l'esterno del profilo chiuso, 1 verso l'interno, 2 mezzeria, 3 due direzioni (Thk1 fuori +
+  Thk2 dentro; con Thk2 = 0 la chiamata non crea nulla). **CapEnds**: qualunque valore diverso da 0 chiude ENTRAMBE le estremita' (0/1/2/3 danno
+  lo stesso risultato); `EndThk` e' lo spessore del tappo (dentro il tubo: volume extra = 2 pi r_interno^2 * cap).
+- Parametri: `thin_thickness`, `thin_type` (one_direction | opposite_direction | mid_plane | two_directions), `thin_thickness2`, `cap_ends`,
+  `cap_thickness`. Il taglio sottile parte da z=30 con `start_offset` (per i tagli la direzione di default dal piano Top e' verso -z).
+- `up_to_vertex` (T1=3): il vertice si seleziona DOPO lo schizzo con `up_to_vertex_point`; qualunque Mark funziona (provati 0,1,2,4,8).
+- `up_to_body` (T1=7): il corpo si seleziona con `Body2.Select2(True, mark)` (qualunque Mark); per sceglierlo si usa `up_to_face_point` = punto
+  su una faccia del corpo di arresto (`_body_of_point`). Misurato: il cilindro si ferma sotto la piastra (altezza 20).
+- Misure (cerchio R=10, h=20, t=2): esterno 2764.602 (pi(144-100)20), interno 2261.95, mezzeria 2513.27, due direzioni (2+1) 3958.407,
+  con tappi 1.5: 2764.6 + 942.5; taglio sottile (10 di profondita') 1130.973 / 1382.301 / 1256.637; up_to_vertex 1963.495 (pi 25 25), up_to_body
+  1570.796 (pi 25 20), taglio fino a vertice 2356.194 (pi 25 30). Tutti entro 0.0001 % dal calcolato.
+
+#### 2. sweep: guide, parete sottile, tangenza, merge, percorso = curva qualunque  [x]
+- `InsertProtrusionSwept4` / `InsertCutSwept5`: Start/EndMatchingType = swTangencyType_e (0 none, 1 path_tangent/normal_to_profile, 3 all_faces),
+  IsThinBody + Thickness1/2 + ThinType (stessa codifica THIN_TYPES), Merge. Guide: selezione con **Mark 2** dopo profilo (Mark 1) e percorso (Mark 4);
+  con guide `TwistCtrlOption = 2` (segui percorso e prima guida: le guide scalano il profilo).
+- Il percorso e' qualunque feature (elica, composita, 3D): `_select_feature(.., mark 4)` funziona (gia' misurato dal lotto curve).
+- TRAPPOLA (mia, non di SW): per spazzare lungo un'elica un profilo DISEGNATO, il piano del profilo deve essere perpendicolare alla tangente di
+  partenza dell'elica (tangente ~ asse Y per l'elica che parte in (R,0,0)): il piano Right (normale Y) con cerchio in u=-R (u = -x). Con un piano
+  parallelo alla tangente (Front offset) lo sweep non crea nulla (provate 24 combinazioni di TwistCtrl/PathAlign/KeepTangency, CreateDefinition,
+  SelectByID2 con REFERENCECURVES...: nessuna serve).
+- Il risultato riporta `start_tangency_readback` / `end_tangency_readback` / `guide_count` letti da `ISweepFeatureData`.
+- Misure: molla = cerchio d=2 lungo elica R=10 passo 5, 4 giri (L=252.1132): 791.888 vs pi r^2 L = 792.064 (0.022 %); con profilo disegnato 789.406
+  (0.34 %, il profilo non e' esattamente perpendicolare: pi r^2 L cos(angolo elica) = 789.50); guida (tronco di cono r 5->10 su 40): 7330.121 vs
+  7330.383 (0.004 %); sottile esterno 1382.301 / interno 1130.973 (pi(36-25)40 e pi(25-16)40, 0.0000 %); merge=true 49570.796 (blocco + pi 25 20),
+  merge=false 51141.593 e 2 corpi; tangenza path_tangent riletta = 1 (volume invariato 3141.593).
+- `all_faces` senza facce adiacenti non crea niente (valido solo con facce tangenti esistenti). `direction_vector` e' nella tabella ma per lo sweep
+  non e' gestito (servirebbe un vettore): non documentato nel tool.
+
+#### 3. loft: condizioni iniziale/finale, parete sottile, merge, curva centrale  [x] (formula esatta della tangente: [~])
+- `InsertProtrusionBlend2(Closed, KeepTangency, ForceNonRational, Tess, StartMatchingType, EndMatchingType, StartTangentLength, EndTangentLength,
+  StartTangentDir, EndTangentDir, IsThinBody, Thk1, Thk2, ThinType, Merge, UseFeatScope, UseAutoSelect, GuideCurveInfluence)`; taglio:
+  `InsertCutBlend`. Condizioni swTangencyType_e: 0 none, 1 normal_to_profile, 2 direction_vector. Centerline = **Mark 4**; vettore di direzione:
+  **Mark 8** (inizio) / **16** (fine). Il vecchio `start_tangency` (bool) resta come alias di `start_condition=normal_to_profile`.
+- Nuovi: `start_condition`, `end_condition`, `start_direction`, `end_direction`, `start_tangent_length`, `end_tangent_length`, `start_reverse`,
+  `end_reverse` (StartTangentDir/EndTangentDir = inversione), `thin_thickness` (+ thin_type, thin_thickness2), `merge`, `centerline_sketch`.
+  Il risultato riporta `start_condition_readback`, `end_condition_readback`, `profile_count`, `guide_count`.
+- Misure (quadrati 20 -> 10, altezza 30): semplice 7000.0 = tronco; normal_to_profile L=1: 6882.44, L=0.5: 6941.19 (volume sotto il tronco e
+  monotono con la lunghezza della tangente; L=2 -> self-intersection, nessun solido); la formula esatta del volume con tangenti normali NON e'
+  riprodotta dal modello Hermite (7114 per L=30 ecc.): SolidWorks usa un'altra scala della tangente. Il test controlla soltanto volume < tronco,
+  > 3000, rilettura = 1 e monotonia `[~]`.
+- Loft sottile (spessore 1 verso l'esterno): 1948.162 = tronco con semilato w + t/cos(a) (tan a = 5/30) meno il tronco: 1948.162 (0.0000 %).
+- direction_vector con il piano Top (normale z): condizione 2 riletta; volume 5759.55 (diverso dal tronco, e dal normal_to_profile 6882: con il vettore
+  di una faccia/asse la scala della tangente e il verso cambiano; `start_reverse=True` -> 8240.19). `[~]`: l'effetto e' provato, il valore no.
+- centerline_sketch con retta lungo z: 7000.0 (= tronco).
+
+#### 4. chamfer_at_points: smusso a vertice, equal_distance  [x]
+- `InsertFeatureChamfer(0, 3, 0, 0, 0, d1, d2, d3)` con il vertice selezionato (Mark 0): volume tolto = d1 d2 d3 / 6 (3,4,5 -> 10.000; 4,4,4 ->
+  10.667). Parametri `vertex_point` (punto SUL vertice), `vertex_distances` [d1,d2,d3] (se manca ma c'e' `distance`: tre volte `distance`).
+- TRAPPOLA: `ChamferType 16` (EqualDistance) crea la feature ma NON scava (volume invariato, gia' scritto nel docstring del modulo). `equal_distance`
+  usa quindi il tipo 2 (distanza-distanza) con d1 = d2: spigolo 40 con d=2 -> 80.000 asportati.
+- `distance` ed `edge_points` ora sono facoltativi (obbligatori solo nel modo spigoli): errore chiaro se manca il modo.
+
+#### 5. shell_body: multi_thickness  [x] con metodo di aggiramento (API nativa [~])
+- API nativa NON utilizzabile: `CreateDefinition(swFmShell=8)` -> None; con `GetDefinition` + `AccessSelections(doc, null)` si puo' impostare
+  `MultipleThicknessFaces` (conteggio 1) ma `SetMultipleThicknessAtIndex(i, t)` non ha effetto (indici 0/1/-1, VT_R8/VT_R4/BYREF, prima o dopo
+  `ModifyDefinition`; `GetMultipleThicknessAtIndex` resta 0.0) e la parete sparisce (spessore 0: cavita' 38 invece di 33). `Thickness=` invece
+  funziona. `IModelDoc2.InsertFeatureShellAddThickness(t)` (selezione prima/dopo, Mark 0/1/2/4) non cambia nulla o da' lo stesso spessore 0.
+- Soluzione: shell uniforme a `thickness`, poi per ogni `{"face","thickness"}` (punto sulla faccia ESTERNA piana del corpo di partenza) si
+  trova la faccia interna (punto - normale * t) e la si sposta di (t_faccia - t) con `move_faces` (InsertMoveFace3, offset lungo la propria
+  normale). Solo facce piane, non con `outward`. Il risultato riporta `multi_thickness_applied` (variazione misurata e attesa = area interna
+  * delta) e `method`.
+- Misure (scatola 40x40x30, parete x=20 di 5, resto 2, faccia superiore aperta): volume 14736.0 = 48000 - 33*36*28 (esatto); due pareti (5 e 4):
+  16752 = 48000 - 31*36*28 (esatto). Variazione della mossa 3024.0 = attesa.
+
+#### 6. create_coordinate_system: modo numerico  [x]
+- `CreateCoordinateSystemUsingNumericalValues(UseLocation, dx, dy, dz, UseRotation, ax, ay, az)` su FeatureManager (nessuna selezione).
+  Parametri `origin` [x,y,z] (`unit`) e `rotation` [rx,ry,rz] gradi; non si combina con origin_point/*_edge_point. Riletti con
+  `GetCoordinateSystemTransformByName` (origine in `unit`, assi).
+- Misure: origine (10,20,30) e rotazione Z 90: assi x=(0,1,0) y=(-1,0,0) z=(0,0,1); rotazione X 30: y=(0,0.866,0.5), z=(0,-0.5,0.866); rotazione Y 90:
+  x=(0,0,-1), z=(1,0,0); origine in cm (1,2,3) -> riletta (1,2,3) (cioe' 10,20,30 mm).
+
+#### 7. draw_slot: asole ad arco  [x]
+- `CreateSketchSlot(SlotCreationType, SlotLengthType, Width, X1..Z3, CenterArcDirection, AddDimension)`: **arc_center = 2**: P1 = centro dell'arco,
+  P2 = inizio, P3 = fine, direzione 1 antioraria / -1 oraria; **arc_3point = 3**: P1 = inizio, P2 = fine, P3 = punto sull'arco centrale (ordine
+  misurato; con l'ordine inizio-mezzo-fine esce un arco sbagliato). Parametri: `slot_type` arc_center | arc_3point, `cx`,`cy`,`radius`,`start_angle`,
+  `end_angle`,`clockwise`,`x3`,`y3`; x1..y2 ora facoltativi (obbligatorio solo `width`). Il risultato riporta `centerline_length`.
+- Misure (w=4, estrusione 10: volume/10 = area): 0..90 gradi raggio 20: 138.230 = 4*31.416 + 4 pi; 0..180 raggio 15; 270 gradi (orario); arc_3point
+  quarto di cerchio; retta 30: tutti entro 0.002 %. Nota di prova: due asole nella stessa parte si sovrappongono ai cappucci (misura falsata): una per parte.
+
+#### 8. mirror_feature / linear_pattern / circular_pattern con `bodies`  [x]
+- I corpi si indicano con un punto SU una loro faccia (`_body_of_point`) e si selezionano con **Mark 256** (`Body2.Select2`): provati i Mark
+  2,4,8,16,32,64,128,256,512,1024,2048,0,1 su `FeatureLinearPattern5`: solo 256 crea la ripetizione (con geometry_pattern vero o falso). Lo
+  stesso Mark vale per `InsertMirrorFeature2(BMirrorBody=True)`. Per le ripetizioni `features` ora e' facoltativo (serve `features` o `bodies`).
+- Il risultato riporta `bodies_before`, `bodies_after`, `bodies_expected_if_separate`.
+- Misure: lineare 3 istanze passo 20 di un cubo da 1000: 3000.0 e 3 corpi; ripetizione di UNO dei due corpi: 3000; specchio rispetto al piano Right
+  (y=0) di un cubo a y 10..20: 2000 e bounding box y -20..20; specchio di un solo corpo su due: 3000 e 3 corpi; circolare 4 istanze attorno all'asse Z:
+  4000 e 4 corpi.
+
+#### 9. Schizzi 3D negli helper di schizzo  [x]
+- Difetto: `_active_sketch_name` (e gli helper simili) cercavano solo `ProfileFeature`, quindi con uno schizzo 3D attivo restituivano l'ultimo schizzo
+  2D. Correzione: `ModelingBase._sketch_name_of(doc, sk)` confronta l'ISketch con le feature di entrambi i tipi (`SKETCH_TYPES`) e, come ripiego,
+  sceglie l'ultimo schizzo 3D/2D secondo `ISketch.Is3D`. Corretti anche `_exit_sketch` (ripiego), `_resolve_sketch` (nome dell'ultimo schizzo di
+  qualunque tipo, elenco degli schizzi con entrambi i tipi), `_sketch_entity_obj` (accetta anche 3D) e `get_sketch_definition_status` (ultimo schizzo).
+  Sugli schizzi 2D il comportamento e' invariato (l'ultimo schizzo e' sempre lo stesso se non ci sono schizzi 3D dopo).
+- Misure: schizzo 3D attivo e riaperto per nome: `list_sketch_entities` e `get_sketch_definition_status` riportano "Schizzo3D1" (prima: lo schizzo 2D
+  precedente); sweep di un cerchio lungo la linea 3D con il profilo ancora aperto: 1130.973 = pi 9 40.
+
+#### Test
+- `tests/test_ext_ext1_live.py`: vedi il riepilogo in STATO (sezioni E1..E9, tutte PASS). Regressione: `test_modeling_extra_live.py B1 B2 B3` e
+  `test_ext_moka1_live.py`.
+- Trappola di rete: il laboratorio e il server possono essere lenti (la macchina e' condivisa con altri lotti): un prova puo' superare i 120 s.
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool nel test offline (nessun tool nuovo da parte mia).
+- `shell_body.multi_thickness` usa move_faces per via di `SetMultipleThicknessAtIndex` inefficace: se in futuro si trova un modo nativo, sostituire.
