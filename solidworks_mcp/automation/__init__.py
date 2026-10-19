@@ -24,13 +24,14 @@ from .ext_manage import ManageOperations
 from .ext_sheetmetal import SheetMetalOperations
 from .ext_weldments import WeldmentsOperations
 from .ext_mold import MoldOperations
+from .ext_analysis import AnalysisOperations
 
 
 class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOperations, DocumentOperations, 
                            SketchOperations, FeatureOperations, DrawingOperations,
                            ModelingOperations, AssemblyOperations, MokaOperations, Sketch2Operations,
                            Features2Operations, Bodies2Operations, CurvesOperations, Surfaces1Operations, Surfaces2Operations,
-                           ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations):
+                           ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations, AnalysisOperations):
     """
     Complete SolidWorks automation class
     

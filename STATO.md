@@ -380,7 +380,9 @@ egr_f2.log`):
     divisione; a gradino `[~]`), `dome`, `wrap_feature` (incisione, rilievo, tracciatura), `thread_feature` (filettatura modellata
     Metric Die/Tap, +3 % dalla stima), `flex_feature` (flessione, torsione, rastremazione, allungamento). Test 50/50.
     `indent_feature` `[~]` non esposto (`InsertIndent` sempre None, con spessore 0,001 appende SolidWorks).
-- Conteggio: 252 tool con `execute_python` (251 senza). In lavorazione: superfici 1, gestione (Haiku), lamiera (Haiku), saldature (Haiku); poi feature avanzate,
+  - analysis (7 tool, Haiku): `insert_bounding_box`, `insert_center_of_mass`, `insert_mate_reference`, `draft_analysis` (numerica
+    per faccia), `thickness_analysis` (raggi dalle facce, min/max), `section_view` (sezione della vista), `fully_define_sketch`. Test 15/15.
+- Conteggio: 259 tool con `execute_python` (258 senza). In lavorazione: superfici 1, gestione (Haiku), lamiera (Haiku), saldature (Haiku); poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

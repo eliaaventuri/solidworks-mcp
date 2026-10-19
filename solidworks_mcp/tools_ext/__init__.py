@@ -7,9 +7,9 @@ Tool aggiunti per lotti (dal 2026-10-18): un modulo per lotto, ciascuno con
 I metodi stanno nei mixin automation/ext_<lotto>.py.
 """
 
-from . import moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments, mold
+from . import moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments, mold, analysis
 
-MODULES = (moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments, mold)
+MODULES = (moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments, mold, analysis)
 
 EXT_TOOLS = {}
 EXT_DESTRUCTIVE = {}

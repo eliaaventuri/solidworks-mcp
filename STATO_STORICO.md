@@ -1257,3 +1257,52 @@ Tool esposti: fillet_advanced, draft_advanced, dome, wrap_feature, thread_featur
   ("N tool esposti" e i due di execute_python) ed `EXPECTED_TOOLS` in `tests/live_common.py`.
 - ATLANTE.md: aggiungere ext_features2.py, tools_ext/features2.py, tests/test_ext_features2_live.py.
 - Le voci di RICERCA_MODELLAZIONE: shell_multi_thickness e thicken non erano nel mio incarico (non fatti).
+
+### Lotto analysis
+
+Moduli: `solidworks_mcp/automation/ext_analysis.py` (AnalysisOperations), `solidworks_mcp/tools_ext/analysis.py` (schemi),
+test `tests/test_ext_analysis_live.py`. Prove: `scripts_tmp/ana_p1..p9.py`, `ana_t1..t8.py`.
+
+#### Esito
+- Test live: **15/15 PASS** (`scripts_tmp/ana_test_run1.txt`).
+- Offline (`tests/test_offline.py`): 145/148. I 3 FAIL sono quelli attesi: "252 tool esposti" (ora 281 con i lotti degli altri agenti) e i 2 su `execute_python`. Nessun altro FAIL.
+- pyflakes su i 3 file: 0 avvisi.
+- Laboratorio `ana`: chiuso ("chiuso").
+
+#### Tool
+| Tool | Stato | Metodo API | Verifica misurata |
+|---|---|---|---|
+| insert_bounding_box(best_fit, include_surfaces, unit) | [x] | `FeatureManager.InsertGlobalBoundingBox2(1, 0, False, inc, Status)` | Blocco 40x30x20 -> [40, 30, 20] mm (letto dagli estremi dei 12 segmenti dello schizzo `BoundingBoxProfileFeat`). best_fit=false rifiutato (solo BestFit implementato). |
+| insert_center_of_mass(unit) | [x] | `FeatureManager.InsertCenterOfMass()` + `Extension.CreateMassProperty2` (`CenterOfMass`) | Blocco -> (10, 0, 0) mm; estrusione 0..20 lungo X in questa installazione (GetBodyBox). |
+| insert_mate_reference(name, face_point, type, alignment, unit) | [x] | `FeatureManager.InsertMateReference2` | Faccia z=15 -> feature `RifTop-<1>` tipo `PosGroupFolder`. Punto lontano (z=50) rifiutato. |
+| draft_analysis(direction, min_angle, unit) | [x] | facce via `GetFaces`, `Normal`, `PlaneParams`/`CylinderParams`/`ConeParams` | Tronco 30x30x20 sformo 5 (flip) -> 4 laterali +5,0, 2 piane 90; cilindro 0,0; direzione 'w' rifiutata. |
+| thickness_analysis(samples, unit) | [x] | `GetTessTriangles(False)`, `Extension.RayIntersections`, `doc.GetRayIntersectionsPoints` | Blocco -> min 20,0 mm (faccia 4); guscio spessore 2 -> min 2,0, max 20,0 (<= 2 x diagonale 107,7). Raggi 12/12 e 28/28 validi. |
+| section_view(plane, offset, remove, unit) | [x] | `ModelViewManager.CreateSectionViewData` + `CreateSectionView(data)`, `RemoveSectionView` | Immagine isometrica: 118571 B senza sezione, 138295 B con sezione Front a 10 mm; volume 24000 mm3 invariato; rimozione -> True, volume invariato. |
+| fully_define_sketch(sketch, use_dimensions, use_relations) | [x] | `SketchManager.FullyDefineSketch(True, rel, 1023 o 0, dims, 1, nul, 1, nul, 1, 1)` | Rettangolo 30x20 libero: sottodefinito -> completamente definito, 2 quote (30, 20). |
+
+#### Trappole scoperte (con le misure)
+1. **Late binding e feature create**: `InsertCenterOfMass` e `InsertMateReference2` sollevano `com_error 'Impossibile trovare membro'` (o `TypeError 'NoneType'`) ANCHE quando la feature viene creata. Il tool chiama, cattura l'errore e verifica con le feature nuove (`_new_features`). Una seconda chiamata di InsertCenterOfMass nello stesso pezzo non crea un altro punto: il tool riporta "gia' presente".
+2. **Accesso come proprieta'**: `doc.FeatureManager.InsertCenterOfMass` (senza parentesi) ESEGUE il comando. Per questo la chiamata e' dentro una lambda.
+3. **InsertMateReference2**: il secondo e il terzo riferimento vanno passati come `VARIANT(VT_DISPATCH, None)`. Con `None` semplice o `Missing` dava errore di tipo ("Incompatibilita' tra tipi", "PyOleMissing"). La feature nasce con nome `NOME-<1>` e tipo `PosGroupFolder`; alla prima chiamata nel pezzo si crea anche la cartella `RegolediAccoppiamento` (`MateReferenceGroupFolder`).
+4. **Tessellazione in mm**: `GetTessTriangles` restituisce coordinate in MILLIMETRI (20.0 per 20 mm), mentre `GetBox`, `GetBodyBox` e le altre API sono in metri. Il tool converte x 0,001. Prima della correzione tutti i raggi non avevano uscite (0 hit).
+5. **GetRayIntersectionsPoints** e' una PROPRIETA' di IModelDoc2 (non sta su Extension), e la tupla e' piatta: 6 valori per punto; il punto e' nei valori 3..5. Il tool associa ogni punto al raggio controllando che stia sulla retta (tolleranza 0,01 mm) e che sia oltre la faccia di partenza (> 0,1 mm: limite, sotto 0,1 mm lo spessore non e' misurato).
+6. **CreateSectionViewData e RemoveSectionView** sono proprieta' (si leggono con `self._com`, non si chiamano: chiamarle da `()` da' "bool object is not callable").
+7. **Estrusione dal piano Front** in questa installazione va lungo +X (corpo 0..20 in X). I test usano questo dato misurato.
+8. **Sformo, convenzione**: sformo positivo = la parete si restringe andando nella direzione di estrazione; piane perpendicolari alla direzione riportano 90 (per entrambe le facce superiore e inferiore). Coni: sformo = semi-angolo con segno dato dalla posizione del vertice. Cilindri non paralleli alla direzione: `not_applicable`.
+9. **draft_faces senza flip** su un'estrusione dal piano Front produce un tronco che si ALLARGA (volume 18000 -> 20181, sformo -5): con `flip=true` si restringe (volume 15981,9, sformo +5). Il test usa flip=true.
+10. **FullyDefineSketch** restituisce 0 (non affidabile): lo stato va riletto con `get_sketch_definition_status`, che il tool fa.
+
+#### Limiti dichiarati
+- insert_bounding_box: solo il box a migliore adattamento (`best_fit=true`); box su piano o su sistema di coordinate non implementato (rifiutato con messaggio).
+- draft_analysis: coni e cilindri non paralleli alla direzione non hanno sformo definito (`not_applicable`).
+- thickness_analysis: campiona i centri dei triangoli della tessellazione (non una griglia UV); spessori sotto 0,1 mm non sono misurati; `samples` max 5000.
+- section_view: solo vista (il volume non cambia); la verifica e' sulla dimensione del file PNG (non c'e' lettura dei pixel).
+
+#### Richieste a Opus
+- **Istanze SolidWorks**: all'avvio del test erano presenti i PID `[624, 3616, 15620]` (`Istanze SolidWorks gia' presenti`). A fine test non risultano piu' vivi (`Get-Process SLDWORKS` mostra solo 7416, 11788, 15592, 15880, che non sono del mio laboratorio nè del test). Il test e il laboratorio chiudono SOLO il proprio PID (`taskkill /PID` del test; `labrun --quit` per il laboratorio): non ho chiamato taskkill su altri PID. Non so chi abbia chiuso quei tre processi (probabilmente altri sotto-agenti in parallelo). Da verificare su Elia se la sua istanza era una di quelle.
+- Per il controllo offline: aggiornare il numero dei tool esposti (ora 281).
+- Cartella `test_output/`: restano `ana_sez_0.png` e `ana_sez.png` (non committare).
+
+#### Stato
+[x] insert_bounding_box, insert_center_of_mass, insert_mate_reference, draft_analysis, thickness_analysis, section_view, fully_define_sketch (tutti misurati nel test live, 15/15).
+[~] insert_bounding_box best_fit=false non implementato (dichiarato nel risultato). Coni/cilindri obliqui: sformo non definito (dichiarato).
