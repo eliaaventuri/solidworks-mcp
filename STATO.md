@@ -373,7 +373,10 @@ egr_f2.log`):
     `shell_body.multi_thickness` (shell + move_faces: la API nativa non funziona, solo facce piane); sistema di coordinate numerico;
     asole ad arco; `bodies` in specchia/ripetizioni (Mark 256); schizzi 3D riconosciuti dagli helper. Test 134/134; loft con tangenti
     normali verificato solo per disuguaglianze (formula esatta non riprodotta).
-- Conteggio: 239 tool con `execute_python` (238 senza). In lavorazione: superfici 1, feature avanzate, corpi 2, gestione; poi feature avanzate,
+  - bodies2 (7 tool): `move_copy_body`, `split_body` (anche salvataggio dei pezzi, OVERWRITE), `intersect_bodies`, `scale_body`,
+    `curve_driven_pattern`, `sketch_driven_pattern`, `table_driven_pattern` (punti nell'argomento, senza file). Test 40/40.
+    Il test completo dura ~11 minuti: per sezioni (`B1 B2`, `B3 B4`, `B5`).
+- Conteggio: 246 tool con `execute_python` (245 senza). In lavorazione: superfici 1, feature avanzate, gestione (Haiku), lamiera (Haiku); poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

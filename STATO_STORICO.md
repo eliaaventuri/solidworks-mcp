@@ -1085,3 +1085,94 @@ default invariati). File toccati: `automation/modeling.py`, `automation/modeling
 #### RICHIESTE A OPUS
 - Aggiornare i conteggi dei tool nel test offline (nessun tool nuovo da parte mia).
 - `shell_body.multi_thickness` usa move_faces per via di `SetMultipleThicknessAtIndex` inefficace: se in futuro si trova un modo nativo, sostituire.
+
+### Lotto bodies2
+
+Codice: `solidworks_mcp/automation/ext_bodies2.py` (mixin `Bodies2Operations`), schemi `solidworks_mcp/tools_ext/bodies2.py`.
+Test: `tests/test_ext_bodies2_live.py` (sezioni B1..B5). Prove: `scripts_tmp/bd2_p*.py`, helper `scripts_tmp/bd2_lib.py`.
+Riuso da `ext_moka.py` (non modificato): `_all_bodies`, `_resolve_bodies` (nome | indice | punto su una faccia), `_body_row`, `_body_key`, `_body_box`.
+
+#### Tool
+
+### move_copy_body  [x]
+- API: `FeatureManager.InsertMoveCopyBody2(TransX,Y,Z, TransDist, RotPointX,Y,Z, RotAngleX,Y,Z, BCopy, NumCopies)` con i corpi selezionati con
+  **marca 1**. Parametri: `translate` | `from_point`+`to_point`, `rotate_angle` + `rotate_axis` ('x'|'y'|'z' o `{"edge":[x,y,z]}` rettilineo parallelo
+  a un asse) + `rotate_point`, `copies`.
+- TRAPPOLE (moka2, confermate): RotAngleX/Y/Z ruotano attorno a Z/Y/X (il tool inverte); rotazione e traslazione NON stanno nella stessa feature ->
+  due feature (prima rotazione, poi traslazione); con `copies` > 0 solo UNA operazione (le copie sono cumulative: copies=2 + translate z 50 -> z 50 e 100).
+- Rotazione solo attorno ad assi paralleli a X/Y/Z (limite dell'API: tre angoli attorno a un punto, nessun asse libero): lo spigolo non parallelo e' rifiutato con messaggio.
+- Misure: blocco 40x30x20: traslazione [100,0,0] -> box x 100..140; (0,0,0)->(0,50,0) -> y 50..80; rotazione 90 gradi attorno a Z per (100,50) ->
+  x 70..100, y 50..90; 2 copie passo z 50 -> 3 corpi, volume 72000.
+
+### split_body  [x]  (senza `bodies`: vedi sotto)
+- API: `FeatureManager.PreSplitBody2` (PROPRIETA') seleziona gli strumenti con **marca 2** (piano / faccia piana / superficie) e restituisce i pezzi risultanti
+  (array di corpi temporanei); poi `PostSplitBody2(pezzi, ConsumeCut, Origins, SavePaths, Template)`.
+- TRAPPOLE: (1) `PostSplitBody2` restituisce None e NON crea nulla se `Origins` e' nullo: serve un array di corpi (si passano gli stessi pezzi) e
+  `SavePaths` un array di stringhe vuote (una per pezzo); (2) dopo una Post fallita SolidWorks resta in uno stato in cui anche `PreSplitBody2` della
+  chiamata dopo solleva errore COM: serve riavviare l'istanza; (3) con percorsi veri in `SavePaths` la Post scrive i file ma NON ritorna (appeso, testato
+  con e senza modello `.prtdot`): per salvare il tool divide e poi usa `CreateSaveBodyFeature(corpi, percorsi, "", False, False)` (funziona, ~5 s);
+  (4) `CreateSaveBodyFeature` APRE i file salvati e crea un assieme senza nome ("Assieme2"): il tool li richiude con `close_document(discard)`
+  e riattiva il pezzo; (5) i file salvati restano bloccati (`~$nome.SLDPRT`) finche' SolidWorks non chiude i documenti; (6) i corpi da dividere NON si
+  possono limitare: selezionare un corpo con Select2 (marche 0,1,2,4) o con SelectByID2 SOLIDBODY non cambia l'esito (Pre restituisce comunque i pezzi di
+  tutti i corpi attraversati dallo strumento) -> il parametro `bodies` NON e' esposto; (7) `ConsumeCut=True` con un piano cancella tutto (0 corpi): non esposto.
+- Misure: blocco 40x30x20 diviso dal piano a x=10 -> 6000 + 18000 mm3, box x 0..10 e 10..40, volume conservato 24000; file salvati `blocco_1/2.sldprt`
+  (21 KB circa ciascuno nei test a mano, 52/61 KB con `CreateSaveBodyFeature`). Faccia piana x=20 di un secondo corpo: divide anche il primo (3 corpi
+  12000+12000+8000).
+- Il tool e' in `OVERWRITE` (argomento `save_path`) e in `DESTRUCTIVE`; rifiuta da se' i file `<nome>_n.sldprt` gia' esistenti.
+
+### intersect_bodies  [x]
+- API: corpi (e strumenti) selezionati con **marca 1**; `PreIntersect2(CapPlanar, 0)` restituisce le regioni (corpi); `PostIntersect(Escludi, Unisci, Consuma)`.
+- TRAPPOLE: (1) `Escludi` e' un array di BOOLEANI (`VT_ARRAY|VT_BOOL`) uno per regione (True = escludi): un array di corpi o di interi viene ignorato e
+  restano TUTTE le regioni; (2) i corpi originali sono sempre consumati (il parametro `Consume` non cambia nulla: misurato con True e False); (3) non ci
+  sono indicazioni su quale regione sia quale: il tool classifica ogni regione con una copia (`region.Copy2` `Operations2(15901 = intersect, copia del corpo)`):
+  non vuota = la regione sta dentro quel corpo; "common" = dentro a tutti i corpi solidi indicati; (4) dopo una Pre non si puo' tornare indietro: se la
+  scelta lascia zero regioni il tool completa la Post tenendole tutte, elimina la feature e restituisce errore (pezzo intatto).
+- Misure: A 40x30x20 e B 40x40x20 sovrapposti (comune y 10..30, z 5..20): regioni 12000 (solo A) + 20000 (solo B) + 12000 (comune); "common" -> 1 corpo
+  12000, box [0,10,5]-[40,30,20]; regions=all -> 3 corpi (44000); corpo + piano a x=10 -> 6000 + 18000.
+
+### scale_body  [x]
+- API: `FeatureManager.InsertScale(Type, Uniform, X, Y, Z)`; Type 0 = baricentro, 1 = origine, 2 = sistema di coordinate (feature selezionata con
+  **marca 0**, anche senza corpi selezionati). Con corpi selezionati (Select2 marca 0) scala solo quelli; senza selezione tutti i corpi.
+- Fattori lungo gli assi del MODELLO. Misure (blocco 30x20x40, x 0..40, y 10..40, z 10..30): x1,5 baricentro -> 81000 (= 24000*3,375), box x -10..50,
+  y 2,5..47,5, z 5..35; 1x2x3 rispetto all'origine -> 144000, y 20..80, z 30..90; sistema di coordinate in (100,0,0) fattore 0,5 -> 3000, x 50..70.
+- Il volume atteso e' calcolato PRIMA della feature (dopo, i vecchi oggetti corpo restituiscono il volume nuovo).
+- Nota: in una prova (due corpi, il piu' grande gia' scalato, CS all'origine) `InsertScale` con CS non ha creato la feature; non riprodotta nel test
+  (stessa chiamata con un solo corpo funziona sempre).
+
+### curve_driven_pattern  [x]
+- API: `ModelDoc2.FeatureCurvePattern(Num1, Spacing1, Num2, Spacing2, FlipDir1, FlipDir2, Equal1, Equal2, UseCentroid, AlignToSeed, OffsetCurve, SeedOnly)`:
+  curva (schizzo o spigolo) con **marca 1**, feature con **marca 4**. Feature creata: tipo `CurvePattern` ("RipetizioneCurva1").
+- TRAPPOLE: (1) con `Spacing1 = 0` la chiamata si APPENDE anche con distanza uguale: il tool passa 10 mm come valore fittizio (ignorato con equal spacing);
+  (2) `AlignToSeed=False` = tangente (`D1AlignmentMethod` 0), True = come il seme (1); (3) la chiamata e' void: la feature si trova per differenza;
+  (4) istanze fuori dal corpo vengono saltate in silenzio: il tool confronta il volume con n x volume del seme.
+- Misure: linea di 80 mm, count 5 -> 4 istanze aggiunte (+392,70 mm3 = 4 x 98,175); passo 15, count 4 -> 3 istanze; su un arco di 40 mm di raggio, 3 istanze:
+  tangente = rotazioni di 45 e 90 gradi attorno a X (matrice di `GetTransform(1/2)`), come il seme = identita'.
+
+### sketch_driven_pattern  [x]
+- API: `FeatureManager.FeatureSketchDrivenPattern(UseCentroid, GeomPattern)`: schizzo con **marca 1**, feature con **marca 4**; con `UseCentroid=False`
+  serve un punto di riferimento (non gestito: il tool usa sempre il baricentro). Tipo `SketchPattern`.
+- TRAPPOLA: il "baricentro" e' quello delle FACCE del seme (non del volume): un cilindro su una piastra (facce laterale + sommita') ha il baricentro a
+  x = 8,0 e non 7,5; lungo la normale dello schizzo la posizione non cambia. Con uno schizzo sulla faccia del seme le istanze vanno esattamente sui punti.
+- Misure: 3 punti -> 3 istanze (+294,52 mm3 = 3 x 98,175), baricentro del pezzo confrontato col calcolo a mano nel test.
+
+### table_driven_pattern  [x]
+- API: `FeatureManager.InsertTableDrivenPattern2("", punti, UseCentroid, GeomPattern, PropVis)`: sistema di coordinate con **marca 16**, feature con
+  **marca 4**; `punti` = array piatto `VT_ARRAY|VT_R8` di coppie [x1,y1,x2,y2,...] in metri nel piano XY del sistema di coordinate (non terne!).
+  Nessun file necessario (provati 5 formati di .sldptab senza successo, ma non serve). Tipo `TablePattern` ("RipetizioneT1").
+- TRAPPOLE: (1) con le marche sbagliate restituisce None senza errori (provate 36 combinazioni, funziona solo CS=16 + feature=4); (2) `PointArray` della
+  definizione (`CreateDefinition(106)`) conta i double a gruppi di 3 ma `CreateFeature` non crea nulla (via non usata); (3) un punto che coincide col seme
+  o cade fuori dal corpo e' saltato in silenzio: il tool confronta le istanze (volume / seme) col numero di punti; (4) riferimento = baricentro delle FACCE
+  del seme (vedi sopra): senza `coordinate_system` il tool ne crea uno con gli assi del modello (le coordinate lungo Z del CS non cambiano, quindi
+  le istanze non sono "a filo" se il baricentro delle facce del seme non e' nel piano delle quote che si danno).
+- Misure: CS ruotato (Z = X modello, X = -Z modello): punti [-10,30], [-30,50] -> istanze a (y30,z10) e (y50,z30), +196,35 mm3.
+
+### pattern_bodies  [non fatto]
+- Saltato come da istruzioni (opzione `bodies` di linear_pattern/circular_pattern/mirror_feature in `modeling.py`, altro agente).
+
+#### Stato prove sporche
+- `PreSplitBody2` / `PreIntersect2` lasciati senza la Post, o Post fallita, bloccano l'istanza (le chiamate successive danno errore COM o si appendono):
+  nelle prove si e' riavviato il laboratorio. I tool completano sempre la Post (anche per annullare).
+- `close_document` ripetuto 4 volte di fila nello stesso script di laboratorio si e' appeso piu' volte (non nel test live).
+
+#### RICHIESTE A OPUS
+- Nessuna modifica a file non miei. (Il conteggio dei tool nel test offline: +7.)
