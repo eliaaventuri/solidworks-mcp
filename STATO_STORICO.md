@@ -1385,3 +1385,270 @@ Trappole nuove:
 3. **Blocco 20x20 con cerchio a 3 mm dal bordo**: taglio parziale (168,394 mm3): il cerchio deve stare dentro la faccia.
 4. Il volume letto con get_mass_properties subito dopo la chiusura dello schizzo non e' affidabile: rebuild_model prima di leggere.
 5. Il tool restituisce la lista GetWhatsWrong come tupla di oggetti COM: `_ww_name` li legge per nome ("Taglio-Estrusione1", codice "71").
+
+### Lotto sheetmetal
+
+Laboratorio `sm` (istanza dedicata): chiuso (`--quit`, "chiuso"). Probe: `scripts_tmp/sm_probe1..25.py`, `sm_smoke1..3.py`.
+File toccati: `solidworks_mcp/automation/ext_sheetmetal.py`, `solidworks_mcp/tools_ext/sheetmetal.py`,
+`tests/test_ext_sheetmetal_live.py`, questo file.
+
+#### Stato dei tool
+
+| Tool | Stato | Note |
+|---|---|---|
+| sm_base_flange | [x] misurato | chiuso 50x30 t2 = 3000 mm3; aperto L40 estruso 20 = 1600 mm3 (box 20x40x2) |
+| sm_hem | [x] misurato (closed, open, rolled) | tear_drop NON esposto (7 varianti senza feature) |
+| sm_sketched_bend | [x] misurato | 60x30 t2 piegata 90 gradi: volume 3600 -> 3600 (delta 0); ingombro X 31,28761 calcolato = misurato |
+| sm_flatten | [x] misurato | sviluppo 60 mm (calcolato) ; ripiegata: X 33,2876 |
+| sm_parameters | [x] parziale | lettura + spessore/raggio (spessore 2 -> 3: volume 4500). K-factor NON modificabile: solo lettura |
+| sm_edge_flange | NON esposto | 4 approcci provati (vedi sotto), nessuna feature creata |
+| sm_export_flat_pattern | NON esposto | 3 approcci provati (vedi sotto) |
+
+Test live `tests/test_ext_sheetmetal_live.py`: **19/19 PASS** (`.venv\Scripts\python.exe tests\test_ext_sheetmetal_live.py`).
+Offline: `tests\test_offline.py` 146 PASS; FAIL solo sui 3 controlli di conteggio tool (`265 tool esposti`, execute_python x2):
+il server ora espone 281 tool (il conteggio include anche i lotti degli altri agenti).
+pyflakes: 0 avvisi sui 3 file.
+
+#### Numeri misurati (test live, esito reale)
+- S1 closed 50x30 t2: volume 3000.0 mm3 (calcolato 3000).
+- S1 aperto L40 depth 20 t2: volume 1600.0 (calcolato 1600); box X 20, Y 40, Z 2.
+- S2 hem closed (L 5, gap 0,5, R 0,5, K 0,5, su spigolo Y=50 z=15): volume 3000 -> 3251.92 (delta 251.92);
+  sviluppo Y 50 -> 54.1987 (+4.1987). Check: 4.1987 x t(2) x W(30) = 251.92. Riferimento BA = pi(R+K t) = 4.7124 NON
+  coincide con il misurato: la formula semplice non e' il valore di SolidWorks per l'orlo; il test usa la coerenza
+  volume/sviluppo (non una formula). [~] sull'allungamento teorico.
+- S2 hem open: delta 265.619 (sviluppo +4.427, coerente).
+- S2 hem rolled (DAngle = pi): delta 132.743 (sviluppo +2.2124, coerente).
+- S3 piega 60x30 t2 R2 K0,5 a 90 gradi sulla linea Y=30: volume 3600 -> 3600.0; X max 31.287611 (calcolato
+  31.28761 = R + (60 - (30-(R+t)) - BA), BA = pi/2 (R+K t) = 4.71239); Y max 30.0; sviluppo 60.0 (box flat 2 x 60 x 30).
+- S4 lamiera 2 -> 3 mm: volume 4500.0 (calcolato 4500), flangia base aggiornata.
+
+#### Trappole API scoperte (misure)
+1. `FeatureManager.CreateCustomBendAllowance()` -> "Impossibile trovare membro" col late binding. Serve
+   `fm._FlagAsMethod("CreateCustomBendAllowance")` prima della chiamata. Vale anche per `GetCustomBendAllowance`.
+2. `InsertSheetMetalBaseFlange2` NON crea la feature (None, nessun errore; anche con PCBA nullo: errore di tipo).
+   Funziona: `CreateDefinition(34)` -> Thickness, BendRadius, OverrideKFactor, KFactor, D1EndConditionType=0,
+   D1EndConditionDistance -> `CreateFeature(dd)`. NON chiamare `AccessSelections` su una definizione nuova (errore).
+3. Modificare `Thickness` della feature `SheetMetal` ("Lamiera1") NON cambia la flangia base (volume resta 3000):
+   va modificata anche ogni `SMBaseFlange` (GetDefinition -> AccessSelections(doc, VARIANT nullo) -> ModifyDefinition).
+4. Flangia da spigolo (`InsertSheetMetalEdgeFlange2`, `CreateDefinition(37)` con `Edges`/`set_Edges`/`ISetEdges`,
+   con spigolo selezionato o in array, con e senza SketchFeats vuoto, BooleanOptions 0/1/4, BendPosition 1/2,
+   UseDefaultBendRadius): in TUTTE le varianti nessuna feature (volume e box invariati). `GetEdgeCount` resta 0 dopo
+   `Edges = ...`. Non esposto.
+5. Orlo `InsertSheetMetalHem2`: funziona con lo spigolo SELEZIONATO (mark 0). Tipi: open 0, closed 1, rolled 3
+   (swHemTypes_e). Per `rolled` il parametro DAngle DEVE essere pi (rad): con 0 non crea nulla. Tear drop (2): nessuna
+   feature in 7 varianti (ReliefTearTypes 0/1/3, UseDefaultRelief, DAngle pi, pi/2, DRad 0,002). Non esposto.
+6. Piega da schizzo `InsertSheetMetal3dBend(Angle, UseDefaultRadius, Radius, Flip, BendPos, PCBA)`: funziona con SOLO lo
+   schizzo selezionato (mark 0). Con la faccia fissa selezionata in aggiunta (mark 1 e mark 0) non crea nulla: il
+   parametro fixed_face_point NON e' esposto; il lato fisso lo sceglie SolidWorks (qui quello con Y=0).
+   La linea di schizzo risulta il bordo esterno: tratto A = 30 - (R+t) (verificato numericamente).
+7. Sviluppo: feature `FlatPattern` ("Ripetizione piatta1") creata da SolidWorks con la lamiera. `IsSuppressed` True = piegata
+   (stato iniziale). `SetSuppression2(1, 2, ...)` = sviluppata (swUnSuppressFeature = 1), `SetSuppression2(0, 2, ...)` = piegata.
+   Su una lamiera senza piegature (rettangolo) lo sviluppo ha lo stesso ingombro: serve una piega per vederlo.
+8. K-factor: `KFactor` su ISheetMetalFeatureData e IBaseFlangeFeatureData (anche con OverrideKFactor e con l'oggetto
+   GetCustomBendAllowance) si rilegge sempre 0,5 dopo il set a 0,4. Non persistito: sm_parameters legge K ma non lo
+   modifica. Orlo e piega da schizzo usano K = 0,5 fisso (PCBA): il K della flangia base non e' verificato su una piega.
+9. Export DXF dello sviluppo: 
+   - `doc.ExportFlatPatternView(path, 1)` BLOCCA lo script (COM appeso, timeout dopo 120 s, serve `labrun --kill`).
+     Probabile finestra modale di SolidWorks: NON riprovare senza verificare a schermo l'istanza dedicata.
+   - `doc.Extension.SaveAs(path, 0, 1|2, nullo, e, w)` -> False, errore 256, nessun file.
+   - `doc.ExportToDWG2(path, "", 1, True, alignment, False, False, 0, nullo)` -> False, nessun file.
+   Tool NON esposto. Da rivedere con un'istanza visibile (il file di prova non e' stato creato).
+10. Nel test c'e' `cleanup` di live_common: la riga "istanza utente intatta: False" compare perche' a inizio test c'erano
+    PID [3920, 15592, 15620] e a fine ne erano chiusi 3920 e 15620 (non il mio PID, che il test chiude da solo).
+    Il test non chiude mai altri PID: segnalo solo il dato.
+
+#### RICHIESTE A OPUS
+- Il tool `sm_edge_flange` e `sm_export_flat_pattern` (2 dei 7 richiesti) non sono esposti: decidere se riprovarli con
+  un'istanza visibile (per l'export: capire se SolidWorks apre una finestra modale) o se toglierli dal piano.
+- K-factor: decidere se accettare `sm_parameters` in sola lettura per K (come ora) o cercare un'altra via (es.
+  ricreare la flangia base con il K giusto).
+- Il conteggio dei tool nei 3 controlli offline va aggiornato (ora 281 tool esposti, altri lotti inclusi).
+- STATO.md / ATLANTE.md: non toccati (regola del lotto); aggiornare con questi esiti.
+
+#### Secondo giro (richiesta del coordinatore): sm_edge_flange e sm_export_flat_pattern
+
+### sm_export_flat_pattern: RIESCE (esposto, test S5 PASS)
+- Metodo: `doc.ExportToDWG2(path_dxf, path_sldprt, 1, True, byref R8, False, False, opzioni, nullo)`. Il secondo argomento
+  e' il percorso del .sldprt SALVATO (non vuoto). Valore misurato: True, file test_output/sm_flat.dxf = 20901 byte nel
+  probe, 20900 byte nel test; contiene "ENTITIES".
+- Pezzo non salvato: il tool rifiuta con "Il pezzo non e' salvato: salvalo prima (save_document)...". Verificato nel test.
+- Preferenza: swDXFDontShowMap (21, swUserPreferenceToggle_e) letta, impostata a True, ripristinata in finally.
+  Letta prima: False. Dopo il ripristino: False. Il tool la imposta con `self._sw_app` (come data_export).
+- `ExportFlatPatternView` non richiamato (blocca lo script; vedi primo giro).
+- Opzione linee di piega: il tool passa 1 (default, bend_lines=false) oppure 5 (1+4 con bend_lines=true). NON
+  verificato il bit 4 (la prova del bit 4 non e' stata fatta: la tool la espone come opzione non testata).
+- Il tool richiama `sm_flatten(True)` prima dell'export. OVERWRITE = {"sm_export_flat_pattern": "filepath"}.
+
+### sm_edge_flange: NON esposto (3 tentativi, nessuna feature con volume)
+1. `doc._FlagAsMethod("InsertSketchForEdgeFlange")` + `InsertSketchForEdgeFlange(spigolo, pi/2, False)` sul bordo
+   Y=50 z=15: restituisce una feature `ProfileFeature` ("Schizzo8") ma lo schizzo ha 0 segmenti (`SketchManager`,
+   `GetSketchSegments` = 0) e 0 quote (sketch_dimensions = []). Poi `InsertSheetMetalEdgeFlange2(arr([spigolo]), arr([schizzo]),
+   1|128, pi/2, 0.002, 1, 0.0, 1, 0.5, 0.0005, 0.0005, 1, nullo)`: restituisce una feature `EdgeFlange`
+   ("Bordo-Flangia1") ma il volume resta 3000 e il box non cambia (flangia di lunghezza nulla).
+   Piano del sketch: origine (0,50,0), asse X = Z, asse Y = X, normale Y (piano dello spigolo, non normale al bordo).
+2. Schizzo profilo manuale su piano "Top" (normale Z): rettangolo x 50..70, y 0..2 mm (spessore X, lunghezza Y 20);
+   `InsertSheetMetalEdgeFlange2(arr([spigolo]), arr([schizzo]), 1|128, pi/2, 0.002, 1, 0, 1, 0.5, ...)`: feature
+   restituita non nulla, volume 3000 invariato, delta 0. Nessuna feature creata.
+3. Selezione dello spigolo (`_select_point`, mark 0) e dello schizzo (`_select_feature`, append, mark 1; contatore
+   selezioni 1: lo schizzo non viene selezionato), poi `InsertSheetMetalEdgeFlange2(nullo, nullo, ...)`: nessuna feature,
+   volume 3000.
+Stato: [~] non esposto. Da decidere: il profilo deve essere quello che SolidWorks genera in UI (non ancora capito come
+ottenerlo via API: lo schizzo dell'API e' vuoto e la selezione dello schizzo non avviene con SelectByID-like).
+Richiesta a Opus: decidere se rinunciare a sm_edge_flange o indicare come generare il profilo (es. disegnando
+il profilo nel piano giusto con le quote della lunghezza).
+
+### Esito finale del giro
+- Test live tests/test_ext_sheetmetal_live.py: 21/21 PASS (S1-S5).
+- Offline: 145 PASS; 3 FAIL solo sui conteggi tool (265 nel test, ora 285 esposti con gli altri lotti).
+- pyflakes: 0 avvisi sui 3 file.
+- Laboratorio sm: chiuso prima del test. Il PID del test (3632) e' chiuso. Altri PID presenti nella lista orfani
+  (3864, 13480) non sono miei.
+
+#### Flangia sul bordo (Opus, 2026-10-19, laboratorio opus) [x]
+- `InsertSheetMetalEdgeFlange2(spigoli, [schizzo], 128|1, angolo, r, posizione, 0, 1, 0.5, 0.0005, 0.0005, 1, nullo)` crea la feature
+  SOLO se SketchFeats contiene uno schizzo: lo crea `doc.InsertSketchForEdgeFlange(spigolo, angolo, flip)` (da marcare con
+  `_FlagAsMethod`), ma VUOTO -> flangia lunga zero (volume invariato). Si modifica poi lo schizzo assorbito dalla flangia
+  (select + EditSketch) e si disegna il rettangolo del profilo: lato inferiore sullo spigolo (estremi del vertice convertiti con
+  ModelToSketchTransform: schizzo = sc*M^T*m + t), altezza `length` lungo +y dello schizzo (= verso della flangia), poi
+  ForceRebuild3. Misure: lamiera 50x30x2, r 2, K 0,5, profilo 20 a 90 gradi -> 4122,743 mm3 = 2*30*((50-4)+(22-4)+pi/2*3),
+  box X 20, sviluppo 68,712389 (= 46+18+pi/2*(r+K t)); seconda flangia a 45 gradi sull'altro bordo: +772,3 mm3. Test S6 7/7.
+
+### Lotto weldments
+
+Stato: 5 tool su 6 `[x]` misurati; `weldment_gusset` `[~]` non fatto (3 approcci falliti, vedi sotto); `weld_bead` non fatto (tempo).
+File: `solidworks_mcp/automation/ext_weldments.py`, `solidworks_mcp/tools_ext/weldments.py`, `tests/test_ext_weldments_live.py`.
+
+#### Test live: 17/17 PASS (`tests/test_ext_weldments_live.py`, istanza dedicata, PID proprio chiuso)
+| Sezione | Misurato | Calcolato | Esito |
+|---|---|---|---|
+| W1 iso / square tube | 4 misure, es. `40 x 40 x 4` presente | - | PASS |
+| W2 telaio 200, 4 corpi | 427844.7999 mm3 | 4 x 534.796 x 200 = 427837.1579 (scarto +0.0018 %) | PASS |
+| W2 telaio, confronto con spigoli vivi (576 mm2) | 460800 calcolato | scarto -7.15 %, informativo: il profilo ha gli arrotondamenti | PASS |
+| W2 un segmento per id `S0-0-1` | 106959.2895 mm3 | 534.796 x 200 = 106959.2895 | PASS |
+| W2 linea 300 | 160438.9342 / 300 = 534.7964 mm2 | faccia d'estremita' (measure_face) 534.7964 mm2 | PASS |
+| W3 taglio T (B da 150 a 130) | 69523.5382 mm3 | 534.796 x 130 = 69523.5382 (sottratto 10695.9289 = atteso) | PASS |
+| W3 intersezione membro tagliato / limite (combine common) | nessun corpo creato | nessuna interferenza | PASS (vedi limite sotto) |
+| W3 estensione (B da 100 a 130) | 69523.5382 mm3 | 69523.5382 | PASS |
+| W4 tappo 10 mm | +1 corpo, delta 10240.0000 mm3 | 32 x 32 x 10 = 10240 (spigoli vivi); con arrotondamento interno 10102.6548 (scarto +1.36 %) | PASS |
+| W5 distinta telaio 200 | 1 voce, quantita' 4, ingombro 240 mm | 200 + 2 x 20 = 240 | PASS |
+
+Offline `tests/test_offline.py`: 145/148. I 3 FAIL sono i controlli previsti sul numero di tool (285 tool esposti ora, il conteggio
+atteso era 265; include anche i lotti degli altri agenti) e i 2 su execute_python. Pyflakes 0 avvisi sui 3 file.
+
+#### Trappole API scoperte (con le misure)
+1. `FeatureManager.CreateStructuralMemberGroup()` con late binding: "Impossibile trovare membro" (CDispatch, `dir()` vuoto).
+   Funziona con `Invoke(DISPATCH_METHOD)` sul dispid di `GetIDsOfNames` (helper `_wld_call`). Stesso problema per `InsertWeldmentCutList2`
+   (`_wld_raw`). Dopo, `g.Segments = VARIANT(VT_ARRAY|VT_DISPATCH, segmenti)`, `ApplyCornerTreatment`, `CornerTreatmentType = 1` (45 gradi), `Angle` (radianti) vanno bene.
+2. Profili: cartella `app.GetUserPreferenceStringValue(29)`, norme = sottocartelle di primo livello (`iso`, `ansi`, `ansi inch`, `AS`, `BSI`, `CISC`, `DIN`...).
+   Misure = `app.GetConfigurationNames(file.sldlfp)` (es. `iso/square tube` -> `20 x 20 x 2`, `30 x 30 x 2.6`, `40 x 40 x 4`, `80 x 80 x 5`).
+   Le `sizes` sono restituite solo quando il profilo e' filtrato (altrimenti solo `count`), per non esplodere l'output.
+3. Il profilo `40 x 40 x 4` ha spigoli esterni R 8 mm e interni r 4 mm: area 534.796447 mm2 misurata sulla faccia (= formula con R 2t e r t).
+4. Feature membri: `WeldMemberFeat`; corpi = un corpo per segmento; con un gruppo di segmenti collegati il mitra e' gia' fatto.
+5. Trim/extend `InsertWeldmentTrimFeature2(EndCond, Options, Gap, BodiesToTrim, BodiesOrFaces)`:
+   - EndCond `4` (= swSolidworksWeldmentEndCondOptions_e.swEndConditionTrim), Options `0` = solo taglio: il membro che attraversa il limite viene tagliato (feature `WeldCornerFeat`, nome `Accorcia/Estendi1`; il corpo tagliato prende quel nome).
+   - Options `1` = taglio + estensione: il membro che si ferma prima del limite viene allungato (100 -> 130 mm, misurato).
+   - EndCond `1`, `2`, `3` con Options 0 hanno modificato il corpo SBAGLIATO (il limite, es. 160438 -> 90915 con EC2): NON usati.
+   - Options 2 e 4 con EC 4: nessun effetto. Gap non provato (sempre 0).
+   - Il valore di ritorno e' un Feature (non None) anche quando non cambia nulla: il tool verifica con i volumi.
+6. End cap `InsertEndCapFeature3(Depth, GivenOffset, Chamfer, Offset, WallRatio, ChamferValue, CornerTreat, DepthOffset, Reverse, Dir)`:
+   - `Dir = 3` (swSpecifyInset): tappo a filo, +1 corpo, volume 32x32xt (1024 mm2 a spigoli vivi).
+   - `Dir = 2`: crea un ANELLO (volume 576 x t = la sezione del tubo), non un tappo: scartato.
+   - `Dir = 1`: 4892.036 mm3 per t=10: scartato.
+   - Offset 2 mm con Dir 3: il tappo diventa 36x36 (12960 mm3 per t=10), cioe' l'offset ALLARGA, non riduce. Non testato con offset negativo: la descrizione del tool dice solo "inset" e va verificata.
+   - Chamfer: parametro passato, NON misurato (nessun test).
+7. Distinta di taglio: `InsertWeldmentCutList2(corpi)` crea la cartella `CutListFolder` (nome `Elenco elementi1`), il suo `GetSpecificFeature2` e' un `IBodyFolder`.
+   - `GetBodyCount()` = 4, `GetBodies()` restituisce i corpi (vanno incapsulati con `win32com.client.Dispatch`).
+   - `UpdateCutList()` restituisce False anche con la distinta gia' aggiornata: il tool lo riporta come `update_result`, non come errore.
+   - Ingombro di un membro del telaio 200: 240 x 40 x 40 mm (mitra). La lunghezza di taglio reale NON e' l'ingombro: da correggere se serve la lunghezza vera (proprieta' custom "LENGTH" non esplorata).
+   - Il tappo e' un corpo della distinta: la voce compare anche per il tappo (lunghezze 10 x 32 x 32). Da decidere con Opus.
+
+#### Weldment_gusset: NON fatto `[~]` (3 approcci falliti)
+- Approccio 1: `InsertGussetFeature3(0.008, DirType 0/1/2, LocType 0/1, BIsProfile True/False, D1 0.04, D2 0.04, D3 0, Angle pi/2, ...)`
+  con facce `_find_entity` (Y 150 z 20 e Y 20 z 150) selezionate con `_select_point` marks 0/1, 1/2, 1/1: ritorno None, feature 19 -> 19, delta 0.
+- Approccio 2: `CreateDefinition(118)` (swFmSMGusset) + `AccessSelections` + `SetSupportingFaces` + setter: "Nome sconosciuto" per tutte le
+  proprieta' (ProfileDistance1, Thickness, ...), `CreateFeature` -> None. Solo `ProfileType` si e' messo senza errore (ma non verificato).
+- Approccio 3: stesso del 2 con `AccessSelections(doc, VARIANT(VT_DISPATCH, None))`: "Il server ha sollevato un'eccezione".
+- Geometria di prova: due membri a L (sketch Front: (0,0)-(300,0) e (0,0)-(0,300), un solo gruppo, mitra), facce interne z=20 e y=20.
+  Volume atteso del fazzoletto triangolare: 1/2 x 40 x 40 x 8 = 6400 mm3.
+- Durante le prove la lab si e' bloccata 3 volte (timeout, possibile finestra modale di SolidWorks su errore: IPOTESI non verificata).
+
+#### Non fatto
+- `weld_bead` (InsertFilletBeadFeature3): non provato.
+- Interferenze: la prova usa `combine_bodies common` (nessun corpo = nessuna intersezione): ragionevole ma indiretta. `check_interference` e' solo per assiemi.
+
+#### Richieste a Opus
+- Per `weldment_gusset`: serve decidere se rifare la prova con l'API del dispatch tipizzato (type library) o rinviarla.
+- Il test chiude la sua istanza; il lotto e' pronto per la regressione dell'orchestratore (`test_offline` con il conteggio dei tool da aggiornare).
+- Il server ha avuto un errore di sintassi in `automation/ext_sheetmetal.py` (altro agente) durante la prima esecuzione del test: risolto da solo dopo qualche minuto, non mio.
+
+### Lotto mold
+
+Stato: 1 tool esposto (`undercut_analysis`) [x] misurato. Tool 1-4 NON esposti: [~] API Mold non disponibile in questa istanza.
+
+#### Tool
+
+### 1. mold_parting_line — NON ESPOSTO ([~])
+Prove (tutte senza feature creata: `InsertMoldPartingLine` restituisce None, nessuna feature nuova, nessun errore):
+- pieno cilindrico R=20 alto 20, direzione faccia piana (fondo, mark 0/1/4), nessuno spigolo: nessuna feature.
+- pieno cilindrico, direzione piano Front (mark 0): nessuna feature.
+- coppa (cilindro R=20 alto 20, shell 2, faccia x=20 aperta): direzione faccia fondo mark 0 / 1 / 2 / 4, con e senza spigolo
+  rim (punto [20,0,20] mark 1 e 2, poi [0,0,20] mark 1), flip True/False: nessuna feature in nessuna combinazione.
+- coppa con sformo 2 deg (extrude draft_angle=2, draft_outward False/True) + shell: nessuna feature (flip False/True).
+- direzione piano Right (mark 0/1/2/4): nessuna feature.
+Totale: oltre 3 approcci, quindi tool tolto dallo schema.
+Nota: la coppa del compito ha l'asse lungo X in questa istanza (sketch "Front" estruso lungo +X: box x 0..20, y,z -20..20).
+
+### 2. mold_shutoff_surface — NON ESPOSTO ([~])
+Blocco 40x30x20 con foro passante Ø10 (il taglio passante `extrude_cut` con end_condition through_all non ha creato feature;
+il foro e' stato fatto con depth 50 blind/blind). `InsertMoldShutOffSurface()` -> com_error -2147352573 "Impossibile trovare membro"
+(il membro non esiste nel dispatch di questa istanza).
+
+### 3. mold_parting_surface — NON ESPOSTO ([~])
+Dipende dal tool 1: senza linea di divisione non si prova.
+
+### 4. mold_tooling_split — NON ESPOSTO ([~])
+Dipende dai tool 1 e 3: non provato.
+
+### Causa probabile (da verificare in SW, non in codice)
+- Nel registro `HKLM\SOFTWARE\SolidWorks\SOLIDWORKS 2026\Addins` non esiste nessun add-in "Mold Tools" (elenco: Autotrace,
+  Auto Drawings, CircuitWorks, Flow Simulation, Visualize, Plastics, XPS, Costing, Part Reviewer, CAM, Design Checker,
+  TolAnalyst, ScanTo3D). Nessun file `*mold*.dll` nella cartella di installazione.
+- Probabile: modulo Mold Tools non installato/licenziato (SW Student). Opus: verificare con Strumenti > Componenti
+  aggiuntivi nell'interfaccia di SW 2026 (se non compare "Mold Tools" il problema e' di licenza/installazione).
+
+#### Tool 5: undercut_analysis — [x] misurato
+Implementazione: `solidworks_mcp/automation/ext_mold.py` (`MoldOperations.undercut_analysis`), schema in
+`solidworks_mcp/tools_ext/mold.py`. Campioni = baricentri dei triangoli di tessellazione (GetTessTriangles, mm -> m).
+Normale: `Normal` per le facce piane, media dei vertici (GetTessNorms) per le altre. Campioni con |n.d| < 0,05 (pareti
+parallele) scartati. Raggio dal campione verso il lato della faccia (+d se n.d>0, -d altrimenti); la faccia e' in
+sottosquadro se il raggio incontra il corpo (RayIntersections, intersezioni con t > 0,1 mm e sul raggio entro 0,01 mm).
+Il criterio "raggio lungo +d E lungo -d" della specifica da solo darebbe falsi positivi sul fondo di una gola
+(il raggio -d parte dentro il materiale): per questo si usa il solo lato della faccia.
+
+Trappole: nessuna ulteriore. `RayIntersections` restituisce i punti di intersezione in `GetRayIntersectionsPoints`
+(6 valori per punto, punto ai valori 3..5), come in thickness_analysis.
+
+Test `tests/test_ext_mold_live.py` (8/8 PASS, istanza dedicata PID 13480, chiusa):
+- U1 blocco 40x30x20 +Z: 0 facce in sottosquadro (2 analizzate), volume 24000,0 mm3.
+- U2 gola (taglio y 5..16, z 8..12, lungo X, depth2 50 blind): volume 24000,0 -> 22400,0 mm3 (atteso 1600, 0,5 %).
+- U3 gola +Z: 2 facce, centri z [8,0; 12,0], aree [400,0; 400,0] mm2 (atteso 10x40 = 400).
+- U4a gola -Z: 2 facce. U4b gola +Y (gola aperta su quel lato): 0 facce.
+- U5 direzione 'diagonale': rifiutata.
+
+#### Offline e qualita'
+- pyflakes su `ext_mold.py`, `tools_ext/mold.py`, `tests/test_ext_mold_live.py`: 0 avvisi.
+- `tests/test_offline.py`: 145/148. I 3 FAIL sono quelli attesi sul numero di tool (285 esposti, duplicati []; execute_python
+  nascosto/riattivato). Opus li aggiorna alla fine.
+
+#### Trappole e osservazioni
+- Il primo script ha superato il timeout di 120 s del Bash (background automatico): usare `timeout` esplicito.
+- Uno script con `InsertMoldPartingLine` dopo `draw_*` e `extrude_cut` si e' appeso su una chiamata COM: `--kill` solo sul PID
+  del laboratorio mld (riavviato dopo).
+- Durante le prove il file `ext_sheetmetal.py` (altro agente) aveva un errore di sintassi e ha bloccato il caricamento del
+  laboratorio per circa 1 minuto: si e' atteso che tornasse a compilare.
+- Dopo il test il controllo "processi orfani" ha segnalato PID 3864: non e' un PID del lotto mld (il mio laboratorio era
+  chiuso con `chiuso`); non toccato.
+
+#### RICHIESTE A OPUS
+- Verificare la presenza di Mold Tools in SW (vedi "Causa probabile"). Se il modulo non e' disponibile, i tool 1-4 restano fuori.
+- Aggiornare i conteggi dei tool nel test offline (285 esposti) alla fine del lotto.

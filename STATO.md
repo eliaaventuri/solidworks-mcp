@@ -386,7 +386,14 @@ egr_f2.log`):
     `reorder_feature`, `create_feature_folder`, `set_appearance` (pezzo/corpo/faccia/feature, colore e trasparenza),
     `edit_sketch`, `change_sketch_plane`. Test 15/15. Da controllare: secondo l'agente `add_sketch_dimension` non accetta
     'origin' come entita' di una quota orizzontale (ha usato un altro riferimento).
-- Conteggio: 265 tool con `execute_python` (264 senza). In lavorazione: superfici 1, lamiera (Haiku), saldature (Haiku); poi feature avanzate,
+  - sheetmetal (7 tool, Haiku + Opus): `sm_base_flange`, `sm_edge_flange` (Opus: profilo disegnato nello schizzo creato da
+    InsertSketchForEdgeFlange), `sm_hem` (aperto, chiuso, arrotolato; a goccia `[~]`), `sm_sketched_bend`, `sm_flatten`,
+    `sm_export_flat_pattern` (DXF con ExportToDWG2, pezzo salvato), `sm_parameters` (K-factor solo in lettura `[~]`). Test 21/21 + S6 7/7.
+  - weldments (5 tool, Haiku): `list_weldment_profiles`, `structural_member` (telaio 0,0018 % dal calcolo), `weldment_trim_extend`,
+    `weldment_end_cap`, `weldment_cut_list`. Test 17/17. Fazzoletto (gusset) `[~]`: 3 approcci falliti, laboratorio bloccato 3 volte.
+  - mold (1 tool, Haiku): `undercut_analysis` (raggi dalle facce). Test 8/8. Linea/superficie di divisione, chiusure e divisione
+    maschio/matrice `[~]`: le API Mold non creano feature (nessun errore).
+- Conteggio: 278 tool con `execute_python` (277 senza). In lavorazione: superfici 1; poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

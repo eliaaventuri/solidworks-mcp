@@ -13,7 +13,7 @@ from pathlib import Path
 
 os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECTED_TOOLS tool, execute_python incluso
 
-EXPECTED_TOOLS = 265    # numero di tool con execute_python attivo (+ 55 dei lotti tools_ext: moka 7, sketch2 16, curves 6, bodies2 7, features2 6, analysis 7, manage 6; + list_sketch_relations, delete_sketch_entities; 197 + add_temperature, add_remote_load, add_bearing_load,
+EXPECTED_TOOLS = 278    # numero di tool con execute_python attivo (+ 68 dei lotti tools_ext: moka 7, sketch2 16, curves 6, bodies2 7, features2 6, analysis 7, manage 6, sheetmetal 7, weldments 5, mold 1; + list_sketch_relations, delete_sketch_entities; 197 + add_temperature, add_remote_load, add_bearing_load,
                         # add_simulation_contact, add_mesh_control del gruppo E; + move_faces)
 
 ROOT = Path(__file__).resolve().parent.parent
