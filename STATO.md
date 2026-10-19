@@ -376,7 +376,11 @@ egr_f2.log`):
   - bodies2 (7 tool): `move_copy_body`, `split_body` (anche salvataggio dei pezzi, OVERWRITE), `intersect_bodies`, `scale_body`,
     `curve_driven_pattern`, `sketch_driven_pattern`, `table_driven_pattern` (punti nell'argomento, senza file). Test 40/40.
     Il test completo dura ~11 minuti: per sezioni (`B1 B2`, `B3 B4`, `B5`).
-- Conteggio: 246 tool con `execute_python` (245 senza). In lavorazione: superfici 1, feature avanzate, gestione (Haiku), lamiera (Haiku); poi feature avanzate,
+  - features2 (6 tool): `fillet_advanced` (a facce, arrotondamento completo, raggi multipli, setback), `draft_advanced` (linea di
+    divisione; a gradino `[~]`), `dome`, `wrap_feature` (incisione, rilievo, tracciatura), `thread_feature` (filettatura modellata
+    Metric Die/Tap, +3 % dalla stima), `flex_feature` (flessione, torsione, rastremazione, allungamento). Test 50/50.
+    `indent_feature` `[~]` non esposto (`InsertIndent` sempre None, con spessore 0,001 appende SolidWorks).
+- Conteggio: 252 tool con `execute_python` (251 senza). In lavorazione: superfici 1, gestione (Haiku), lamiera (Haiku), saldature (Haiku); poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo

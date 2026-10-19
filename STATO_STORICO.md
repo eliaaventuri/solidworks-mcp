@@ -1176,3 +1176,84 @@ Riuso da `ext_moka.py` (non modificato): `_all_bodies`, `_resolve_bodies` (nome 
 
 #### RICHIESTE A OPUS
 - Nessuna modifica a file non miei. (Il conteggio dei tool nel test offline: +7.)
+
+### Lotto features2
+
+File: `solidworks_mcp/automation/ext_features2.py` (mixin `Features2Operations`), `solidworks_mcp/tools_ext/features2.py` (6 tool, nessuno
+distruttivo), `tests/test_ext_features2_live.py` (sezioni F1..F6), prove in `scripts_tmp/ft2_*.py`.
+Tool esposti: fillet_advanced, draft_advanced, dome, wrap_feature, thread_feature, flex_feature (6). NON esposto: indent_feature.
+
+#### fillet_advanced  [x]  (mode edges | faces | full_round)
+- API: `FeatureManager.CreateDefinition(1)` -> `ISimpleFilletFeatureData2.Initialize(tipo)` -> `SetFaces(lista, [facce])` / `Edges` -> `CreateFeature`.
+- TRAPPOLE: (1) `FeatureFillet3` con Ftyp=2 (facce) e marche non crea nulla; con Ftyp=3 crea un raccordo semplice di tipo 2 su UN SOLO lato
+  (misurato: volume -321.9 invece di -643.8). (2) `AccessSelections` su una definizione nuova solleva eccezione COM: non si chiama.
+  (3) Liste di facce = `swSimpleFilletWhichFaces_e`: facce 1 e 2; arrotondamento completo 3 (laterale 1), 4 (centrale), 5 (laterale 2); con
+  (5,4,3) la creazione puo' fallire: il tool riprova da solo con le laterali scambiate (`sides_swapped`). (4) Raggi multipli: `Initialize(0)`,
+  `Edges=[...]`, `IsMultipleRadius=True`, `SetRadius(elemento, r)` per ogni `GetFilletItemAtIndex(i)`; elemento <-> spigolo con
+  `ISldWorks.IsSame` (=1); ordine degli elementi non garantito. `GetRadius` subito dopo `SetRadius` legge 0 (la feature ha il valore giusto).
+  (5) Setback: `FeatureFillet3(Options=2|1, r, r, 0, 0, 0, 0, None, None, None, SetBackDistances, ...)` con spigoli e POI il vertice selezionati
+  (marca ininfluente); `SetSetbackVertices`/`SetSetbackVertexDistance` sulla definizione: eccezioni COM (e in late binding il nome `Set...`
+  con un argomento viene letto come proprieta'). Non supportato: setback insieme a raggi multipli (dichiarato).
+- Misure: arrotondamento completo parete t=10, L=60: -643.806 (calcolato t^2(4-pi)/8 L = 643.806); raccordo a facce r=4: -206.018 (=(1-pi/4) r^2 L);
+  raggi 2 (L=60) e 4 (L=40) su spigoli senza vertici in comune: -188.850 (scambiati sarebbe 240.354); setback 3 spigoli r=2 sul vertice: senza
+  -93.09, distanze 4: -104.07, distanze 8: -134.29. Ordine delle distanze di setback per spigolo non verificato (nei test sono uguali).
+
+#### draft_advanced  [x] linea di divisione  /  [~] sformo a gradino NON fatto
+- Linea di divisione: `InsertMultiFaceDraft(angolo, inverti, EdgeDraft=True, prop, False, False)` con direzione di estrazione (faccia o piano)
+  marca **1** e spigoli della linea marca **4** (marche 2, 8, 16, 0: nulla). Misura: boss 30x30 alto 20 su piastra, spigoli di base come linea,
+  5 gradi: -2018.082 mm3 = tronco di piramide 30 -> 26.5 calcolato. Direzione `flip` non misurata.
+- Step draft [~]: 3 approcci, nessuno funziona. (a) `InsertMultiFaceDraft(..., IsStepDraft=True)`: ignorato (stesso volume e `Type`=0 riletto).
+  (b) `CreateDefinition(swFmDraft=3)` ritorna None. (c) su uno sformo esistente `GetDefinition`: `StepType` si scrive (3 tapered / 6 perpendicular,
+  riletto) ma `Type=3` fa tornare `ModifyDefinition` False e resta 0; il volume non cambia. Il tool non lo espone e lo dichiara nella descrizione.
+
+#### dome  [x]
+- `IModelDoc2.InsertDome(altezza, inverti, ellittica)`: la faccia va selezionata con marca **1** (con marca 0 non succede nulla, nemmeno errore).
+- Misure (cilindro r=10): h=5 calotta 850.848 (calcolato pi h^2 (3R-h)/3 con R=12.5: 850.848); ellittica 1047.366 (mezzo ellissoide 1047.198, +0.016 %);
+  reverse = rientranza: -850.848 e -1047.214. Il parametro "continua" non esiste in questa API (non esposto).
+
+#### wrap_feature  [x]
+- `FeatureManager.InsertWrapFeature2(tipo 0 rilievo/1 incisione/2 tracciatura, spessore, inverti, metodo 0 analitico/1 spline, mesh)`; schizzo
+  selezionato con marca **4**, faccia con marca **1**. Lo schizzo sta su un piano tangente (piano di riferimento a distanza R dall'asse).
+  La feature si chiama sempre `Emboss` (tipo) / "Avvolgi1". Tracciatura: con spessore 0 non crea nulla, serve > 0 (viene ignorato): il tool
+  passa 1 mm e verifica che le facce aumentino (3 -> 4).
+- Misure (cilindro R=10, rettangolo 10 x 8 sviluppato, d=1): incisione -76.000 = a b d (1 - d/2R); rilievo +84.000 = a b d (1 + d/2R).
+  Lo sviluppo conserva la lunghezza d'arco (analitico).
+
+#### thread_feature  [x]
+- `CreateDefinition(swFmSweepThread=87)` -> `InitializeThreadData` -> `Type` ('Metric Die' albero / 'Metric Tap' foro, nomi dei file in
+  `C:\ProgramData\SolidWorks\SOLIDWORKS 2026\Thread Profiles`), `Size`, `EndCondition=0`, `BlindDepth`, `ThreadMethod` (0 taglio, 1 estrusione),
+  `RightHanded`, `ReverseDirection`; spigolo circolare PRESELEZIONATO; `CreateFeature`. Feature tipo `SweepThread`, nome "Filettatura1".
+- TRAPPOLE: (1) SolidWorks NON rifiuta una misura inesistente: ripiega in silenzio su un'altra configurazione ("M10x1" taglia 47 mm3,
+  "M10x1.0" 183). Le configurazioni hanno SEMPRE il decimale nel passo (`M6x1.0`, `M8x1.25`, `M10x1.5`): le 69 misure di Metric Die/Tap (lette aprendo
+  il .SLDLFP con `OpenDoc6(..., 3)` e `GetConfigurationNames`) sono incluse nel modulo; il tool normalizza ('M10x1' -> 'M10x1.0', 'M8' -> passo grosso)
+  e rifiuta le misure inesistenti elencando i passi validi. Per i profili inch / custom il nome si passa com'e' e NON e' validato.
+  (2) `IThreadFeatureData.Pitch` dopo la creazione resta 10 mm (default): NON e' leggibile il passo vero dalla definizione; il tool riporta
+  `pitch_mm` ricavato dal nome. Il passo e' verificato col volume (V ~ P). (3) `NumberOfStarts` letto 2 di default ma il filetto e' a una entrata.
+  (4) La filettatura parte dallo spigolo e va nel materiale per `length` (con uscita ~1.3 mm in piu': elica fra z=8.7 e z=30 per L=20 da z=30).
+- Misure (albero D10, L=20): M10x1.5 asportati 267.97 mm3 vs stima ISO (vano trapezoidale 0.685 mm2 x elica 378 mm) 259.34 (+3.3 %, tolleranza
+  dichiarata 6 %); M10x1.0 182.84 vs 179.03 (+2.1 %), rapporto 0.682 contro 0.690 stimato. Foro 8.5 con Metric Tap M10x1.5 L=15: -152.53.
+
+#### flex_feature  [x]
+- `FeatureManager.InsertFlexFeature(Rot*, Tan*, Rad*, Angolo, Pivot*, Tipo, TrimSx, TrimDx, Bordi)` col corpo selezionato (marca 1).
+  Rot = asse di flessione, Tan = direzione lungo il corpo, Rad = Tan x Rot. **Trim a 0 = nessun effetto** (la zona e' pivot +- trim; il tool usa
+  l'estensione del corpo lungo `axis`). Tipi: 0 flessione, 1 RASTREMAZIONE, 2 TORSIONE, 3 allungamento (la feature si chiama "Flesso1", tipo
+  `Bending` in ogni caso). Angolo: flessione/torsione in radianti, totale (ogni estremita' ruota di meta'); rastremazione adimensionale
+  (scala delle estremita' 1 -+ A/2); allungamento: A = pi (fattore - 1), il fattore moltiplica la lunghezza della zona (trim effettivi).
+  Per ogni estremita': allungamento = A * min(trim, distanza dall'estremita' del corpo) / pi.
+- Misure (barra 20x20x60): flessione 30 gradi volume x0.99961, normali delle estremita' a 14.999 gradi; allungamento x1.25 volume 30000 (x1.25),
+  lunghezza 75; zona 20 mm x1.5 -> lunghezza 70; torsione 40 gradi ingombro 12.8171 (=10 sqrt2 sin 65), volume x0.99932; rastremazione 0.5 estremita'
+  12.5 e volume x1.020833 (= (0.75^2 + 0.75 1.25 + 1.25^2)/3).
+
+#### indent_feature  [~] NON ESPOSTO
+- `FeatureManager.InsertIndent(spessore, gioco, escludi, dirgioco, taglia, dirtaglio)` non crea mai nulla (ritorna None). Prove (corpo bersaglio 40x40x20 e
+  utensile cubo 10 che lo attraversa da z=15 a 25, poi lastra da 3 mm): (1) selezione con `Body2.Select2` marche (1,2), (2,1), (1,1), (0,1), (1,0), (4,1),
+  (2,2); (2) `SelectByID2(nome, "SOLIDBODY")` marche 1/2 in entrambi gli ordini; (3) facce dell'utensile marca 2 / faccia del bersaglio marca 1;
+  parametri: spessore 0.0005..0.01, gioco 0 / 0.0005 / 0.001, i quattro booleani in tutte le 16 combinazioni sul primo gruppo: sempre `None`.
+  Con spessore 0.001 e gioco 0 (combinazione sola) la chiamata APPENDE SolidWorks (lab da riavviare); con (0, 0) marche e nessuna selezione corretta
+  idem. `IIndentFeatureData` non ha `CreateDefinition` (non e' in swFeatureNameID_e). Nessun getter per diagnosticare l'errore.
+
+#### RICHIESTE A OPUS
+- Aggiornare i conteggi dei tool (+6: fillet_advanced, draft_advanced, dome, wrap_feature, thread_feature, flex_feature) nel test offline
+  ("N tool esposti" e i due di execute_python) ed `EXPECTED_TOOLS` in `tests/live_common.py`.
+- ATLANTE.md: aggiungere ext_features2.py, tools_ext/features2.py, tests/test_ext_features2_live.py.
+- Le voci di RICERCA_MODELLAZIONE: shell_multi_thickness e thicken non erano nel mio incarico (non fatti).
