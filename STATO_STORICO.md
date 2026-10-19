@@ -1306,3 +1306,82 @@ test `tests/test_ext_analysis_live.py`. Prove: `scripts_tmp/ana_p1..p9.py`, `ana
 #### Stato
 [x] insert_bounding_box, insert_center_of_mass, insert_mate_reference, draft_analysis, thickness_analysis, section_view, fully_define_sketch (tutti misurati nel test live, 15/15).
 [~] insert_bounding_box best_fit=false non implementato (dichiarato nel risultato). Coni/cilindri obliqui: sformo non definito (dichiarato).
+
+### Lotto manage
+
+Test: `tests/test_ext_manage_live.py` -> **15/15 PASS** (una esecuzione, PID test 3148 chiuso, laboratorio mng chiuso).
+Offline: 145/148, i 3 FAIL sono quelli sul numero di tool (268 esposti; execute_python), da aggiornare da Opus.
+pyflakes su `automation/ext_manage.py`, `tools_ext/manage.py`, `tests/test_ext_manage_live.py`: 0 avvisi.
+
+#### Stato dei tool
+
+| Tool | Stato | Note |
+|---|---|---|
+| check_geometry | [x] parziale | Check2 + GetWhatsWrong + GetErrorCode2 funzionano. Il percorso "feature con errore" NON e' stato verificato: vedi trappola 2. |
+| reorder_feature | [x] | ReorderFeature2, indice B 20 -> 19 (misurato). Rifiuta se l'ordine non cambia. |
+| create_feature_folder | [x] | InsertFeatureTreeFolder2(2) crea `Cartella1` + `Cartella1___EndTag___`; rinomina con `folder.Name`. Tipo letto: `FtrFolder`. Volume 4000 -> 4000. |
+| set_appearance | [x] | part/body/face/feature, letti dopo la scrittura (vedi numeri test). |
+| edit_sketch | [x] | EditSketch come metodo ok. Foro r=5: volume 4000,000 -> 3214,602 (differenza 785,398 = pi*25*10). |
+| change_sketch_plane | [x] | Front (normale [1,0,0]) -> Top (normale [0,0,1]), volume 4000 -> 4000. |
+
+#### Numeri del test (esito reale)
+- G1 blocco sano: Geometria OK, 1 corpo, 0 difetti, 0 feature con errore.
+- G2 [~] raccordo r=2 portato a r=50: SW accetta senza errore, volume 1094,9 mm3, errori feature 0.
+- R1 indice B 19 < indice A 20, volume 4500 -> 4500.
+- F1 tipo FtrFolder, volume 4000 -> 4000.
+- A1 RGB letto [1.0, 0.0, 0.0]; A2 faccia x=10 RGB [0.0, 0.0, 1.0]; A3 trasparenza letta 0.5; A4 RGB [0,1,0] trasp 0.25; A5 corpo RGB [0,0,1].
+- E1 volume 4000,000 -> 3214,602; differenza 785,398 (atteso 785,398).
+- P1 normale prima [1,0,0], dopo [0,0,1] = normale di uno schizzo nuovo su Top [0,0,1]; volume 4000 -> 4000.
+
+#### Trappole scoperte (misure)
+1. **Parametri di uscita COM**: `doc.Extension.GetWhatsWrong(fs, ec, wn)` con tre `VARIANT(VT_BYREF|VT_VARIANT, None)`
+   funziona (ritorna True). Senza argomenti o con `None` errore ("Parametro non facoltativo" / "Incompatibilita' tra tipi").
+   Con nessun problema i valori restano `None`. `GetWhatsWrongCount` e' una PROPRIETA' (non si chiama).
+2. **GetErrorCode2**: va chiamato con `VARIANT(VT_BYREF|VT_BOOL, False)`; ritorna il codice (0 = ok) e il flag avviso si legge da `.value`.
+   Senza argomento: "Incompatibilita' tra tipi".
+3. **Raggio sproporzionato NON segnalato da SolidWorks** (limite [~]): raccordo r=50 su spigolo di 20 mm di un blocco 10x20x20
+   -> accettato, volume 1094,9, `GetErrorCode2` = 0, `GetWhatsWrongCount` = 0, rebuild "0 feature con errori".
+   Scalini provati: r=2, 9, 12, 50 sullo stesso spigolo: tutti senza errore (volumi 3982,8 / 3652,3 / 3417,7 / 1094,9).
+   Quindi check_geometry non ha un caso reale di feature in errore da mostrare nel test.
+4. **Raccordo r=12 su 4 spigoli** (`fillet_edges`): rifiutato in creazione ("Raccordo non riuscito, nessuna feature creata").
+   Un errore in creazione non lascia una feature in errore: non e' rilevabile da check_geometry.
+5. **Estrusione con profondita' 0**: `set_dimension_value` riporta "10.0 -> 10.0": SW rifiuta il valore senza errore.
+6. **Nomi quota**: il raccordo ha la quota `D1@Raccordo1` (non `Radius@...`); l'estrusione `D1@Estrusione-Estrusione1`.
+7. **get_sketch_plane_info lascia lo schizzo in modifica** (ActiveSketch non None): con lo schizzo aperto il volume letto e' 0.
+   Per questo `_plane_info_closed` chiude lo schizzo, pulisce la selezione e fa `ForceRebuild3(False)` prima di leggere il volume.
+8. **change_sketch_plane**: il nome del piano va passato in minuscolo a `_std_ref_feature` ("top", non "Top"), altrimenti il piano
+   non viene trovato e SW risponde False. Con mark 0/1 e config 1/2 il risultato e' lo stesso (True).
+9. **Materiale della feature**: `feat.GetMaterialPropertyValues` e' una PROPRIETA' (chiamarla con () da `None`). Il setter
+   `feat.SetMaterialPropertyValues2(arr, 2, None)` funziona.
+10. **Materiale del pezzo/faccia/corpo**: `doc.MaterialPropertyValues`, `face.MaterialPropertyValues`, `body.MaterialPropertyValues2`
+    sono PROPRIETA' lette e scritte con `r8_array` (9 valori: R,G,B 0..1, Ambient, Diffuse, Specular, Shininess, Transparency, Emission).
+    Il default usato se il vettore e' vuoto: [0.5,0.5,0.5,0.5,0.5,0.5,0.5,0,0].
+11. **Folder**: `InsertFeatureTreeFolder2` crea anche il tag di chiusura `Cartella1___EndTag___` (non e' una feature da spostare).
+12. **Processi**: alla fine del test restavano SLDWORKS 2680 (avviato 11:35, parent 1860, comando `/r`, NON mio: il mio 3148 e' chiuso)
+    e mancavano i PID 7980 e 10396 presenti all'avvio (non miei, non toccati: cleanup chiude solo il PID del test).
+    Il messaggio "istanza utente intatta: False" nel test e' quindi falso positivo dovuto ad altri agenti/utente.
+
+#### RICHIESTE A OPUS
+- Il controllo "istanza utente intatta" di `live_common.cleanup` confronta con i PID di avvio: con altri agenti in parallelo da' False
+  anche senza nostre chiusure. Forse va riformulato (controllare solo che il PID del test sia chiuso).
+- Per chiudere G2 come PASS vero serve un caso di feature in errore reale: da decidere (es. un tool che produca un'errore di
+  rebuild affidabile). Finche' non c'e', G2 e' un test sul comportamento riportato, marcato [~].
+- Numero di tool: 268 esposti (era 246 nel controllo offline); aggiornare il conteggio di test_offline.
+
+#### Aggiornamento: G2 con errore vero di ricostruzione (secondo giro)
+Sostituisce il limite [~] di prima: ora G2 verifica la rilevazione vera. Test: **15/15 PASS** (run finale, PID test 11788 chiuso, laboratorio mng chiuso).
+Scenario: blocco 40x40x10 centrato (rettangolo -20..20, Front, estruso 10); schizzo sulla faccia x=10 (create_sketch_on_face 10,0,0);
+cerchio r=5 con centro a (3,0); punto di origine (draw_point 0,0); quota orizzontale centro-punto `posx@Schizzo2` = 3;
+close_sketch; extrude_cut depth 5 (senza reverse); set_dimension_value `posx@Schizzo2` = 100; rebuild; check_geometry.
+Misure:
+- taglio dentro il blocco: volume 16000 -> 15607,301 (differenza 392,699 = pi*25*5, atteso 392,699).
+- dopo quota = 100: volume 16000,0; check_geometry: feature `Taglio-Estrusione1` (tipo ICE) errore **71**, ok=false.
+- GetErrorCode2 grezzo dopo ForceRebuild3: Taglio-Estrusione1 = 71, Schizzo2 = 0. GetWhatsWrong: (feature Taglio, codice 71), count 1.
+Trappole nuove:
+1. **Quota orizzontale a 0 tra centro e origine rifiutata**: `AddDimension fallito per ['P0-2','origine']` (anche con 'origin', anche
+   con punto draw_point in 0,0 come 'P4-4'; value 0 rifiutato). Quindi la quota e' stata data a 3 mm (non 0): deviazione dalla specifica.
+   Origine dello schizzo (`origin`) non usabile come entita' di quota in uno schizzo su faccia (il nome 'origine' non viene accettato).
+2. **extrude_cut con reverse=true** taglia dall'altro lato (volume -7607,301): per il taglio dentro il blocco usare reverse=false.
+3. **Blocco 20x20 con cerchio a 3 mm dal bordo**: taglio parziale (168,394 mm3): il cerchio deve stare dentro la faccia.
+4. Il volume letto con get_mass_properties subito dopo la chiusura dello schizzo non e' affidabile: rebuild_model prima di leggere.
+5. Il tool restituisce la lista GetWhatsWrong come tupla di oggetti COM: `_ww_name` li legge per nome ("Taglio-Estrusione1", codice "71").

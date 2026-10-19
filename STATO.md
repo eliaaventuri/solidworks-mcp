@@ -382,7 +382,11 @@ egr_f2.log`):
     `indent_feature` `[~]` non esposto (`InsertIndent` sempre None, con spessore 0,001 appende SolidWorks).
   - analysis (7 tool, Haiku): `insert_bounding_box`, `insert_center_of_mass`, `insert_mate_reference`, `draft_analysis` (numerica
     per faccia), `thickness_analysis` (raggi dalle facce, min/max), `section_view` (sezione della vista), `fully_define_sketch`. Test 15/15.
-- Conteggio: 259 tool con `execute_python` (258 senza). In lavorazione: superfici 1, gestione (Haiku), lamiera (Haiku), saldature (Haiku); poi feature avanzate,
+  - manage (6 tool, Haiku): `check_geometry` (difetti dei corpi + feature in errore: taglio fuori dal pezzo -> codice 71),
+    `reorder_feature`, `create_feature_folder`, `set_appearance` (pezzo/corpo/faccia/feature, colore e trasparenza),
+    `edit_sketch`, `change_sketch_plane`. Test 15/15. Da controllare: secondo l'agente `add_sketch_dimension` non accetta
+    'origin' come entita' di una quota orizzontale (ha usato un altro riferimento).
+- Conteggio: 265 tool con `execute_python` (264 senza). In lavorazione: superfici 1, lamiera (Haiku), saldature (Haiku); poi feature avanzate,
   corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
 
 ## Prossimo passo
