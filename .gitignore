@@ -12,3 +12,5 @@ build/
 .venv/
 test_output/
 scripts_tmp/
+.aider*
+opencode.json

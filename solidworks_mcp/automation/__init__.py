@@ -25,13 +25,20 @@ from .ext_sheetmetal import SheetMetalOperations
 from .ext_weldments import WeldmentsOperations
 from .ext_mold import MoldOperations
 from .ext_analysis import AnalysisOperations
+from .ext_sketch3 import Sketch3Operations
+from .ext_features3 import Features3Operations
+from .ext_sheetmetal2 import SheetMetal2Operations
+from .ext_assembly2 import Assembly2Operations
+from .ext_selection import SelectionOperations
 
 
 class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOperations, DocumentOperations, 
                            SketchOperations, FeatureOperations, DrawingOperations,
                            ModelingOperations, AssemblyOperations, MokaOperations, Sketch2Operations,
                            Features2Operations, Bodies2Operations, CurvesOperations, Surfaces1Operations, Surfaces2Operations,
-                           ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations, AnalysisOperations):
+                           ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations, AnalysisOperations,
+                           Sketch3Operations, Features3Operations, SheetMetal2Operations, Assembly2Operations,
+                           SelectionOperations):
     """
     Complete SolidWorks automation class
     
@@ -64,4 +71,9 @@ __all__ = [
     "AssemblyOperations",
     "DataExportOperations",
     "SimulationOperations",
+    "Sketch3Operations",
+    "Features3Operations",
+    "SheetMetal2Operations",
+    "Assembly2Operations",
+    "SelectionOperations",
 ]

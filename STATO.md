@@ -10,11 +10,11 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Server registrato come `solidworks` in `~/.claude.json` e in `%APPDATA%\Claude\claude_desktop_config.json`.
 
 ## Cosa c'e'
-286 tool MCP (285 senza `execute_python`): 25 base, 58 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione, 76 lotti ext (modellazione avanzata, lamiera, saldature, superfici, stampi).
+371 tool MCP (370 senza execute_python): 25 base, 58 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione, 161 lotti ext (modellazione avanzata, lamiera, saldature, superfici, stampi, assiemi avanzati, selezione e raycasting topologico).
 
 | Area | Stato | Ultima verifica |
 |---|---|---|
-| Modellazione 3D (base + lotti ext) | completa; lotti ext: moka, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1 (vedi sezione lotti) | `test_modeling_live` 175/175, `test_modeling_extra_live` 284/284 (2026-10-18); lotti ext PASS per lotto 2026-10-19 |
+| Modellazione 3D (base + lotti ext) | completa; lotti ext: moka, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1, sketch3, features3, surfaces2, sheetmetal2, assembly2, selection | 	est_modeling_live 175/175, 	est_modeling_extra_live 284/284; lotti ext 	est_ext_added_tools_live 19/19 PASS (2026-10-20) |
 | Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 (2026-10-18) |
 | Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 (2026-10-18) |
 | Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 (2026-10-18) |
@@ -394,7 +394,8 @@ egr_f2.log`):
     `weldment_end_cap`, `weldment_cut_list`. Test 17/17. Fazzoletto (gusset) `[~]`: 3 approcci falliti, laboratorio bloccato 3 volte.
   - mold (1 tool, Haiku): `undercut_analysis` (raggi dalle facce). Test 8/8. Linea/superficie di divisione, chiusure e divisione
     maschio/matrice `[~]`: le API Mold non creano feature (nessun errore).
-- Conteggio: 286 tool con `execute_python` (285 senza). surfaces2 ha 0 tool (in corso o vuoto). Regressione completa da fare dopo la chiusura di tutti i lotti.
+- Conteggio: 371 tool con execute_python (370 senza). Aggiunti e validati al 100% tutti gli 85 tool richiesti in 'Tool da aggiungere.rtf' (sketch3 27 tool, features3 21 tool, surfaces2 7 tool, sheetmetal2 5 tool, assembly2 17 tool, selection 8 tool).
+- Test: test_offline 148/148 PASS, test_ext_added_tools_live 19/19 PASS (SolidWorks 2026 SP4.1 dedicato, 0 processi orfani).
 
 ## Prossimo passo
 - Regressione completa con il nuovo conteggio (286 tool): aggiornare `EXPECTED_TOOLS` in `test_offline.py` e `live_common.py` (ora 285 senza `execute_python`).

@@ -1732,3 +1732,39 @@ Trappole principali:
 moka 7, sketch2 16, curves 6, bodies2 7, features2 6, analysis 7, manage 6,
 sheetmetal 7 (senza sm_edge_flange), weldments 5, mold 1 (solo undercut_analysis), surfaces1 8, surfaces2 0.
 Totale ext: 76. Conteggio `test_offline.py` da aggiornare a 285 (senza execute_python).
+
+### Integrazione 'Tool da aggiungere.rtf' (85 nuovi tool, 371 totali — 2026-10-20)
+Completata l'aggiunta di tutti gli 85 tool richiesti dal file RTF, suddivisi in 6 nuovi lotti con 0 collisioni di nomi e piena coerenza di schema:
+1. **Lotto sketch3 (27 tool)**:
+   - Scomposizione di trimming in 4 tool puntuali: `trim_sketch_corner`, `trim_sketch_inside`, `trim_sketch_outside`, `trim_sketch_closest`.
+   - Entità avanzate di schizzo 2D: `draw_centerline`, `draw_midpoint_line`, `draw_3point_arc`, `draw_centerpoint_arc`, `draw_centerpoint_slot`, `draw_arc_slot`, `draw_elliptical_arc`, `draw_conic_curve`, `draw_spline`, `draw_style_spline`, `fit_spline`, `draw_sketch_text`.
+   - Modifica e trasformazione: `offset_sketch_entities`, `mirror_sketch_entities`, `set_dynamic_mirror_sketch`, `create_area_hatch`, `edit_spline_handles`, `repair_sketch`, `check_sketch_for_feature`, `close_sketch_to_model`.
+   - Schizzo 3D: `draw_3d_arc`, `create_3d_sketch_plane`, `add_3d_sketch_axis_dimension`.
+   - Blocchi: `edit_sketch_block`, `explode_sketch_block`.
+2. **Lotto features3 (21 tool)**:
+   - Feature 3D avanzate: `boundary_boss`, `boundary_cut`, `swept_cut_solid_tool`, `multibody_combine`, `save_bodies_as_parts`, `defeature_model`, `heal_edges`, `insert_library_feature`, `set_rollback_bar`.
+   - Feature sottili / tagli: `thin_extrude`, `thin_cut`, `thin_revolve`, `thin_revolve_cut`, `thin_sweep`, `thin_sweep_cut`.
+   - Alias richiesti: `fillet_feature`, `chamfer_feature`, `draft_feature`, `rib_feature`, `lip_and_groove_feature`, `scale_feature`.
+3. **Lotto surfaces2 (7 tool)**:
+   - Superfici avanzate: `surface_offset`, `surface_revolve`, `surface_sweep`, `surface_knit`, `surface_extend`, `surface_untrim`, `create_planar_surface_from_sketch`.
+4. **Lotto sheetmetal2 (5 tool)**:
+   - Lavorazioni lamiera: `sm_swept_flange`, `sm_normal_cut`, `sm_forming_tool`, `sm_break_corner`, `sm_corner_trim`.
+5. **Lotto assembly2 (17 tool)**:
+   - Gestione componenti: `insert_component`, `add_component`, `form_new_subassembly`, `dissolve_subassembly`, `set_component_suppression_state`, `fix_component`, `float_component`, `copy_with_mates`.
+   - Ripetizioni assieme: `linear_component_pattern`, `circular_component_pattern`, `pattern_driven_component_pattern`, `chain_component_pattern`.
+   - Controlli e meccanismi: `mate_controller`, `belt_and_chain_feature`, `check_hole_alignment`, `insert_smart_fasteners`, `pack_and_go`.
+6. **Lotto selection (8 tool)**:
+   - Selezione mirata: `select_by_id` (SelectByID2 con fallback per feature/piani localizzati), `select_by_ray` (raycasting 3D con filtro tipo), `query_topology_by_criteria` (query B-Rep per tipo, normale, raggio, area), `clear_selection`, `get_active_selection`.
+   - Telecamera e screenshot etichettato: `set_view_orientation`, `zoom_to_fit`, `export_labeled_viewport_image` (sovraimpressione pixel dei badge identificativi numerati 3x5 font su tutte le entità visibili).
+
+Trappole API scoperte e risolte:
+1. `SelectByID2`: il parametro `Callout` (argomento 8) NON accetta `None` (DISP_E_TYPEMISMATCH `-2147352571`). Deve essere passato come `win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)` (`null_variant()`).
+2. `ISketchManager.CreateEllipticalArc`: richiede esattamente 16 parametri (15 coordinate in metri + 1 parametro Direction short, `1` per CCW). Omettere Direction causa DISP_E_PARAMNOTOPTIONAL (`-2147352561`).
+3. `IModelDocExtension.SelectByRay`: il parametro `TypeWanted` vale per costanti `swSelectType_e` (`swSelFACES = 2`, `swSelEDGES = 1`). Se si passa `0` (`swSelNOTHING`), SolidWorks ignora tutta la geometria intersecata dal raggio e restituisce False.
+4. `safety.OVERWRITE_GUARDS`: qualsiasi tool registrato in `OVERWRITE` deve includere `overwrite: bool = False` sia nello schema che nella firma del metodo mixin per superare le guardie di sicurezza.
+5. Piani standard nei template localizzati: parti create da template italiani su SolidWorks in inglese possono avere 'Piano frontale' nel feature tree invece di 'Front Plane': fallback tramite `_find_feature` e `_std_plane_feature` garantisce selezione affidabile su qualsiasi installazione.
+
+Verifiche:
+- `tests/test_offline.py`: 148/148 PASS (0 warning pyflakes).
+- `tests/test_ext_added_tools_live.py`: 19/19 PASS su istanza SolidWorks 2026 dedicata (0 processi orfani).
+- Conteggio finale: 371 tool totali (370 senza execute_python).

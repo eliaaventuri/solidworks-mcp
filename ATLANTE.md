@@ -35,8 +35,13 @@ solidworks_mcp/
     sheetmetal.py           lotto lamiera: flangia base, orlo, piega da schizzo, sviluppo, export DXF sviluppo, parametri; sm_edge_flange [~]
     weldments.py            lotto saldature: elenco profili, membro strutturale, taglia/estendi, tappo, distinta di taglio; gusset [~]
     mold.py                 lotto stampi: analisi sottosquadri; linea/superficie divisione e tooling split [~] (Mold Tools non disponibile in SW Student)
-    surfaces1.py            lotto superfici 1: (8 tool, in attesa di regressione)
-    surfaces2.py            lotto superfici 2: vuoto / in corso
+    surfaces1.py            lotto superfici 1 (8 tool): estrusione, offset, loft, superficie rigata, cuci, estendi, rifila
+    surfaces2.py            lotto superfici 2 (7 tool): offset, rivoluzione, sweep, cuci/unisci, allunga, crea superficie da schizzo
+    sketch3.py              lotto schizzo 3 (27 tool): trimming avanzato (corner/inside/outside/closest), entità 2D/3D (centerline, midpoint line, 3point arc, elliptical arc, conic curve, spline avanzate, blocchi)
+    features3.py            lotto feature 3 (21 tool): feature avanzate 3D, feature sottili, tagli/sweep dedicati, librerie feature, defeature, rollback bar, scale_body alias
+    sheetmetal2.py          lotto lamiera 2 (5 tool): flangia con sweep, taglio normale lamiera, forming tools, break corner / corner trim
+    assembly2.py            lotto assiemi 2 (17 tool): ripetizioni componenti (lineari, circolari, guidate, catena), copia con accoppiamenti, mate controller, cinghie, allineamento fori, Pack and Go
+    selection.py            lotto selezione e topologia (8 tool): select_by_id, select_by_ray, query_topology_by_criteria, clear_selection, get_active_selection, set_view_orientation, zoom_to_fit, export_labeled_viewport_image
   safety.py                   tool distruttivi (destructiveHint + nota [DESTRUCTIVE]), parametro overwrite e rifiuto della sovrascrittura
   config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
