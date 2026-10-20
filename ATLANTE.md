@@ -27,7 +27,16 @@ solidworks_mcp/
   tools_ext/                  tool aggiunti per lotti: un modulo per lotto (TOOLS, DESTRUCTIVE, OVERWRITE), uniti al gruppo modeling e a safety
     moka.py                   filettatura cosmetica, ripetizione di riempimento, corpi (elenca/elimina/combina/inserisci), lettura feature
     sketch2.py                trim/extend, smusso, ripetizioni e trasformazioni di schizzo, rettangoli, arco tangente, parabola, equazioni, schizzo 3D
-    curves.py ... mold.py     lotti successivi (curve, superfici, feature avanzate, corpi 2, gestione, lamiera, saldature, stampi)
+    curves.py               lotto curve: elica, elica a passo variabile, curva proiettata, linea di divisione, curva composita, curva per punti
+    features2.py            lotto feature avanzate: raccordo a facce/completo/setback, sformo con linea di divisione, cupola, avvolgi, filettatura modellata, flessione
+    bodies2.py              lotto corpi 2: sposta/copia, dividi, interseca, scala; ripetizioni guidate da curva/schizzo/tabella
+    analysis.py             lotto analisi: box di delimitazione, centro di massa, riferimento accoppiamento, sformo/spessore per faccia, sezione vista, schizzo definito
+    manage.py               lotto gestione: verifica geometria, riordino, cartelle, aspetto (colore/trasparenza), modifica e cambio piano schizzo
+    sheetmetal.py           lotto lamiera: flangia base, orlo, piega da schizzo, sviluppo, export DXF sviluppo, parametri; sm_edge_flange [~]
+    weldments.py            lotto saldature: elenco profili, membro strutturale, taglia/estendi, tappo, distinta di taglio; gusset [~]
+    mold.py                 lotto stampi: analisi sottosquadri; linea/superficie divisione e tooling split [~] (Mold Tools non disponibile in SW Student)
+    surfaces1.py            lotto superfici 1: (8 tool, in attesa di regressione)
+    surfaces2.py            lotto superfici 2: vuoto / in corso
   safety.py                   tool distruttivi (destructiveHint + nota [DESTRUCTIVE]), parametro overwrite e rifiuto della sovrascrittura
   config.py / config.json     configurazione: exe_path, timeout di avvio, unita', log (chiavi sconosciute ignorate con avviso)
   constants.py                costanti API SolidWorks (piani, errori, tipi)
@@ -80,7 +89,7 @@ tests/test_data_live.py            dati ed export (materiali, massa, equazioni, 
 tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3), argomenti per sezione: test_data_extra_live.py D7 D1
 tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
 tests/test_simulation_extra_live.py gruppo E (E3 FOS minimo, E5 frequenze/buckling/termico, E1 contatti locali, E4 carichi remoti/cuscinetto, E2 controllo mesh), argomenti per sezione
-tests/test_ext_<lotto>_live.py     un test live per lotto di tools_ext (moka1 = estensioni dei tool esistenti, moka2, sketch2, curves, ...), argomenti per sezione
+tests/test_ext_<lotto>_live.py     un test live per lotto di tools_ext (moka1/moka2, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1); argomenti per sezione
 tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
@@ -90,5 +99,5 @@ I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata
 ```
 .venv/          ambiente Python
 test_output/    file generati dai test
-scripts_tmp/    strumenti di sviluppo locali: laboratorio lab.py + labrun.py (istanze dedicate con nome), api_ref/ (enum, firme API, catalogo comandi), BRIEF_LOTTI.md + notes_<lotto>.md (sotto-agenti), esplorazione della type library (tlb.py, tlbgrep.py, swenum.py), worker con istanza dedicata (worker.py + run.sh + restart_worker.sh), pngtool.py, lingua.py (it/en), contatore di fase (fase2.ps1 + fase2.json), prove (c3p*.py)
+scripts_tmp/    strumenti di sviluppo locali: laboratorio lab.py + labrun.py (istanze dedicate con nome, codice ricaricato a ogni script), api_ref/ (enum swconst, firme dei metodi, catalogo RICERCA_MODELLAZIONE.md), BRIEF_LOTTI.md + notes_<lotto>.md (esiti e trappole di ogni lotto), prove (c3p*.py, sm_probe*.py, ana_p*.py, ecc.), lingua.py (it/en), pngtool.py
 ```

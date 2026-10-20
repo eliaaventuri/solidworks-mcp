@@ -4,6 +4,50 @@ Tutte le modifiche importanti a SolidWorks MCP sono scritte qui, dalla versione 
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/). Dettagli, misure e trappole dell'API: `STATO_STORICO.md`.
 Ogni numero citato e' stato misurato da un test sul PC di sviluppo (SolidWorks 2026 SP4.1 Student).
 
+## [7.0.0] - 2026-10-19
+
+Il server arriva a 286 tool (285 + `execute_python`, disattivato di default).
+76 tool nuovi in `tools_ext/`: 12 lotti di modellazione avanzata, lamiera, saldature, superfici e stampi.
+
+### Aggiunto
+- **Infrastruttura lotti**: `solidworks_mcp/tools_ext/<lotto>.py` (schemi) + `automation/ext_<lotto>.py` (implementazione);
+  laboratorio di sviluppo `scripts_tmp/lab.py` + `labrun.py` (istanze dedicate multiple, codice ricaricato a ogni script,
+  chiusura automatica dopo 45 min); riferimento API dalle DLL di interop (`scripts_tmp/api_ref/`).
+- **Log condiviso**: `_SharedRotatingFileHandler` salta la rotazione per 10 minuti se un altro processo tiene il file
+  (evita PermissionError con piu' sessioni Claude in parallelo).
+- **Lotto moka** (7 tool + estensioni dei tool esistenti): relazioni verso il modello/altri schizzi, piani aggiuntivi,
+  asse di rivoluzione da asse/spigolo/schizzo, `start_from`, `list_entities` con parametri di superficie/curva;
+  `add_cosmetic_thread`, `fill_pattern`, `list_bodies`, `delete_body`, `combine_bodies`, `insert_part`, `get_feature_definition`.
+  Test PASS.
+- **Lotto sketch2** (16 tool): trim (6 modi), extend, smusso, ripetizioni lineare/circolare, sposta/ruota/scala/copia,
+  rettangoli da centro e 3 punti, parallelogramma, arco tangente, parabola, curva da equazione, schizzo 3D. Test 50/50.
+- **Lotto curves** (6 tool): `create_helix`, `create_variable_pitch_helix`, `project_curve`, `split_line`,
+  `composite_curve`, `curve_through_points`. Molla su elica 0,024 % dal calcolo. Test 89/89.
+- **Lotto ext1** (estensioni, nessun tool nuovo): estrusioni sottili, sweep/loft completi, smusso a vertice,
+  shell multispessore, sistema di coordinate numerico, asole ad arco. Test 134/134.
+- **Lotto bodies2** (7 tool): `move_copy_body`, `split_body`, `intersect_bodies`, `scale_body`,
+  `curve_driven_pattern`, `sketch_driven_pattern`, `table_driven_pattern`. Test 40/40.
+- **Lotto features2** (6 tool): `fillet_advanced`, `draft_advanced`, `dome`, `wrap_feature`,
+  `thread_feature`, `flex_feature`. Test 50/50.
+- **Lotto analysis** (7 tool): `insert_bounding_box`, `insert_center_of_mass`, `insert_mate_reference`,
+  `draft_analysis`, `thickness_analysis`, `section_view`, `fully_define_sketch`. Test 15/15.
+- **Lotto manage** (6 tool): `check_geometry` (errore codice 71 verificato con taglio fuori pezzo), `reorder_feature`,
+  `create_feature_folder`, `set_appearance`, `edit_sketch`, `change_sketch_plane`. Test 15/15.
+- **Lotto sheetmetal** (6 tool esposti): `sm_base_flange` (3000 mm3), `sm_hem` (3 varianti),
+  `sm_sketched_bend` (X max 31.28761 = calcolato), `sm_flatten`, `sm_export_flat_pattern` (~20900 byte),
+  `sm_parameters`. Test 21/21.
+- **Lotto weldments** (5 tool): `list_weldment_profiles`, `structural_member` (0,0018 % dal calcolo),
+  `weldment_trim_extend`, `weldment_end_cap` (+10240 mm3), `weldment_cut_list`. Test 17/17.
+- **Lotto mold** (1 tool): `undercut_analysis` (gola: 2 facce, aree 400 mm2). Test 8/8.
+- **Lotto surfaces1** (8 tool): superfici di base; test live `test_ext_surfaces1_live.py`.
+
+### Limiti noti
+- `sm_edge_flange` `[~]`: API non crea geometria in nessuna combinazione provata.
+- `weldment_gusset` `[~]`: API Mold non disponibile (SW Student).
+- Tool stampi (parting line, shutoff surface, tooling split) `[~]`: Mold Tools non installato.
+- `surfaces2`: nessun tool (in corso).
+- `test_offline.py`: conteggio da aggiornare a 285 (senza `execute_python`).
+
 ## [6.0.0] - 2026-10-18
 
 Il server arriva a 202 tool (201 + `execute_python`, che e' disattivato di default).

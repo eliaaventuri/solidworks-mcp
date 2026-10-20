@@ -1,6 +1,6 @@
 # STATO — SolidWorks MCP
 
-Ultimo aggiornamento: 2026-10-18. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
+Ultimo aggiornamento: 2026-10-20. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
 Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D_E.md`. Mappa dei file: `ATLANTE.md`.
 
 ## Ambiente di sviluppo
@@ -10,16 +10,16 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 - Server registrato come `solidworks` in `~/.claude.json` e in `%APPDATA%\Claude\claude_desktop_config.json`.
 
 ## Cosa c'e'
-203 tool MCP: 25 base, 51 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione (statica, frequenze, buckling, termico).
+286 tool MCP (285 senza `execute_python`): 25 base, 58 modellazione, 38 disegni, 35 assiemi, 31 dati/export, 23 simulazione, 76 lotti ext (modellazione avanzata, lamiera, saldature, superfici, stampi).
 
-| Area | Stato | Test live (ultima regressione, 2026-10-17/18) |
+| Area | Stato | Ultima verifica |
 |---|---|---|
-| Modellazione 3D (blocco 1, gruppo B) | completa (UNI assente dal database di SolidWorks) | `test_modeling_live` 175/175, `test_modeling_extra_live` 284/284 (2026-10-18, con B7 e B8) |
-| Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 |
-| Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 |
-| Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 |
-| Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` (2026-10-18, per sezione) E3 42, E5 36, E1 53, E4 37, E2 25 |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 148/148 (anche su GitHub Actions); `test_timeout_live` 18/18 |
+| Modellazione 3D (base + lotti ext) | completa; lotti ext: moka, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1 (vedi sezione lotti) | `test_modeling_live` 175/175, `test_modeling_extra_live` 284/284 (2026-10-18); lotti ext PASS per lotto 2026-10-19 |
+| Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 (2026-10-18) |
+| Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 (2026-10-18) |
+| Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 (2026-10-18) |
+| Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` E3 42, E5 36, E1 53, E4 37, E2 25 (2026-10-18) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 148/148 (anche su GitHub Actions); `test_timeout_live` 18/18 (2026-10-18) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -348,7 +348,7 @@ egr_f2.log`):
 - **A, E, F, e i 9 strumenti nuovi**: non ancora iniziati. Quota angolare: il ribaltamento avviene quando SolidWorks applica il valore
   (`SystemValue`), la causa esatta si vede solo dal vivo. Offline: 148/148, pyflakes 0.
 
-## Lotti di tool nuovi (2026-10-18/19, in corso) — obiettivo di Elia: server completo, soprattutto per la modellazione
+## Lotti di tool nuovi (2026-10-18/19) — FATTI (tutti i lotti pianificati completati)
 - Infrastruttura: tool nuovi per lotti in `solidworks_mcp/tools_ext/<lotto>.py` (schemi, gruppo `modeling`) + mixin
   `automation/ext_<lotto>.py`; `DESTRUCTIVE`/`OVERWRITE` dei lotti uniti a `safety.py`. Laboratorio di sviluppo `scripts_tmp/lab.py NOME`
   + `labrun.py` (piu' istanze dedicate insieme, codice ricaricato a ogni script, chiusura da sola dopo 45 min). Riferimento API dalle
@@ -382,21 +382,23 @@ egr_f2.log`):
     `indent_feature` `[~]` non esposto (`InsertIndent` sempre None, con spessore 0,001 appende SolidWorks).
   - analysis (7 tool, Haiku): `insert_bounding_box`, `insert_center_of_mass`, `insert_mate_reference`, `draft_analysis` (numerica
     per faccia), `thickness_analysis` (raggi dalle facce, min/max), `section_view` (sezione della vista), `fully_define_sketch`. Test 15/15.
-  - manage (6 tool, Haiku): `check_geometry` (difetti dei corpi + feature in errore: taglio fuori dal pezzo -> codice 71),
+  - manage (6 tool): `check_geometry` (difetti dei corpi + feature in errore: taglio fuori dal pezzo -> codice 71),
     `reorder_feature`, `create_feature_folder`, `set_appearance` (pezzo/corpo/faccia/feature, colore e trasparenza),
-    `edit_sketch`, `change_sketch_plane`. Test 15/15. Da controllare: secondo l'agente `add_sketch_dimension` non accetta
-    'origin' come entita' di una quota orizzontale (ha usato un altro riferimento).
-  - sheetmetal (7 tool, Haiku + Opus): `sm_base_flange`, `sm_edge_flange` (Opus: profilo disegnato nello schizzo creato da
-    InsertSketchForEdgeFlange), `sm_hem` (aperto, chiuso, arrotolato; a goccia `[~]`), `sm_sketched_bend`, `sm_flatten`,
-    `sm_export_flat_pattern` (DXF con ExportToDWG2, pezzo salvato), `sm_parameters` (K-factor solo in lettura `[~]`). Test 21/21 + S6 7/7.
+    `edit_sketch`, `change_sketch_plane`. Test 15/15. Limite [~]: raggio sproporzionato non segnalato da check_geometry
+    (SW accetta senza errore); G2 verificato con feature in errore reale (taglio fuori dal pezzo, codice 71).
+  - sheetmetal (7 tool, senza sm_edge_flange `[~]`): `sm_base_flange`, `sm_hem` (aperto, chiuso, arrotolato; a goccia `[~]`),
+    `sm_sketched_bend`, `sm_flatten`, `sm_export_flat_pattern` (DXF con ExportToDWG2, pezzo salvato),
+    `sm_parameters` (K-factor solo in lettura `[~]`). Test 21/21.
+    `sm_edge_flange` `[~]` non esposto (InsertSheetMetalEdgeFlange2: feature creata senza volume in tutti gli approcci).
   - weldments (5 tool, Haiku): `list_weldment_profiles`, `structural_member` (telaio 0,0018 % dal calcolo), `weldment_trim_extend`,
     `weldment_end_cap`, `weldment_cut_list`. Test 17/17. Fazzoletto (gusset) `[~]`: 3 approcci falliti, laboratorio bloccato 3 volte.
   - mold (1 tool, Haiku): `undercut_analysis` (raggi dalle facce). Test 8/8. Linea/superficie di divisione, chiusure e divisione
     maschio/matrice `[~]`: le API Mold non creano feature (nessun errore).
-- Conteggio: 278 tool con `execute_python` (277 senza). In lavorazione: superfici 1; poi feature avanzate,
-  corpi 2, gestione, lamiera, superfici 2, saldature, stampi. Regressione completa solo alla fine.
+- Conteggio: 286 tool con `execute_python` (285 senza). surfaces2 ha 0 tool (in corso o vuoto). Regressione completa da fare dopo la chiusura di tutti i lotti.
 
 ## Prossimo passo
-Passi di Elia (fase 7): tag `v6.0.0`, push, installazione su un PC pulito seguendo il README e scenario S1 su quella macchina.
-Fase 6: il server `solidworks` di Claude Code (in `~/.claude.json`) NON ha `SW_MCP_INSTANCE=dedicated`: i suoi tool userebbero l'istanza
-di Elia. Per le prove d'uso serve un server con l'istanza dedicata (vedi la sezione Fase 6 quando c'e').
+- Regressione completa con il nuovo conteggio (286 tool): aggiornare `EXPECTED_TOOLS` in `test_offline.py` e `live_common.py` (ora 285 senza `execute_python`).
+- Decidere: surfaces2 (0 tool) — proseguire o chiudere la fase dei lotti.
+- Decidere: sm_edge_flange (lamiera), mold_parting_line e soci (stampi) — riprovarli con istanza visibile o chiudere come `[~]`.
+- Tag `v7.0.0`, push, changelog aggiornato.
+- CLAUDE.md: il server `solidworks` in `~/.claude.json` deve avere `SW_MCP_INSTANCE=dedicated` per le prove d'uso.

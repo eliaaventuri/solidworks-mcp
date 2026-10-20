@@ -1652,3 +1652,83 @@ Test `tests/test_ext_mold_live.py` (8/8 PASS, istanza dedicata PID 13480, chiusa
 #### RICHIESTE A OPUS
 - Verificare la presenza di Mold Tools in SW (vedi "Causa probabile"). Se il modulo non e' disponibile, i tool 1-4 restano fuori.
 - Aggiornare i conteggi dei tool nel test offline (285 esposti) alla fine del lotto.
+
+
+## Lotti di tool nuovi (2026-10-19) — lamiera, saldature, analisi dei sottosquadri (commit c074c3e, 56d2ce8, 94a89e5, 477e07, 069900c, 60feb3f, 35bb118, 244dd71)
+
+Prosecuzione del piano dei lotti: gli 8 commit del 19 ottobre aggiungono i lotti `sheetmetal`, `weldments`, `mold`, `manage`, `analysis`,
+`features2`, `bodies2`, `curves`, `ext1`, `moka`, `sketch2`, tutti sviluppati da sotto-agenti in parallelo nella sessione del 18-19 ottobre.
+I numeri dei test e le trappole principali di ciascun lotto sono nei file `scripts_tmp/notes_<lotto>.md` (non versionati).
+Riepilogo degli esiti e delle trappole principali per i lotti del 19 ottobre (precedenti sono in "Lotti di tool nuovi" 2026-10-18/19 di STATO.md):
+
+### Lotto sheetmetal (7 tool, 21/21 PASS — 2026-10-19)
+- `sm_base_flange`: chiuso 50x30 t2 = 3000 mm3; aperto L40 estruso 20 = 1600 mm3.
+- `sm_hem`: closed (volume delta 251.92, sviluppo +4.1987), open (265.619, +4.427), rolled (132.743, +2.2124).
+- `sm_sketched_bend`: 60x30 t2 R2 K0,5 a 90 gradi, X max 31.28761 = calcolato.
+- `sm_flatten`: sviluppo 60 mm (calcolato); box flat 2x60x30.
+- `sm_parameters`: lettura + spessore/raggio (spessore 2->3: volume 4500). K-factor solo in lettura `[~]`.
+- `sm_export_flat_pattern`: ExportToDWG2 con percorso .sldprt salvato; preferenza swDXFDontShowMap (21) ripristinata.
+  Preferenza letta/imposta/ripristinata: False -> True -> False. File 20900 byte, contiene "ENTITIES".
+- `sm_edge_flange` `[~]` NON esposto: 3 approcci (InsertSheetMetalEdgeFlange2, CreateDefinition(37), selezione mark);
+  feature restituita non nulla ma volume invariato (flangia senza geometria). Il profilo generato da InsertSketchForEdgeFlange
+  e' vuoto (0 segmenti) via API.
+Trappole principali:
+1. `CreateCustomBendAllowance`/`GetCustomBendAllowance`: richiedono `_FlagAsMethod` prima della chiamata (late binding).
+2. `InsertSheetMetalBaseFlange2` non crea feature: usare `CreateDefinition(34)` -> `CreateFeature`.
+3. Modificare `Thickness` su `SheetMetal` non aggiorna la flangia base: modificare anche ogni `SMBaseFlange` con GetDefinition/AccessSelections/ModifyDefinition.
+4. Hem: spigolo selezionato con mark 0; `rolled` richiede DAngle = pi (rad), con 0 non crea nulla.
+5. Sviluppo: feature `FlatPattern` gia' presente nella lamiera; `SetSuppression2(1/0, 2, ...)` per espandere/ripiegare.
+6. K-factor: `KFactor` si rilegge sempre 0,5 dopo il set: non persistito.
+
+### Lotto weldments (5 tool, 17/17 PASS — 2026-10-19)
+- `list_weldment_profiles`: cartella dalla preferenza 29; norme = sottocartelle; misure da GetConfigurationNames.
+- `structural_member`: telaio 4 corpi 200 mm, 427844.7999 mm3 contro 427837.1579 calcolato (0,0018 %).
+  Un segmento per id S0-0-1: 106959.2895 mm3 = 534.796 x 200.
+- `weldment_trim_extend`: EndCond 4 + Options 0 = taglio (B 150->130: 69523.5382 mm3 = 534.796 x 130);
+  Options 1 = estendi (B 100->130). EndCond 1/2/3 modificano il corpo sbagliato: NON usati.
+- `weldment_end_cap`: Dir 3 (swSpecifyInset): tappo a filo, +1 corpo, volume 32x32x10 = 10240 mm3 (con arrotondamento 10102.6548).
+- `weldment_cut_list`: InsertWeldmentCutList2 -> CutListFolder; 1 voce, quantita' 4, ingombro 240 mm (200+2x20 mitra).
+- `weldment_gusset` `[~]` NON esposto: InsertGussetFeature3 -> None; CreateDefinition(118): "Nome sconosciuto" per le proprieta';
+  laboratorio bloccato 3 volte (possibile finestra modale).
+Trappole principali:
+1. `CreateStructuralMemberGroup`: "Impossibile trovare membro" col late binding; usare `Invoke(DISPATCH_METHOD)` sul dispid.
+2. Stessa cosa per `InsertWeldmentCutList2`.
+3. Trim/extend: il valore di ritorno e' una feature anche quando non cambia nulla; verificare col volume.
+4. End cap Dir 2 crea un anello (sezione del tubo), non un tappo.
+
+### Lotto manage (6 tool, 15/15 PASS — 2026-10-19)
+- `check_geometry`: Check2 + GetWhatsWrong + GetErrorCode2. G2 verificato con errore reale: taglio fuori pezzo -> codice 71.
+  Raggio sproporzionato (r=50 su 20 mm) NON segnalato da SW (GetErrorCode2 = 0): limite dichiarato.
+- `reorder_feature`: ReorderFeature2, indice B 20->19.
+- `create_feature_folder`: InsertFeatureTreeFolder2(2) -> cartella + EndTag.
+- `set_appearance`: RGB letto dopo scrittura su pezzo/corpo/faccia/feature; trasparenza 0.5 verificata.
+- `edit_sketch`: foro r=5 su faccia -> volume 4000->3214.602 (diff 785.398 = pi*25*10).
+- `change_sketch_plane`: Front (normale [1,0,0]) -> Top ([0,0,1]); volume 4000->4000.
+Trappole principali:
+1. `GetWhatsWrong(fs, ec, wn)`: tre VARIANT(VT_BYREF|VT_VARIANT, None) necessari.
+2. `GetErrorCode2`: VARIANT(VT_BYREF|VT_BOOL, False) necessario.
+3. `get_sketch_plane_info` lascia lo schizzo in modifica: `_plane_info_closed` chiude, ricostruisce, poi legge.
+4. `change_sketch_plane`: nome piano in minuscolo a `_std_ref_feature` ("top", non "Top").
+5. Materiale proprietà su feature/pezzo/faccia/corpo: tutte PROPRIETÀ (non metodi).
+
+### Lotto analysis (7 tool, 15/15 PASS — 2026-10-19)
+- `insert_bounding_box`: blocco 40x30x20 -> [40, 30, 20] mm (BestFit=True; altri modalita' non implementate).
+- `insert_center_of_mass`: blocco -> (10,0,0) mm (asse X di estrusione).
+- `insert_mate_reference`: faccia z=15 -> feature RifTop-<1> tipo PosGroupFolder.
+- `draft_analysis`: tronco 30x30x20 sformo 5 (flip) -> 4 laterali +5,0, 2 piane 90.
+- `thickness_analysis`: blocco min 20,0 mm; guscio t2 min 2,0, max 20,0.
+- `section_view`: PNG 118571 B senza sezione, 138295 B con sezione Front a 10 mm; rimozione True.
+- `fully_define_sketch`: rettangolo 30x20 libero -> completamente definito, 2 quote.
+Trappole principali:
+1. `InsertCenterOfMass`/`InsertMateReference2`: com_error anche quando la feature viene creata; verificare con _new_features.
+2. `InsertCenterOfMass` come PROPRIETÀ (lettura = esecuzione).
+3. `InsertMateReference2`: secondo e terzo riferimento come VARIANT(VT_DISPATCH, None).
+4. `GetTessTriangles` in MILLIMETRI (non metri come le altre API).
+5. `GetRayIntersectionsPoints` su IModelDoc2 (non Extension); tupla piatta, 6 valori per punto (3..5).
+6. `CreateSectionViewData`/`RemoveSectionView` sono PROPRIETÀ: `self._com(...)`.
+
+### Conteggio finale lotti (2026-10-19)
+286 tool totali con execute_python (285 senza). Dettaglio per lotto ext:
+moka 7, sketch2 16, curves 6, bodies2 7, features2 6, analysis 7, manage 6,
+sheetmetal 7 (senza sm_edge_flange), weldments 5, mold 1 (solo undercut_analysis), surfaces1 8, surfaces2 0.
+Totale ext: 76. Conteggio `test_offline.py` da aggiornare a 285 (senza execute_python).
