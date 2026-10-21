@@ -8,10 +8,10 @@ I metodi stanno nei mixin automation/ext_<lotto>.py.
 """
 
 from . import (moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments,
-               mold, analysis, sketch3, features3, sheetmetal2, assembly2, selection, sketch4)
+               mold, analysis, sketch3, features3, sheetmetal2, assembly2, selection, sketch4, sketch5)
 
 MODULES = (moka, sketch2, features2, bodies2, curves, surfaces1, surfaces2, manage, sheetmetal, weldments,
-           mold, analysis, sketch3, features3, sheetmetal2, assembly2, selection, sketch4)
+           mold, analysis, sketch3, features3, sheetmetal2, assembly2, selection, sketch4, sketch5)
 
 EXT_TOOLS = {}
 EXT_DESTRUCTIVE = {}

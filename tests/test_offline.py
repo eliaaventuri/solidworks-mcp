@@ -69,7 +69,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 390                       # 391 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 405                       # 406 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1751,6 +1751,130 @@ def test_sketch4_tools():
            ok_eq3d["success"] and ok_eq3d["data"]["samples_count"] == 20 and len(ok_eq3d["data"]["start_point_m"]) == 3)
 
 
+def test_sketch5_tools():
+    sw = SolidWorksAutomation()
+
+    # Senza documento attivo, devono fallire con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun doc attivo"})
+    sw._part = lambda: (None, {"success": False, "message": "Nessun pezzo attivo"})
+    sw._s2_active_or_open = lambda sketch=None: (None, None, {"success": False, "message": "Nessun schizzo attivo"})
+
+    r1 = sw.relax_sketch_spline()
+    r2 = sw.simplify_sketch_spline(0.1)
+    r3 = sw.insert_spline_point(10, 20)
+    r4 = sw.delete_spline_point(1)
+    r5 = sw.edit_spline_handle(0, magnitude=1.5)
+    r6 = sw.replace_sketch_entity("Line1", "Line2")
+    r7 = sw.create_sketch_belt()
+    r8 = sw.suppress_sketch_relation(0)
+    r9 = sw.get_allowed_relations()
+    r10 = sw.delete_all_sketch_relations()
+    r11 = sw.list_sketch_regions()
+    r12 = sw.rotate_copy_3d_sketch(45.0)
+    r13 = sw.merge_sketch_points(0.01)
+    r14 = sw.save_sketch_block_to_file("Block1", "nonexistent.sldblk")
+    r15 = sw.set_sketch_performance_mode(True, True, True)
+
+    all_failed_cleanly = all(not r["success"] for r in (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15))
+    record("sketch5: tutti i 15 tool gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
+
+    # Mock per esecuzione con schizzo e spline attiva
+    class _MockSplineHandle:
+        def __init__(self):
+            self.TangentDriving = True
+            self.CurvatureControlled = False
+            self.Curvature = 0.0
+        def set_TangentDriving(self, v): self.TangentDriving = v
+        def set_TangentMagnitude(self, d, v): pass
+        def set_TangentRadialDirection(self, v): pass
+        def set_TangentPolarDirection(self, v): pass
+        def set_CurvatureControlled(self, v): self.CurvatureControlled = v
+        def set_Curvature(self, v): self.Curvature = v
+
+    class _MockSplineSeg:
+        def __init__(self, name="Spline1"):
+            self._name = name
+            self.GetType = 3 # swSketchSPLINE
+        def GetName(self): return self._name
+        def RelaxSpline(self): return True
+        def Simplify(self, tol): return True
+        def InsertPoint(self, x, y, z): return True
+        def DeletePoint(self, pt): return True
+        def GetPoints2(self): return [self]
+        def GetSplineHandles(self): return [_MockSplineHandle()]
+
+    class _MockRelation:
+        def __init__(self):
+            self.Suppressed = False
+        def set_Suppressed(self, v): self.Suppressed = v
+
+    class _MockRelationMgr:
+        def GetRelations(self, f): return [_MockRelation()]
+        def GetAllowedRelations(self, ents): return [4, 5, 6] # Horiz, Vert, Tangent
+        def DeleteAllRelations(self): return True
+
+    class _MockSketch5Mgr:
+        def __init__(self):
+            self.ActiveSketch = self
+            self.RelationManager = _MockRelationMgr()
+        def SketchReplace2(self, c, cnt): return True
+        def CreateSketchBelt(self, *args): return True
+        def RotateOrCopy3DAboutVector(self, *args): return True
+        def set_AddToDB(self, v): pass
+        def set_AutoSolve(self, v): pass
+        def set_AutoInference(self, v): pass
+        def GetSketchBlockDefinitions(self): return []
+        def GetSketchRegions(self): return [self]
+        def GetSketchContours(self): return [self]
+        def GetEdgesCount(self): return 4
+        def MergePoints(self, d): return True
+
+    class _MockDoc5:
+        def __init__(self):
+            self.SketchManager = _MockSketch5Mgr()
+            self.Extension = self
+            self.SelectionManager = self
+        def SelectByID2(self, *args): return True
+        def ClearSelection2(self, *args): return True
+        def CreateSelectData(self):
+            class _SD: Mark = 0
+            return _SD()
+
+    mock_doc = _MockDoc5()
+    mock_sp = _MockSplineSeg("Spline1")
+    sw._s2_active_or_open = lambda sketch=None: (mock_doc, mock_doc.SketchManager, None)
+    sw._s5_segs = lambda doc: [mock_sp]
+    sw._part = lambda: (mock_doc, None)
+
+    ok_rel = sw.relax_sketch_spline("Spline1")
+    ok_smp = sw.simplify_sketch_spline(0.05, "Spline1")
+    ok_ins = sw.insert_spline_point(5, 5, 0, "Spline1")
+    ok_del = sw.delete_spline_point(1, "Spline1")
+    ok_hnd = sw.edit_spline_handle(0, magnitude=2.0, spline_entity="Spline1")
+    ok_rep = sw.replace_sketch_entity("Line1", "Line2")
+    ok_blt = sw.create_sketch_belt(thickness=3.0)
+    ok_sup = sw.suppress_sketch_relation(0, True)
+    ok_alw = sw.get_allowed_relations()
+    ok_dar = sw.delete_all_sketch_relations()
+    ok_reg = sw.list_sketch_regions()
+    ok_r3d = sw.rotate_copy_3d_sketch(90.0, copy=True, num_copies=3)
+    ok_mrg = sw.merge_sketch_points(0.02)
+    blk_tmp = str(Path(tempfile.gettempdir()) / "block.sldblk")
+    ok_blk = sw.save_sketch_block_to_file("Block1", blk_tmp, overwrite=True)
+    ok_prf = sw.set_sketch_performance_mode(True, False, False)
+
+    record("sketch5: relax, simplify, insert e delete punto spline operativi",
+           ok_rel["success"] and ok_smp["success"] and ok_ins["success"] and ok_del["success"])
+    record("sketch5: edit_spline_handle aggiorna manubri tangenza",
+           ok_hnd["success"] and ok_hnd["data"]["magnitude"] == 2.0)
+    record("sketch5: replace_sketch_entity e create_sketch_belt eseguiti con successo",
+           ok_rep["success"] and ok_rep["data"]["replaced"] and ok_blt["success"])
+    record("sketch5: relazioni (suppress, get_allowed, delete_all) analizzate correttamente",
+           ok_sup["success"] and len(ok_alw["data"]["allowed_relations"]) == 3 and ok_dar["success"])
+    record("sketch5: regioni, rotazione 3D, merge points, export blocco e modalita' performance validi",
+           ok_reg["success"] and ok_r3d["data"]["copy"] and ok_mrg["success"] and ok_blk["success"] and ok_prf["data"]["add_to_db"])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1766,7 +1890,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools)):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools)):
             try:
                 fn()
             except Exception as e:
