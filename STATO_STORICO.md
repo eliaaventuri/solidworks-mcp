@@ -1768,3 +1768,22 @@ Verifiche:
 - `tests/test_offline.py`: 148/148 PASS (0 warning pyflakes).
 - `tests/test_ext_added_tools_live.py`: 19/19 PASS su istanza SolidWorks 2026 dedicata (0 processi orfani).
 - Conteggio finale: 371 tool totali (370 senza execute_python).
+
+### Estensione move_faces, stabilizzazione solutore Simulation e regressione completa (2026-10-21)
+1. **Estensione `move_faces` (InsertMoveFace3)**:
+   - Rotazione su asse arbitrario: parametro `axis_edge` (punto `[x,y,z]` su uno spigolo lineare, mark 4) e `axis="Axis1"` (nome asse di riferimento, mark 4). L'angolo si passa in radianti (`Angle`) con `RotationParams = None`.
+   - Traslazione su direzione arbitraria: parametri `direction_edge` e `direction_axis` (mark 2) per traslazione guidata. La distanza si passa in metri (`Distance`) con `TranslationParams = None`.
+   - Unit test dedicati in `tests/test_modeling_extra_live.py` (sezione B8): rotazione su spigolo 5 deg, rotazione su asse di riferimento Axis1, traslazione lungo spigolo +10 mm (287/287 PASS).
+
+2. **Risoluzione conflitti e trappole API**:
+   - `server.py`: `arguments.pop("document")` consumava l'argomento ed eseguiva `activate_document` su tutti i tool; per `close_document` questo impediva di chiudere documenti inattivi per nome e causava errori errati se il file era già chiuso. Escluso `close_document` dal pre-processing di `document`.
+   - `documents.py`: `close_document` senza argomenti interrogava solo `get_active_doc()`. Alla chiusura di un assieme, i componenti referenziati restavano in memoria in background senza frame attivo (`get_active_doc()` restituiva None); ora effettua il fallback su `_open_docs()` chiudendo ordinatamente i componenti orfani.
+   - `data_export.py`: `SetUserPreferenceIntegerValue(9, dpi)` accetta solo valori specifici `[50, 72, 100, 150, 200, 300, 400, 600]`. Valori arbitrari (come 350) fallivano silenziosamente lasciando 1 DPI; aggiunto fallback con arrotondamento allo step standard superiore.
+   - `test_simulation_live.py`: `rm(*paths)` cancellava solo il file del modello, lasciando residui di studi passati (`.CWR`, `.OUT`, `.LOG`). Il solutore Simulation, trovando file database preesistenti con lo stesso nome, apriva dialog di conferma non visibili mandando in timeout `RunAnalysis`; la cancellazione di `{stem}*` ha risolto completamente i timeout sporadici.
+   - `run_all.py`: `ORDER` posizionava `drawing_quality` prima di `assembly`; anticipato `assembly` per garantire la creazione di `asm_main.SLDASM`.
+
+3. **Regressione completa `tests/run_all.py` (2026-10-21 03:40)**:
+   - 12 suite eseguite in sequenza su istanze dedicate nascoste.
+   - Esito: **1853/1853 PASS (100%)**, 0 processi orfani, tempo totale ~93 min.
+   - Dettaglio: offline 148/148, modeling 175/175, modeling_extra 287/287, assembly 113/113, assembly_extra 214/214, drawings 65/65, drawing_quality 139/139, data 183/183, data_extra 110/110, simulation 120/120, simulation_extra 181/181, timeout 18/18.
+   - Report archiviato in `test_output/regressione_20261021_0340.md`.

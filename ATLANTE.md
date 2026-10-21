@@ -60,7 +60,7 @@ solidworks_mcp/
     features.py               estrusioni, tagli, raccordi, smussi, elenco feature
     modeling_base.py          selezione 3D per coordinate (facce/spigoli/vertici), volume, ricerca feature, elenco entita'
     sketch_constraints.py     quote, relazioni, stato dello schizzo, spline/asola/ellisse/offset/specchia/testo
-    modeling.py               rivoluzione, sweep, loft, shell, nervatura, sformo, raccordi/smussi, ripetizioni, Hole Wizard (HOLE_STANDARDS, misure M3..M70, foro generico se manca dal database), move_faces, riferimenti, gestione feature
+    modeling.py               rivoluzione, sweep, loft, shell, nervatura, sformo, raccordi/smussi, ripetizioni, Hole Wizard (HOLE_STANDARDS, misure M3..M70, foro generico se manca dal database), move_faces (offset, translate anche lungo spigolo/asse, rotate attorno ad asse X/Y/Z, asse di riferimento o spigolo), riferimenti, gestione feature
     drawings.py               messe in tavola: fogli, viste, sezioni, quote, annotazioni, BOM, export (rifiuta DXF/DWG con viste interrotte)
     drawing_layout.py         scala e layout automatici, spazio libero, proprieta' del cartiglio
     drawing_dims.py           lettura e pulizia delle quote, impilamento ISO 129, inventario del layout, tolleranze
@@ -82,20 +82,21 @@ formats/                      formati foglio ISO verticali A0-A3 (.slddrt, "... 
 ## Test
 ```
 tests/test_offline.py              SENZA SolidWorks (anche su Linux): registro e smistamento dei tool (call_tool con SolidWorks finto), sicurezza, PNG, lettori dei file esportati, .sldmat, configurazione, unita'
-tests/run_all.py                   regressione completa (un test alla volta) con riepilogo in test_output/regressione_*.md
+tests/run_all.py                   regressione completa (un test alla volta) con riepilogo in test_output/regressione_*.md (ordine: offline, modeling, modeling_extra, assembly, assembly_extra, drawings, drawing_quality, data, data_extra, simulation, simulation_extra, timeout)
 tests/live_common.py               parti comuni dei test live: percorsi, Client MCP (auto_overwrite), sw_pids, cleanup
-tests/test_modeling_live.py        modellazione 3D con volumi calcolati a mano
-tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); B7 fori grandi fino a M70, B8 move_faces; argomenti B1 B4 ... per sezioni
-tests/test_drawings_live.py        tool di disegno
-tests/test_drawing_quality_live.py qualita' delle tavole (sovrapposizioni, duplicati, versi, tolleranze); QUAL_ONLY=staffa,cuneo per una sola tavola
-tests/test_assembly_live.py        assiemi (perno-staffa-boccola-viti, esploso, tavola, interferenze)
-tests/test_assembly_extra_live.py  gruppo C (sotto-assiemi, specchiatura, esplosi, accoppiamenti avanzati, DOF); argomenti C1 C5 ..., CX_REUSE=1
-tests/test_data_live.py            dati ed export (materiali, massa, equazioni, configurazioni, export/import, misure, immagini)
-tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3), argomenti per sezione: test_data_extra_live.py D7 D1
-tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione)
-tests/test_simulation_extra_live.py gruppo E (E3 FOS minimo, E5 frequenze/buckling/termico, E1 contatti locali, E4 carichi remoti/cuscinetto, E2 controllo mesh), argomenti per sezione
+tests/test_modeling_live.py        modellazione 3D con volumi calcolati a mano (175 test)
+tests/test_modeling_extra_live.py  gruppo B (raccordo variabile, riferimenti, Hole Wizard, tool base, chiusura sicura); B7 fori grandi fino a M70, B8 move_faces esteso (rotazione attorno ad asse/spigolo, traslazione lungo spigolo) (287 test); argomenti B1 B4 ... per sezioni
+tests/test_drawings_live.py        tool di disegno (65 test)
+tests/test_drawing_quality_live.py qualita' delle tavole (sovrapposizioni, duplicati, versi, tolleranze) (139 test); QUAL_ONLY=staffa,cuneo per una sola tavola
+tests/test_assembly_live.py        assiemi (perno-staffa-boccola-viti, esploso, tavola, interferenze) (113 test)
+tests/test_assembly_extra_live.py  gruppo C (sotto-assiemi, specchiatura, esplosi, accoppiamenti avanzati, DOF) (214 test); argomenti C1 C5 ..., CX_REUSE=1
+tests/test_data_live.py            dati ed export (materiali, massa, equazioni, configurazioni, export/import, misure, immagini) (183 test)
+tests/test_data_extra_live.py      gruppo D (D7 D8 D1 D10 D4 D9 D2 D3) (110 test), argomenti per sezione: test_data_extra_live.py D7 D1
+tests/test_simulation_live.py      simulazione statica (trave, piastra con foro, assieme incollato, torsione) (120 test)
+tests/test_simulation_extra_live.py gruppo E (E3 FOS minimo, E5 frequenze/buckling/termico, E1 contatti locali, E4 carichi remoti/cuscinetto, E2 controllo mesh) (181 test), argomenti per sezione
+tests/test_ext_added_tools_live.py smoke test live dei nuovi 85 tool (sketch3, features3, surfaces2, sheetmetal2, assembly2, selection) (19 test)
 tests/test_ext_<lotto>_live.py     un test live per lotto di tools_ext (moka1/moka2, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1); argomenti per sezione
-tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere)
+tests/test_timeout_live.py         fase 5.1: timeout dei tool col thread COM unico (due istanze dedicate, PID chiuso allo scadere) (18 test)
 ```
 I test `*_live.py` girano solo su Windows con SolidWorks, in un'istanza dedicata e nascosta; l'output va in `test_output/`.
 `.github/workflows/test-offline.yml`: GitHub Actions esegue `test_offline.py` e pyflakes (qualunque avviso fa fallire) a ogni push.

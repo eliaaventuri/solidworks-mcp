@@ -63,11 +63,12 @@ def F(name, ext="SLDPRT"):
 def rm(*paths):
     for n in paths:
         p = Path(n)
-        if p.exists():
-            try:
-                p.unlink()
-            except Exception:
-                pass
+        if p.parent.exists():
+            for f in p.parent.glob(f'{p.stem}*'):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
 
 
 def rel(a, b):

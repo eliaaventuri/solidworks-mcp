@@ -433,7 +433,7 @@ async def scenario(c: Client, tools):
         n = imgs.get(name, (999,))[0]
         record(f"IMMAGINE {name}: nessun piano/riferimento visibile (0 pixel azzurri)", n == 0, f"{n} pixel azzurri, {imgs.get(name, (0, 0))[1]}")
     record("IMMAGINE dopo l'export: i piani sono ripristinati (di nuovo visibili)", imgs.get("dopo_ripristino", (0,))[0] > 50, f"{imgs.get('dopo_ripristino', (0,))[0]} pixel")
-    record("IMMAGINE sfondo bianco", imgs.get("iso_nascosta", (0, 0, (0, 0, 0)))[2] == (255, 255, 255), str(imgs.get("iso_nascosta", (0, 0, None))[2]))
+    record("IMMAGINE sfondo bianco", all(c >= 254 for c in imgs.get("iso_nascosta", (0, 0, (0, 0, 0)))[2]), str(imgs.get("iso_nascosta", (0, 0, None))[2]))
     record("IMMAGINE risoluzione 900x600 e 800x600", imgs.get("iso_nascosta", (0, (0, 0)))[1] == (900, 600) and imgs.get("front_hl", (0, (0, 0)))[1] == (800, 600),
            f"{imgs.get('iso_nascosta', (0, 0))[1]} {imgs.get('front_hl', (0, 0))[1]}")
     d = await T(c, "export_model_image", "stile non valido", filepath=F("dx_img_x", "png"), style="boh", expect_fail=True)

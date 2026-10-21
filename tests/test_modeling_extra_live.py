@@ -903,6 +903,31 @@ async def b8_sposta_facce(c):
         record(f"B8 rotate {ang:+} gradi attorno a Y per (40,0,0)", ok and rel(v, exp_v) < 1e-6 and abs(x - exp_x) < 1e-4,
                f"V {v:.3f} (atteso {exp_v:.3f}), x max {x:.5f} (atteso {exp_x:.5f}); {text[:80]}")
         await discard_all(c)
+    # rotazione attorno a uno spigolo (axis_edge)
+    await mf_block(c)
+    ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", axis_edge=[40, 100, 30], angle=5)
+    v = await vol(c)
+    exp_v_edge = 240000 + 100 * 100 * math.tan(math.radians(5)) / 2 * 60
+    record("B8 rotate attorno a spigolo axis_edge [40,100,30]", ok and rel(v, exp_v_edge) < 1e-4,
+           f"V {v:.3f} (atteso {exp_v_edge:.3f}); {text[:80]}")
+    await discard_all(c)
+
+    # rotazione attorno a un asse di riferimento (axis="Axis1")
+    await mf_block(c)
+    await c.call("create_reference_axis", mode="two_planes", planes=["Top", "Right"])
+    ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", axis="Axis1", angle=3)
+    record("B8 rotate attorno ad asse di riferimento Axis1", ok, text[:80])
+    await discard_all(c)
+
+    # traslazione con spigolo come direzione (direction_edge)
+    await mf_block(c)
+    ok, text, _ = await c.call("move_faces", faces=[[20, 50, 60]], mode="translate", direction_edge=[40, 100, 30], distance=10)
+    v = await vol(c)
+    exp_v_trans = 240000 + 40 * 100 * 10
+    record("B8 translate lungo spigolo direction_edge + distance 10", ok and rel(v, exp_v_trans) < 1e-4,
+           f"V {v:.3f} (atteso {exp_v_trans:.3f}); {text[:80]}")
+    await discard_all(c)
+
     await mf_block(c)
     ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", angle=5)
     record("B8 rotate senza asse: rifiutato", not ok and "axis" in text, text[:120])

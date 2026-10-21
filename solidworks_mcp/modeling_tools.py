@@ -281,15 +281,21 @@ _TOOLS = {
          "flip": (B, "Flip the draft direction"), "propagate_tangent": (B, "Propagate to tangent faces"),
          "unit": _UNIT}, ["angle", "faces", "neutral_face_point"]),
     "move_faces": ("move_faces",
-        "Move faces (direct edit, like Insert > Face > Move): offset each face along its normal, translate by a vector, "
-        "or rotate about an axis parallel to X, Y or Z. Example: {\"faces\":[[40,50,30]],\"mode\":\"offset\",\"distance\":5}; "
-        "{\"faces\":[[40,50,30]],\"mode\":\"rotate\",\"axis\":\"y\",\"axis_point\":[40,0,0],\"angle\":5}.",
+        "Move faces (direct edit, like Insert > Face > Move): offset each face along its normal, translate by a vector "
+        "or along a reference edge/axis, or rotate about an axis (X, Y, Z, reference axis, or linear edge). "
+        "Example: {\"faces\":[[40,50,30]],\"mode\":\"offset\",\"distance\":5}; "
+        "{\"faces\":[[40,50,30]],\"mode\":\"rotate\",\"axis\":\"y\",\"axis_point\":[40,0,0],\"angle\":5}; "
+        "{\"faces\":[[40,50,30]],\"mode\":\"rotate\",\"axis_edge\":[40,100,30],\"angle\":5}; "
+        "{\"faces\":[[40,50,30]],\"mode\":\"rotate\",\"axis\":\"Axis1\",\"angle\":5}.",
         {"faces": _PTS3, "mode": (S, "offset (default) | translate | rotate"),
-         "distance": (N, "offset: distance along the face normal, negative = inward; translate: length along `direction` (`unit`)"),
+         "distance": (N, "offset: distance along face normal; translate: length along direction or reference (`unit`)"),
          "vector": (A, "translate: move vector [dx,dy,dz] (`unit`)"),
          "direction": (A, "translate: direction [dx,dy,dz] (unitless, normalized), used with distance"),
-         "axis": (S, "rotate: x | y | z, axis direction (right-hand rule)"),
-         "axis_point": (A, "rotate: point [x,y,z] on the rotation axis (`unit`)"),
+         "direction_edge": (A, "translate: point [x,y,z] on a linear edge to use as direction (`unit`), used with distance"),
+         "direction_axis": (S, "translate: name of a reference axis to use as direction, used with distance"),
+         "axis": (S, "rotate: 'x' | 'y' | 'z' (with axis_point), or name of a reference axis (e.g. 'Axis1')"),
+         "axis_point": (A, "rotate: point [x,y,z] on rotation axis (`unit`), when axis is 'x', 'y' or 'z'"),
+         "axis_edge": (A, "rotate: point [x,y,z] on a linear edge to act as the rotation axis (`unit`)"),
          "angle": (N, "rotate: angle in degrees"), "unit": _UNIT}, ["faces"]),
     "fillet_at_points": ("fillet_at_points", "Constant-radius fillet on edges picked by coordinates. "
         "Example: {\"radius\":5,\"edge_points\":[[10,0,5]]}.",

@@ -834,14 +834,15 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     def move_faces(self, faces: list, mode: str = "offset", distance: float = None, vector: list = None,
-                   direction: list = None, axis: str = None, axis_point: list = None, angle: float = None,
+                   direction: list = None, direction_edge: list = None, direction_axis: str = None,
+                   axis: str = None, axis_point: list = None, axis_edge: list = None, angle: float = None,
                    unit: str = None) -> Dict:
         """Sposta facce (Inserisci > Facce > Sposta, InsertMoveFace3) indicate da un punto su ciascuna [[x,y,z],...].
         mode offset: ogni faccia si sposta lungo la propria normale di `distance` (negativo = verso l'interno).
-        mode translate: tutte le facce si spostano del vettore `vector` [dx,dy,dz], oppure di `distance` lungo `direction`.
-        mode rotate: rotazione di `angle` gradi attorno a un asse parallelo a X, Y o Z (`axis`) passante per `axis_point`
-        (regola della mano destra). Misurato (2026-10-18): TranslationParams = [dx,dy,dz] in metri, RotationParams =
-        [origine x,y,z in metri, rotazioni attorno a X,Y,Z in radianti]; il parametro Angle e' ignorato."""
+        mode translate: tutte le facce si spostano del vettore `vector` [dx,dy,dz], oppure di `distance` lungo `direction`,
+        oppure di `distance` lungo uno spigolo `direction_edge` o un asse `direction_axis`.
+        mode rotate: rotazione di `angle` gradi attorno a un asse parallelo a X, Y o Z (`axis`) passante per `axis_point`,
+        oppure attorno a uno spigolo lineare `axis_edge` [x,y,z], oppure attorno a un asse di riferimento `axis` ('Axis1')."""
         try:
             doc, err = self._part()
             if err:
@@ -855,12 +856,23 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 return self._result(False, "Servono faces: un punto [x,y,z] su ogni faccia da spostare.",
                                     SwErrors.swInvalidInput)
             tp, rp, dist, rev = None, None, 0.0, False
+            angle_rad = 0.0
+            ref_spec_translate = None
+            ref_spec_rotate = None
+
             if mode_l == "offset":
                 if distance is None or float(distance) == 0:
                     return self._result(False, "offset: serve distance diversa da 0.", SwErrors.swInvalidInput)
                 dist, rev = self._mmu(abs(float(distance)), unit), float(distance) < 0
             elif mode_l == "translate":
-                if vector is not None:
+                if direction_edge is not None or direction_axis is not None:
+                    if distance is None or float(distance) == 0:
+                        return self._result(False, "translate: serve distance diversa da 0 quando si specifica un asse o spigolo.",
+                                            SwErrors.swInvalidInput)
+                    dist, rev = self._mmu(abs(float(distance)), unit), float(distance) < 0
+                    ref_spec_translate = direction_edge if direction_edge is not None else {"axis": direction_axis}
+                    v = None
+                elif vector is not None:
                     v = [float(c) for c in vector]
                 elif direction is not None and distance is not None:
                     d = [float(c) for c in direction]
@@ -869,28 +881,50 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                         return self._result(False, "translate: direction nulla.", SwErrors.swInvalidInput)
                     v = [c / n * float(distance) for c in d]
                 else:
-                    return self._result(False, "translate: serve vector [dx,dy,dz] oppure direction + distance.",
+                    return self._result(False, "translate: serve vector [dx,dy,dz] oppure direction + distance, oppure direction_edge/axis + distance.",
                                         SwErrors.swInvalidInput)
-                if len(v) != 3 or not any(v):
-                    return self._result(False, "translate: vettore di 3 componenti non tutte nulle.", SwErrors.swInvalidInput)
-                tp = r8_array([self._mmu(c, unit) for c in v])
+                if v is not None:
+                    if len(v) != 3 or not any(v):
+                        return self._result(False, "translate: vettore di 3 componenti non tutte nulle.", SwErrors.swInvalidInput)
+                    tp = r8_array([self._mmu(c, unit) for c in v])
             else:
-                ax = str(axis or "").lower()
-                if ax not in ("x", "y", "z") or angle is None or axis_point is None:
-                    return self._result(False, "rotate: servono axis (x | y | z), axis_point [x,y,z] e angle (gradi).",
-                                        SwErrors.swInvalidInput)
-                rot = [0.0, 0.0, 0.0]
-                rot["xyz".index(ax)] = math.radians(float(angle))
-                rp = r8_array([self._mmu(float(c), unit) for c in axis_point] + rot)
+                if angle is None:
+                    return self._result(False, "rotate: serve angle (gradi).", SwErrors.swInvalidInput)
+                if axis_edge is not None:
+                    ref_spec_rotate = axis_edge
+                    angle_rad = math.radians(float(angle))
+                elif axis is not None and str(axis).lower() not in ("x", "y", "z"):
+                    ref_spec_rotate = {"axis": axis} if isinstance(axis, str) else axis
+                    angle_rad = math.radians(float(angle))
+                else:
+                    ax = str(axis or "").lower()
+                    if ax not in ("x", "y", "z") or axis_point is None:
+                        return self._result(False, "rotate: servono axis (x | y | z) e axis_point [x,y,z], oppure axis_edge [x,y,z], oppure asse di riferimento in axis.",
+                                            SwErrors.swInvalidInput)
+                    rot = [0.0, 0.0, 0.0]
+                    rot["xyz".index(ax)] = math.radians(float(angle))
+                    rp = r8_array([self._mmu(float(c), unit) for c in axis_point] + rot)
+
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             doc.ClearSelection2(True)
             ok, msg = self._select_points(doc, "face", faces, unit, mark=1)     # con mark 0 nessuna feature (misurato)
             if not ok:
                 return self._result(False, msg, SwErrors.swSelectionError)
+
+            if mode_l == "translate" and ref_spec_translate is not None:
+                ok, msg = self._select_edge_or_axis(doc, ref_spec_translate, unit, mark=2, append=True)
+                if not ok:
+                    return self._result(False, f"Riferimento di direzione per traslazione fallito: {msg}", SwErrors.swSelectionError)
+
+            if mode_l == "rotate" and ref_spec_rotate is not None:
+                ok, msg = self._select_edge_or_axis(doc, ref_spec_rotate, unit, mark=4, append=True)
+                if not ok:
+                    return self._result(False, f"Riferimento asse di rotazione fallito: {msg}", SwErrors.swSelectionError)
+
             mt = {"offset": 0, "translate": 1, "rotate": 2}[mode_l]
             try:
-                feat = doc.FeatureManager.InsertMoveFace3(mt, rev, 0.0, dist, tp, rp, 0, 0.0)
+                feat = doc.FeatureManager.InsertMoveFace3(mt, rev, angle_rad, dist, tp, rp, 0, 0.0)
             except Exception as e:
                 return self._result(False, f"Sposta facce fallito: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
@@ -898,9 +932,23 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if mode_l == "offset":
                 extra["distance"] = distance
             elif mode_l == "translate":
-                extra["vector"] = [round(c, 6) for c in v]
+                if v is not None:
+                    extra["vector"] = [round(c, 6) for c in v]
+                else:
+                    extra["distance"] = distance
+                    if direction_edge:
+                        extra["direction_edge"] = direction_edge
+                    if direction_axis:
+                        extra["direction_axis"] = direction_axis
             else:
-                extra.update({"axis": ax, "axis_point": axis_point, "angle": angle})
+                extra["angle"] = angle
+                if ref_spec_rotate is not None:
+                    if axis_edge:
+                        extra["axis_edge"] = axis_edge
+                    else:
+                        extra["axis"] = axis
+                else:
+                    extra.update({"axis": ax, "axis_point": axis_point})
             return self._finish(doc, "Sposta facce", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"move_faces: {e}\n{traceback.format_exc()}")

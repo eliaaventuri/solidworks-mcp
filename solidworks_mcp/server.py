@@ -514,7 +514,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
     """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool.
     Parametro comune `document` (titolo di un documento aperto): lo rende attivo prima del tool. Senza, se il documento
     attivo e' cambiato dalla chiamata precedente, il risultato lo segnala (un close_sketch chiudeva lo schizzo di un altro file)."""
-    doc_arg = arguments.pop("document", None) if isinstance(arguments, dict) else None
+    doc_arg = arguments.pop("document", None) if (isinstance(arguments, dict) and name != "close_document") else None
     try:
         if sw_automation._sw_app is not None:
             sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)

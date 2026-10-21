@@ -1803,8 +1803,13 @@ class DataExportOperations:
                         for k in (6, 10, 9):
                             if k not in print_orig:
                                 print_orig[k] = app.GetUserPreferenceIntegerValue(k)
-                        for k, v in ((6, 1), (10, 0), (9, capture_dpi)):
-                            app.SetUserPreferenceIntegerValue(k, v)
+                        app.SetUserPreferenceIntegerValue(6, 1)
+                        app.SetUserPreferenceIntegerValue(10, 0)
+                        if not app.SetUserPreferenceIntegerValue(9, capture_dpi):
+                            for step in (100, 150, 200, 300, 400, 600):
+                                if step >= capture_dpi:
+                                    if app.SetUserPreferenceIntegerValue(9, step):
+                                        break
                         capture = "print"
                     doc.Extension.SaveAs(target, 0, 1, null_variant(), e, w)
 

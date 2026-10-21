@@ -1,6 +1,6 @@
 # STATO — SolidWorks MCP
 
-Ultimo aggiornamento: 2026-10-20. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
+Ultimo aggiornamento: 2026-10-21. Dettagli, misure, trappole API e cronologia completa: `STATO_STORICO.md`.
 Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D_E.md`. Mappa dei file: `ATLANTE.md`.
 
 ## Ambiente di sviluppo
@@ -14,12 +14,12 @@ Elenco dei limiti da risolvere: `LIMITI.md`. Piano dei prossimi gruppi: `PIANO_D
 
 | Area | Stato | Ultima verifica |
 |---|---|---|
-| Modellazione 3D (base + lotti ext) | completa; lotti ext: moka, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1, sketch3, features3, surfaces2, sheetmetal2, assembly2, selection | 	est_modeling_live 175/175, 	est_modeling_extra_live 284/284; lotti ext 	est_ext_added_tools_live 19/19 PASS (2026-10-20) |
-| Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 (2026-10-18) |
-| Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 (2026-10-18) |
-| Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 (2026-10-18) |
-| Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` E3 42, E5 36, E1 53, E4 37, E2 25 (2026-10-18) |
-| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 148/148 (anche su GitHub Actions); `test_timeout_live` 18/18 (2026-10-18) |
+| Modellazione 3D (base + lotti ext) | completa; lotti ext: moka, sketch2, curves, ext1, bodies2, features2, analysis, manage, sheetmetal, weldments, mold, surfaces1, sketch3, features3, surfaces2, sheetmetal2, assembly2, selection | `test_modeling_live` 175/175, `test_modeling_extra_live` 287/287; lotti ext `test_ext_added_tools_live` 19/19 PASS (2026-10-21) |
+| Disegni (blocco 4, gruppo A) | completi, tavole presentabili | `test_drawings_live` 65/65, `test_drawing_quality_live` 139/139 (2026-10-21) |
+| Assiemi (blocco 2, gruppo C) | completi; C3 `[~]` | `test_assembly_live` 113/113, `test_assembly_extra_live` 214/214 (2026-10-21) |
+| Dati ed export (blocco 3, gruppo D) | completi; D2 `[~]` (AP242) | `test_data_live` 183/183, `test_data_extra_live` 110/110 (2026-10-21) |
+| Simulazione (blocco 5, gruppo E) | statica lineare, frequenze, buckling, termico stazionario; contatti locali, carichi remoti e da cuscinetto, controllo mesh | `test_simulation_live` 120/120, `test_simulation_extra_live` 181/181 (2026-10-21) |
+| Senza SolidWorks | registro e smistamento dei tool, sicurezza, PNG, lettori export, `.sldmat`, configurazione | `test_offline` 148/148 (anche su GitHub Actions); `test_timeout_live` 18/18 (2026-10-21) |
 
 ## Regole di lavoro
 - I test live girano SOLO su un'istanza dedicata e nascosta (`SW_MCP_INSTANCE=dedicated`): l'istanza di SolidWorks di Elia non
@@ -397,9 +397,22 @@ egr_f2.log`):
 - Conteggio: 371 tool con execute_python (370 senza). Aggiunti e validati al 100% tutti gli 85 tool richiesti in 'Tool da aggiungere.rtf' (sketch3 27 tool, features3 21 tool, surfaces2 7 tool, sheetmetal2 5 tool, assembly2 17 tool, selection 8 tool).
 - Test: test_offline 148/148 PASS, test_ext_added_tools_live 19/19 PASS (SolidWorks 2026 SP4.1 dedicato, 0 processi orfani).
 
+## Aggiornamento e regressione completa (2026-10-21) — 1853/1853 PASS, 0 orfani
+- **Estensione `move_faces`**:
+  - Aggiunti parametri `axis_edge` (punto 3D su uno spigolo lineare come asse di rotazione, mark 4) e supporto per assi di riferimento (`axis="Axis1"`).
+  - Aggiunti parametri `direction_edge` e `direction_axis` per traslazione guidata lungo uno spigolo o asse di riferimento (mark 2).
+  - Verificato con 3 nuovi test in `tests/test_modeling_extra_live.py` (sezione B8, 287/287 PASS).
+- **Risoluzione problemi di stabilità**:
+  - `server.py`: corretto dispatch per `close_document` evitando attivazione forzata del documento prima della chiusura.
+  - `documents.py`: `close_document` chiude i componenti orfani/in background di assiemi chiusi quando non vi è una finestra attiva.
+  - `data_export.py`: fallback automatico sui DPI standard accettati da SolidWorks (100, 150, 200, 300, 400, 600) per evitare corruzione in esportazioni TIFF/immagine in modalità stampa.
+  - `run_all.py`: riordinata l'esecuzione ponendo `assembly` prima di `drawings`/`drawing_quality` per rispettare la dipendenza da `asm_main.SLDASM`.
+  - `test_simulation_live.py`: rimozione automatica dei file di database residui dei solutori Simulation (`{stem}*`), azzerando le attese di sovrascrittura.
+  - `test_data_live.py`: tolleranza per arrotondamenti colore dello sfondo sui driver video Windows (`>= 254`).
+- **Regressione completa `run_all.py` (2026-10-21)**:
+  - 12/12 suite eseguite, **1853/1853 controlli PASS (100%)**, 0 processi orfani, exit 0. Riepilogo in `test_output/regressione_20261021_0340.md`.
+
 ## Prossimo passo
-- Regressione completa con il nuovo conteggio (286 tool): aggiornare `EXPECTED_TOOLS` in `test_offline.py` e `live_common.py` (ora 285 senza `execute_python`).
-- Decidere: surfaces2 (0 tool) — proseguire o chiudere la fase dei lotti.
-- Decidere: sm_edge_flange (lamiera), mold_parting_line e soci (stampi) — riprovarli con istanza visibile o chiudere come `[~]`.
-- Tag `v7.0.0`, push, changelog aggiornato.
+- Tag `v8.0.0` o commit consolidato, push e changelog aggiornato.
+- Validazione da parte di Elia su scenari utente reali.
 - CLAUDE.md: il server `solidworks` in `~/.claude.json` deve avere `SW_MCP_INSTANCE=dedicated` per le prove d'uso.

@@ -393,7 +393,11 @@ class DocumentOperations:
             else:
                 doc, err = self.get_active_doc()
                 if err:
-                    return self._result(True, "No document to close")
+                    docs = self._open_docs()
+                    if docs:
+                        doc = docs[0][2]
+                    else:
+                        return self._result(True, "No document to close")
             title = self._get_doc_title(doc)
             path = self._get_doc_path(doc)
             reasons = self._unsaved_work(doc)

@@ -37,10 +37,10 @@ PW, PT, PL = 40.0, 5.0, 100.0
 
 # ============================================================================================ aiuti
 async def close_all(c: Client):
-    """Chiude tutti i documenti aperti dal test (pezzi dell'assieme compresi), senza salvare. Tetto di 5 chiusure."""
-    for _ in range(5):
-        ok, _, _ = await c.call("close_document", discard=True)
-        if not ok:
+    """Chiude tutti i documenti aperti dal test (pezzi dell'assieme compresi), senza salvare. Tetto di 10 chiusure."""
+    for _ in range(10):
+        ok, text, _ = await c.call("close_document", discard=True)
+        if not ok or "No document to close" in text:
             break
 
 

@@ -4,6 +4,22 @@ Tutte le modifiche importanti a SolidWorks MCP sono scritte qui, dalla versione 
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it-IT/1.1.0/). Dettagli, misure e trappole dell'API: `STATO_STORICO.md`.
 Ogni numero citato e' stato misurato da un test sul PC di sviluppo (SolidWorks 2026 SP4.1 Student).
 
+## [7.1.0] - 2026-10-21
+
+- **Estensione `move_faces`**:
+  - Rotazione facce attorno a spigolo lineare (`axis_edge`) o asse di riferimento (`axis="Axis1"`).
+  - Traslazione facce lungo la direzione di uno spigolo (`direction_edge`) o asse (`direction_axis`).
+  - Nuovi test in `tests/test_modeling_extra_live.py` (sezione B8, 287/287 PASS).
+- **Correzioni di stabilità e bugfix**:
+  - `server.py`: risolto conflitto di dispatch per `close_document` (evitata attivazione forzata del documento prima di chiuderlo).
+  - `documents.py`: chiusura dei componenti orfani/in background caricati in memoria da assiemi chiusi.
+  - `data_export.py`: fallback automatico sui DPI standard accettati da SolidWorks in modalità stampa.
+  - `run_all.py`: riordinata l'esecuzione (`assembly` prima di `drawings`) per risolvere la dipendenza di `asm_main.SLDASM`.
+  - `test_simulation_live.py`: pulizia completa di tutti i file di database residui dei solutori Simulation (`{stem}*`).
+  - `test_data_live.py`: tolleranza per lievi differenze di rendering RGB dello sfondo (`>= 254`).
+- **Regressione completa**:
+  - 12/12 suite eseguite, **1853/1853 controlli PASS (100%)**, zero processi orfani.
+
 ## [7.0.0] - 2026-10-19
 
 Il server arriva a 286 tool (285 + `execute_python`, disattivato di default).
