@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-8.0.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-523-green)
+![tools](https://img.shields.io/badge/MCP%20tools-555-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,7 +23,7 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **523 tools** (522 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **555 tools** (554 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
 Every tool has been tested against a live SOLIDWORKS session. The tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. A tool only counts as done when those numbers match.
 

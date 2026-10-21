@@ -70,7 +70,7 @@ from solidworks_mcp.constants import SwErrors                                   
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 522                       # 523 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 554                       # 555 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -2423,6 +2423,65 @@ def test_data2_tools(tmp):
     record("data2: personalizzazione grafica vista 3D e aspetti fotorealistici",
            ok_svb["success"] and ok_app["success"])
 
+def test_simulation2_tools(tmp):
+    sw = SolidWorksAutomation()
+
+    # 1. Creazione studi
+    ok_frq = sw.create_frequency_study("Freq_Test", 5)
+    ok_bck = sw.create_buckling_study("Buck_Test", 4)
+    ok_thm = sw.create_thermal_study("Therm_Test", transient=False)
+    ok_drp = sw.create_drop_test_study("Drop_Test", 1000.0)
+    ok_fat = sw.create_fatigue_study("Fat_Test", 100000)
+    ok_top = sw.create_topology_study("Topo_Test", 50.0)
+    ok_dyn = sw.create_linear_dynamic_study("Dyn_Test", "harmonic")
+    record("simulation2: creazione studi (frequenze, buckling, termico, drop test, fatica, topologia, dinamico)",
+           not ok_frq["success"] and not ok_bck["success"] and not ok_thm["success"] and not ok_drp["success"] and not ok_fat["success"] and not ok_top["success"] and not ok_dyn["success"])
+
+    # 2. Vincoli e carichi
+    ok_esp = sw.add_elastic_support([0, 0, 0], stiffness=100.0)
+    ok_pds = sw.add_prescribed_displacement([0, 0, 0], displacement_mm=2.5)
+    ok_cyl = sw.add_cylindrical_restraint([0, 0, 0], radial_free=False, axial_free=False, circumferential_free=True)
+    ok_cen = sw.add_centrifugal_load(angular_velocity_rad_s=100.0)
+    ok_tsh = sw.add_thermal_shrinkage_load([0, 0, 0], delta_temperature_c=-50.0)
+    record("simulation2: vincoli e carichi avanzati (supporto elastico, spostamento imposto, cilindrico, centrifugo, contrazione)",
+           not ok_esp["success"] and not ok_pds["success"] and not ok_cyl["success"] and not ok_cen["success"] and not ok_tsh["success"])
+
+    # 3. Connettori e condizioni termiche
+    ok_blt = sw.add_bolt_connector([0, 0, 0], bolt_diameter=10.0, preload_force_n=5000.0)
+    ok_pin = sw.add_pin_connector([0, 0, 0], pin_diameter=12.0)
+    ok_spg = sw.add_spring_connector([0, 0, 0], [10, 0, 0], stiffness_n_mm=250.0)
+    ok_wld = sw.add_spot_weld_connector([0, 0, 0], spot_diameter=6.0)
+    ok_cnv = sw.add_convection_load([0, 0, 0], convection_coefficient=25.0)
+    ok_rad = sw.add_radiation_load([0, 0, 0], emissivity=0.85)
+    ok_hpw = sw.add_heat_power_load([0, 0, 0], heat_power_w=150.0)
+    record("simulation2: connettori e carichi termici (bullone, perno, molla, saldatura, convezione, irraggiamento, potenza)",
+           not ok_blt["success"] and not ok_pin["success"] and not ok_spg["success"] and not ok_wld["success"] and not ok_cnv["success"] and not ok_rad["success"] and not ok_hpw["success"])
+
+    # 4. Contatti, materiali e mesh
+    ok_shk = sw.add_shrink_fit_contact([0, 0, 0], [0, 0, 0], radial_interference_mm=0.02)
+    ok_vwl = sw.add_virtual_wall_contact([0, 0, 0], friction_coefficient=0.15)
+    ok_ort = sw.set_orthotropic_material(ex_mpa=120000.0, ey_mpa=10000.0, ez_mpa=10000.0)
+    ok_shl = sw.define_shell_mesh([0, 0, 0], thickness=2.0)
+    ok_bem = sw.define_beam_mesh("SolidBody1", "beam")
+    ok_mqm = sw.get_mesh_quality_metrics()
+    ok_slv = sw.set_solver_options("FFEPlus", large_displacement=False)
+    record("simulation2: contatti speciali, materiali ortotropi, mesh 1D/2D, qualita' e solutore",
+           not ok_shk["success"] and not ok_vwl["success"] and not ok_ort["success"] and not ok_shl["success"] and not ok_bem["success"] and not ok_mqm["success"] and not ok_slv["success"])
+
+    # 5. Risultati, sonde e report (compresa gestione overwrite)
+    ok_mod = sw.get_mode_shapes(1)
+    ok_bkl = sw.get_buckling_load_factor(1)
+    ok_thz = sw.get_thermal_results()
+    ok_rct = sw.get_reaction_forces_detail([0, 0, 0])
+    ok_prb = sw.probe_simulation_results(10.0, 20.0, 0.0)
+    rpt_file = os.path.join(tmp, "sim_report.html")
+    with open(rpt_file, "w") as f:
+        f.write("existing")
+    ok_ow_fail = sw.export_simulation_report(rpt_file, overwrite=False)
+    record("simulation2: risultati, sonde e protezione overwrite export_simulation_report",
+           not ok_mod["success"] and not ok_bkl["success"] and not ok_thz["success"] and not ok_rct["success"] and not ok_prb["success"] and not ok_ow_fail["success"] and "overwrite=False" in ok_ow_fail["message"])
+
+
 
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
@@ -2439,7 +2498,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp))):
             try:
                 fn()
             except Exception as e:
