@@ -69,7 +69,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 371                       # 372 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 373                       # 374 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1377,6 +1377,57 @@ def test_image_content(tmp):
            len(out_seq) == 2 and out_seq[1].type == "image" and out_seq[1].mimeType == "image/png")
 
 
+# ============================================================================ Diagnostica e Tool Discovery
+def test_diagnostics_and_search():
+    # 1. search_tools senza query -> errore
+    res_no_q = srv._search_tools_handler({})
+    record("search_tools: query mancante -> errore", not res_no_q["success"])
+
+    # 2. search_tools con query 'fillet' trova strumenti di raccordo
+    res_fillet = srv._search_tools_handler({"query": "fillet", "limit": 10})
+    matched_names = [t["name"] for t in res_fillet["data"]["tools"]]
+    record("search_tools: query 'fillet' trova fillet_edges",
+           res_fillet["success"] and "fillet_edges" in matched_names and res_fillet["data"]["total_matches"] > 0)
+
+    # 3. search_tools con filtro di gruppo 'simulation'
+    res_sim = srv._search_tools_handler({"query": "mesh", "group": "simulation"})
+    sim_groups = {t["group"] for t in res_sim["data"]["tools"]}
+    record("search_tools: filtro gruppo 'simulation' restituisce solo tool di simulazione",
+           res_sim["success"] and sim_groups <= {"simulation"})
+
+    # 4. search_tools con query inesistente -> 0 match ma successo
+    res_none = srv._search_tools_handler({"query": "xyz_inesistente_12345"})
+    record("search_tools: query inesistente -> 0 risultati con successo",
+           res_none["success"] and res_none["data"]["total_matches"] == 0 and len(res_none["data"]["tools"]) == 0)
+
+    # 5. get_rebuild_errors: struttura del risultato diagnostico
+    sw = SolidWorksAutomation()
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun doc attivo"})
+    err_no_doc = sw.get_rebuild_errors()
+    record("get_rebuild_errors: senza documento attivo riporta errore pulito", not err_no_doc["success"])
+
+    class _MockDoc:
+        def __init__(self):
+            self.FirstFeature = None
+            self.Extension = self
+        def GetWhatsWrong(self, fs, ec, wn):
+            pass
+        def ForceRebuild3(self, top_only):
+            return True
+
+    sw.get_active_doc = lambda: (_MockDoc(), None)
+    res_reb = sw.get_rebuild_errors(force_rebuild=True)
+    d = res_reb.get("data", {})
+    record("get_rebuild_errors: struttura dati corretta (rebuild_ok, error_count, warning_count)",
+           res_reb["success"] and "rebuild_ok" in d and d.get("error_count") == 0 and d.get("warning_count") == 0)
+
+    # 6. get_feature_tree: include contatori di errore e warning
+    tree_res = sw.get_feature_tree()
+    td = tree_res.get("data", {})
+    record("get_feature_tree: include contatori error_count e warning_count",
+           tree_res["success"] and "error_count" in td and "warning_count" in td and "features" in td)
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1392,7 +1443,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search)):
             try:
                 fn()
             except Exception as e:

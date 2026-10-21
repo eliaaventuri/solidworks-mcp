@@ -1,6 +1,6 @@
 """Lotto ANALISI E GESTIONE: schemi dei tool -> automation/ext_manage.py (ManageOperations)."""
 
-from ._common import S, N, A, UNIT
+from ._common import S, N, B, A, UNIT
 
 TOOLS = {
     "check_geometry": ("check_geometry",
@@ -47,6 +47,11 @@ TOOLS = {
          "plane": (None, "Front | Top | Right (standard planes, any language) or a plane feature name, or {\"face\":[x,y,z]} (point `unit` on the new face)"),
          "unit": UNIT},
         ["sketch", "plane"]),
+    "get_rebuild_errors": ("get_rebuild_errors",
+        "Inspect rebuild errors and warnings on the active model. Checks What's Wrong list and feature error codes with detailed diagnostics.",
+        {"force_rebuild": (B, "Force a full model rebuild (ForceRebuild3) before diagnosing errors (default false)"),
+         "top_only": (B, "If force_rebuild is true, only rebuild top-level features in assemblies (default false)")},
+        []),
 }
 
 DESTRUCTIVE = {

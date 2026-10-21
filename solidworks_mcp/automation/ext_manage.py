@@ -319,3 +319,116 @@ class ManageOperations:
         except Exception as e:
             logger.error(f"change_sketch_plane: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+    def get_rebuild_errors(self, force_rebuild: bool = False, top_only: bool = False) -> Dict:
+        """Ispeziona errori e avvisi di ricostruzione del modello attivo (What's Wrong e codici di errore delle feature)."""
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+
+            if force_rebuild:
+                try:
+                    doc.ForceRebuild3(bool(top_only))
+                except Exception as ex:
+                    logger.warning(f"ForceRebuild3 failed: {ex}")
+
+            # 1. Interroga GetWhatsWrong
+            ww_feats, ww_codes, ww_warns = [], [], []
+            try:
+                fs, ec, wn = _byref(), _byref(), _byref()
+                doc.Extension.GetWhatsWrong(fs, ec, wn)
+                ww_feats = [self._ww_name(x) for x in _as_list(fs.value)]
+                ww_codes = [self._ww_name(x) for x in _as_list(ec.value)]
+                ww_warns = [bool(x) for x in _as_list(wn.value)]
+            except Exception as ex:
+                logger.debug(f"GetWhatsWrong not available or empty: {ex}")
+
+            # 2. Scansione dell'albero delle feature per codici di errore
+            features_with_errors = []
+            features_with_warnings = []
+            try:
+                feat = doc.FirstFeature
+                while feat:
+                    fname = str(self._com(feat, "Name") or "")
+                    ftype = str(feat.GetTypeName2() if hasattr(feat, "GetTypeName2") else "")
+
+                    code = 0
+                    warn = False
+                    if hasattr(feat, "GetErrorCode2"):
+                        try:
+                            bf = _byref(pythoncom.VT_BOOL)
+                            code = int(feat.GetErrorCode2(bf))
+                            warn = bool(bf.value)
+                        except Exception:
+                            pass
+
+                    if code != 0 or warn:
+                        item = {"name": fname, "type": ftype, "error_code": code, "warning": warn}
+                        if warn:
+                            features_with_warnings.append(item)
+                        else:
+                            features_with_errors.append(item)
+
+                    # Controlla sub-features
+                    if hasattr(feat, "GetFirstSubFeature"):
+                        sub_f = feat.GetFirstSubFeature()
+                        while sub_f:
+                            sname = str(self._com(sub_f, "Name") or "")
+                            stype = str(sub_f.GetTypeName2() if hasattr(sub_f, "GetTypeName2") else "")
+                            scode = 0
+                            swarn = False
+                            if hasattr(sub_f, "GetErrorCode2"):
+                                try:
+                                    sbf = _byref(pythoncom.VT_BOOL)
+                                    scode = int(sub_f.GetErrorCode2(sbf))
+                                    swarn = bool(sbf.value)
+                                except Exception:
+                                    pass
+                            if scode != 0 or swarn:
+                                sitem = {"name": sname, "type": stype, "error_code": scode, "warning": swarn, "parent": fname}
+                                if swarn:
+                                    features_with_warnings.append(sitem)
+                                else:
+                                    features_with_errors.append(sitem)
+                            sub_f = sub_f.GetNextSubFeature() if hasattr(sub_f, "GetNextSubFeature") else None
+
+                    feat = feat.GetNextFeature() if hasattr(feat, "GetNextFeature") else None
+            except Exception as ex:
+                logger.debug(f"Feature tree error scan error: {ex}")
+
+            has_errors = bool(features_with_errors or any(not w for w in ww_warns))
+            has_warnings = bool(features_with_warnings or any(w for w in ww_warns))
+            rebuild_ok = not has_errors
+
+            ww_list = []
+            for i in range(len(ww_feats)):
+                f_name = ww_feats[i] if i < len(ww_feats) else "Unknown"
+                c_val = ww_codes[i] if i < len(ww_codes) else ""
+                is_w = ww_warns[i] if i < len(ww_warns) else False
+                ww_list.append({"feature": f_name, "code": c_val, "warning": is_w})
+
+            total_errs = len(features_with_errors)
+            total_warns = len(features_with_warnings)
+
+            if rebuild_ok and not has_warnings:
+                msg = "Rebuild status: OK. 0 errors, 0 warnings across all features."
+            elif rebuild_ok:
+                msg = f"Rebuild status: OK with warnings. {total_warns} feature warning(s) detected."
+            else:
+                msg = f"Rebuild status: FAILED. {total_errs} error(s) and {total_warns} warning(s) detected. Fix sketches or feature inputs."
+
+            data = {
+                "rebuild_ok": rebuild_ok,
+                "has_errors": has_errors,
+                "has_warnings": has_warnings,
+                "error_count": total_errs,
+                "warning_count": total_warns,
+                "errors": features_with_errors,
+                "warnings": features_with_warnings,
+                "whats_wrong": ww_list,
+            }
+            return self._result(True, msg, SwErrors.swSuccess, data)
+        except Exception as e:
+            logger.error(f"get_rebuild_errors: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
+

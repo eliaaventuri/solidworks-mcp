@@ -314,29 +314,83 @@ class Features3Operations:
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
 
     def get_feature_tree(self, include_sketches: bool = True, include_suppressed: bool = True) -> Dict:
-        """Restituisce la struttura gerarchica ad albero di feature e schizzi."""
+        """Restituisce la struttura gerarchica ad albero di feature e schizzi con stato di errore e avviso."""
         try:
-            doc, err = self._part()
+            import pythoncom
+            from win32com.client import VARIANT
+
+            doc, err = self.get_active_doc()
             if err:
                 return err
             feat = doc.FirstFeature
             tree = []
+            error_count = 0
+            warning_count = 0
+
             while feat:
-                fname = feat.Name
-                ftype = feat.GetTypeName2()
+                fname = str(self._com(feat, "Name") or "")
+                ftype = str(feat.GetTypeName2() if hasattr(feat, "GetTypeName2") else "")
                 suppressed = bool(feat.IsSuppressed2(1, None)[0]) if hasattr(feat, "IsSuppressed2") else False
+
+                err_code = 0
+                warn = False
+                if hasattr(feat, "GetErrorCode2"):
+                    try:
+                        bf = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, None)
+                        err_code = int(feat.GetErrorCode2(bf))
+                        warn = bool(bf.value)
+                    except Exception:
+                        pass
+
+                if err_code != 0 and not warn:
+                    error_count += 1
+                elif warn:
+                    warning_count += 1
+
                 if include_suppressed or not suppressed:
                     sub_sketches = []
                     sub_f = feat.GetFirstSubFeature() if hasattr(feat, "GetFirstSubFeature") else None
                     while sub_f:
                         if include_sketches:
-                            sub_sketches.append({"name": sub_f.Name, "type": sub_f.GetTypeName2()})
+                            sname = str(self._com(sub_f, "Name") or "")
+                            stype = str(sub_f.GetTypeName2() if hasattr(sub_f, "GetTypeName2") else "")
+                            scode = 0
+                            swarn = False
+                            if hasattr(sub_f, "GetErrorCode2"):
+                                try:
+                                    sbf = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, None)
+                                    scode = int(sub_f.GetErrorCode2(sbf))
+                                    swarn = bool(sbf.value)
+                                except Exception:
+                                    pass
+                            if scode != 0 and not swarn:
+                                error_count += 1
+                            elif swarn:
+                                warning_count += 1
+
+                            sub_sketches.append({
+                                "name": sname,
+                                "type": stype,
+                                "error_code": scode,
+                                "warning": swarn
+                            })
                         sub_f = sub_f.GetNextSubFeature() if hasattr(sub_f, "GetNextSubFeature") else None
-                    tree.append({"name": fname, "type": ftype, "suppressed": suppressed, "sub_features": sub_sketches})
-                feat = feat.GetNextFeature()
+
+                    tree.append({
+                        "name": fname,
+                        "type": ftype,
+                        "suppressed": suppressed,
+                        "error_code": err_code,
+                        "warning": warn,
+                        "sub_features": sub_sketches
+                    })
+                feat = feat.GetNextFeature() if hasattr(feat, "GetNextFeature") else None
+
+            msg = f"Feature tree extracted: {len(tree)} features ({error_count} errors, {warning_count} warnings)."
             return self._result(
-                True, f"Albero feature estratto: {len(tree)} feature trovate.",
-                SwErrors.swSuccess, {"count": len(tree), "features": tree}
+                True, msg,
+                SwErrors.swSuccess,
+                {"count": len(tree), "error_count": error_count, "warning_count": warning_count, "features": tree}
             )
         except Exception as e:
             logger.error(f"get_feature_tree: {e}\n{traceback.format_exc()}")

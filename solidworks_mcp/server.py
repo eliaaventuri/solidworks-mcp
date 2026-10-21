@@ -85,10 +85,9 @@ server = Server("solidworks-mcp-server")
 # Tool Definitions
 # ============================================================================
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    """List all available SolidWorks tools"""
-    tools = [
+def _raw_all_tools() -> list[Tool]:
+    """Restituisce la lista completa di tutti i tool non filtrati."""
+    return [
         # Connection Tools
         Tool(
             name="connect_solidworks",
@@ -131,6 +130,29 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["steps"]
+            }
+        ),
+        Tool(
+            name="search_tools",
+            description="Search available SolidWorks MCP tools by keyword or category. Returns matching tool names, descriptions, groups, and argument signatures. Useful for discovering specialized tools on-demand.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keyword to search in tool names and descriptions (e.g. 'fillet', 'sheet metal', 'mesh', 'drawing', 'mate', 'loft', 'export')"
+                    },
+                    "group": {
+                        "type": "string",
+                        "description": "Optional toolset group filter: 'base' | 'modeling' | 'drawings' | 'assembly' | 'data' | 'simulation'"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "default": 15,
+                        "description": "Maximum number of matching tools to return (count, default 15)"
+                    }
+                },
+                "required": ["query"]
             }
         ),
         
@@ -408,7 +430,12 @@ async def list_tools() -> list[Tool]:
             }
         ),
     ] + DRAWING_TOOLS + MODELING_TOOLS + ASSEMBLY_TOOLS + DATA_TOOLS + SIMULATION_TOOLS
-    return decorate_tools([t for t in tools if _tool_blocked_reason(t.name) is None])
+
+
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    """List all available SolidWorks tools"""
+    return decorate_tools([t for t in _raw_all_tools() if _tool_blocked_reason(t.name) is None])
 
 
 # ============================================================================
@@ -1192,10 +1219,85 @@ BASE_DISPATCH = {
     "chamfer_edges": ("chamfer_edges", {"distance", "angle", "unit", "edge_points", "distance2"}),
 }
 
+def _search_tools_handler(arguments: dict) -> Dict:
+    query = str(arguments.get("query", "")).strip().lower()
+    if not query:
+        return sw_automation._result(False, "Query parameter is required", SwErrors.swInvalidInput)
+
+    group_filter = str(arguments.get("group", "")).strip().lower()
+    limit = int(arguments.get("limit") or 15)
+    limit = max(1, min(limit, 50))
+
+    all_tools = decorate_tools(_raw_all_tools())
+    q_words = [w for w in query.replace("_", " ").split() if len(w) >= 2]
+    if not q_words:
+        q_words = [query]
+
+    scored = []
+    for t in all_tools:
+        t_group = _tool_group(t.name) or "base"
+        if group_filter and group_filter != "all" and t_group != group_filter:
+            continue
+
+        name_lower = t.name.lower()
+        desc_lower = (t.description or "").lower()
+        props = (t.inputSchema or {}).get("properties", {})
+        param_names = [p.lower() for p in props]
+
+        score = 0
+        if query == name_lower:
+            score += 100
+        elif query in name_lower:
+            score += 60
+
+        matched_words = 0
+        for w in q_words:
+            found_in_tool = False
+            if w in name_lower:
+                score += 30
+                found_in_tool = True
+            if any(w in p for p in param_names):
+                score += 15
+                found_in_tool = True
+            if w in desc_lower:
+                score += 10
+                found_in_tool = True
+            if found_in_tool:
+                matched_words += 1
+
+        # Se la ricerca ha piu' parole, richiediamo che tutte le parole siano presenti o che la query intera compaia
+        if len(q_words) > 1 and matched_words < len(q_words) and query not in name_lower and query not in desc_lower:
+            score = 0
+
+        if score > 0:
+            is_enabled = (_tool_blocked_reason(t.name) is None)
+            scored.append((score, {
+                "name": t.name,
+                "group": t_group,
+                "enabled": is_enabled,
+                "description": (t.description or "").split("[DESTRUCTIVE")[0].strip(),
+                "parameters": list(props.keys()),
+                "required": (t.inputSchema or {}).get("required", [])
+            }))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results = [item for _, item in scored[:limit]]
+
+    msg = f"Found {len(scored)} tool(s) matching '{query}' (returning top {len(results)})."
+    return sw_automation._result(True, msg, SwErrors.swSuccess, {
+        "query": query,
+        "group_filter": group_filter or "all",
+        "total_matches": len(scored),
+        "returned_count": len(results),
+        "tools": results
+    })
+
+
 # tool base con un gestore proprio: nome -> funzione(arguments)
 SPECIAL_HANDLERS = {
     "get_solidworks_info": _solidworks_info_handler,
     "execute_tool_sequence": _execute_tool_sequence_handler,
+    "search_tools": _search_tools_handler,
     "list_features": lambda arguments: _list_features_fixed(),
     "close_sketch": lambda arguments: _close_sketch_handler(),
     "get_sketch_status": lambda arguments: _get_sketch_status_handler(),
