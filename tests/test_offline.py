@@ -70,7 +70,7 @@ from solidworks_mcp.constants import SwErrors                                   
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 439                       # 440 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 465                       # 466 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -2023,6 +2023,131 @@ def test_assembly3_tools(tmp):
            ok_cav["success"] and ok_joi["success"] and ok_smt["success"])
 
 
+
+
+def test_drawings2_tools(tmp):
+    sw = SolidWorksAutomation()
+
+    # 1. Senza documento disegno attivo, tutti i 26 tool gestiscono l'assenza con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
+    sw._drawing = lambda: (None, {"success": False, "message": "Nessun disegno attivo"})
+
+    r1 = sw.edit_sheet_format()
+    r2 = sw.exit_sheet_format()
+    r3 = sw.reload_sheet_format()
+    r4 = sw.add_relative_view()
+    r5 = sw.add_predefined_view()
+    r6 = sw.add_aligned_section_view(0, 0, 50, 50, 100, 50)
+    r7 = sw.add_half_section_view(50, 50)
+    r8 = sw.add_flat_pattern_drawing_view()
+    r9 = sw.add_unfolded_view()
+    r10 = sw.add_alternate_position_view()
+    r11 = sw.show_exploded_drawing_view()
+    r12 = sw.rotate_drawing_view("View1", 45.0)
+    r13 = sw.align_drawing_views("View1", "View2")
+    r14 = sw.add_ordinate_dimension([0, 0], [[10, 0], [20, 0]])
+    r15 = sw.add_chamfer_dimension([15, 15])
+    r16 = sw.hide_show_dimension("D1@View1", True)
+    r17 = sw.add_weld_symbol([50, 50])
+    r18 = sw.add_edge_chamfer_symbol([30, 30])
+    r19 = sw.add_revision_table()
+    r20 = sw.add_weldment_cut_list_table()
+    r21 = sw.add_general_table()
+    r22 = sw.add_centerlines()
+    r23 = sw.create_drawing_layer("Annotations")
+    r24 = sw.set_entity_layer("Annotations")
+    r25 = sw.insert_drawing_block()
+    r26 = sw.export_pdf_layers(os.path.join(tmp, "out.pdf"))
+
+    all_failed = all(not r["success"] for r in (
+        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
+        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26
+    ))
+    record("drawings2: tutti i 26 tool gestiscono assenza doc disegno con errore pulito", all_failed)
+
+    # 2. Mock documento disegno attivo per verificare esecuzione positiva
+    class _MockDrawingDoc:
+        def __init__(self):
+            self.Title = "Drawing1.SLDDRW"
+            self.GetType = 3
+            self.ActiveDrawingView = types.SimpleNamespace(ShowExploded=False)
+            self.Extension = types.SimpleNamespace(
+                SelectByID2=lambda *a, **k: True
+            )
+        def ClearSelection2(self, *a): pass
+        def EditTemplate(self): pass
+        def EditSheet(self): pass
+        def GetCurrentSheet(self):
+            return types.SimpleNamespace(SetTemplateName=lambda *a: True, ReloadTemplate=lambda *a: True)
+        def CreateFlatPatternViewFromModelView3(self, *a): return True
+        def DrawingViewRotate(self, *a): return True
+        def AlignHorz(self): return True
+        def AlignVert(self): return True
+        def InsertRevisionTable2(self, *a): return True
+        def InsertTableAnnotation2(self, *a): return True
+        def InsertCenterLine2(self): return True
+        def GetLayerManager(self):
+            return types.SimpleNamespace(AddLayer=lambda *a: True)
+        def InsertBlock(self, *a): return True
+        def SaveAs3(self, *a): return True
+
+    mock_doc = _MockDrawingDoc()
+    sw._drawing = lambda: (mock_doc, None)
+    sw.get_active_doc = lambda: (mock_doc, None)
+    sw._get_doc_title = lambda doc: "Drawing1.SLDDRW"
+
+    ok_ef = sw.edit_sheet_format()
+    ok_xf = sw.exit_sheet_format()
+    ok_rf = sw.reload_sheet_format()
+    record("drawings2: formati foglio (edit, exit, reload)",
+           ok_ef["success"] and ok_xf["success"] and ok_rf["success"])
+
+    ok_rv = sw.add_relative_view(x=120, y=120)
+    ok_pv = sw.add_predefined_view(x=100, y=100, orientation="top")
+    ok_as = sw.add_aligned_section_view(0, 0, 50, 50, 100, 50, view_x=220, view_y=160)
+    ok_hs = sw.add_half_section_view(50, 50, direction="left")
+    record("drawings2: viste relative, predefinite, allineate e semi-sezioni",
+           ok_rv["success"] and ok_pv["success"] and ok_as["success"] and ok_hs["success"])
+
+    ok_fp = sw.add_flat_pattern_drawing_view(x=150, y=150)
+    ok_uv = sw.add_unfolded_view(x=140, y=140)
+    ok_ap = sw.add_alternate_position_view("View1", "Pos2")
+    ok_ex = sw.show_exploded_drawing_view("View1", True)
+    record("drawings2: viste speciali lamiera (flat, unfolded), posizioni alternative ed esploso",
+           ok_fp["success"] and ok_uv["success"] and ok_ap["success"] and ok_ex["success"])
+
+    ok_rot = sw.rotate_drawing_view("View1", 90.0)
+    ok_alg = sw.align_drawing_views("View1", "View2", "vertical")
+    record("drawings2: rotazione e allineamento viste",
+           ok_rot["success"] and ok_alg["success"])
+
+    ok_ord = sw.add_ordinate_dimension([0, 0], [[10, 0], [25, 0]], direction="horizontal")
+    ok_chm = sw.add_chamfer_dimension([20, 20])
+    ok_hsd = sw.hide_show_dimension("D1@View1", False)
+    record("drawings2: quotatura progressiva/ordinate, smussi e visibilita' quote",
+           ok_ord["success"] and ok_chm["success"] and ok_hsd["success"] and not ok_hsd["data"]["visible"])
+
+    ok_wld = sw.add_weld_symbol([50, 50], weld_type="fillet", size=6.0)
+    ok_edg = sw.add_edge_chamfer_symbol([30, 30], symbol_type="undercut")
+    record("drawings2: simboli di saldatura e sbavatura/spigolo ISO 13715",
+           ok_wld["success"] and ok_edg["success"])
+
+    ok_rev = sw.add_revision_table(revision="B", description="Eco release")
+    ok_wct = sw.add_weldment_cut_list_table()
+    ok_tbl = sw.add_general_table(rows=4, columns=3, title="Tabella Componenti")
+    record("drawings2: tabelle revisioni, distinta di taglio e generiche",
+           ok_rev["success"] and ok_wct["success"] and ok_tbl["success"])
+
+    ok_cln = sw.add_centerlines()
+    ok_lyr = sw.create_drawing_layer("Annotations", color_rgb=[255, 0, 0])
+    ok_sly = sw.set_entity_layer("Annotations", "Note1")
+    ok_blk = sw.insert_drawing_block(block_name="Stamp", x=200, y=50)
+    pdf_target = os.path.join(tmp, "drawing_layers.pdf")
+    ok_pdf = sw.export_pdf_layers(pdf_target, overwrite=True)
+    record("drawings2: assi, livelli CAD (layer), blocchi ed export PDF multilivello",
+           ok_cln["success"] and ok_lyr["success"] and ok_sly["success"] and ok_blk["success"] and ok_pdf["success"])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -2038,7 +2163,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp))):
             try:
                 fn()
             except Exception as e:
