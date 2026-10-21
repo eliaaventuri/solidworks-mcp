@@ -31,12 +31,15 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 
 | Area | Tools | What it can do |
 |---|:---:|---|
-| 🧱 **Core** | 25 | Connect; new/open/save/close; basic sketches; extrude, cut, fillet, chamfer |
-| 📐 **Modeling** | 51 | Sketch dimensions and relations; revolve, sweep, loft, shell, rib, draft, move faces; linear, circular and mirror patterns; Hole Wizard (ISO, ANSI, DIN, BSI, JIS; metric up to M70); reference planes, axes, points and coordinate systems |
-| 📄 **Drawings** | 38 | ISO sheets (first-angle projection); standard, projected, section, detail, auxiliary, broken and crop views; clean automatic dimensions; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
-| ⚙️ **Assemblies** | 35 | Insert components and mate them (standard, advanced and limit mates); component patterns; mirroring with opposite-hand parts; exploded views; interference and clearance checks; measured degrees of freedom |
-| 📦 **Data & export** | 31 | Materials (including custom libraries); mass properties and inertia (also in a user coordinate system); custom properties; equations; configurations, also from a CSV/JSON table; STL/3MF/STEP/IGES/Parasolid/3D PDF/eDrawings export with a check of the written file; import; high-resolution images; measurements |
-| 🔬 **Simulation** | 23 | Static, frequency, buckling and steady-state thermal studies; fixtures, forces, torques, pressure, gravity, temperature, remote and bearing loads; global and local contacts; mesh with local controls; results (including where the minimum factor of safety is, and reaction moments); color plots |
+| 🧱 **Core & Documents** | 25 | Connect to live or dedicated instance; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
+| 📐 **Modeling & Sketching** | 148 | Advanced 2D/3D sketching (centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim); boss/cut lofts, sweeps, boundary features, ribs, domes, wraps, flex, cosmetic & modeled threads; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns |
+| 🌀 **Curves & Surfaces** | 21 | Standard & variable-pitch helices, spirals, projected & composite curves, split lines; planar surface from sketch, surface extrude, revolve, sweep, loft, offset, knit, extend, untrim, ruled surface |
+| 📄 **Drawings** | 38 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); automatic layout & scaling; standard, projected, section, detail, auxiliary, broken & crop views; clean automatic dimensioning; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
+| ⚙️ **Assemblies** | 52 | Component insertion (floating/fixed); standard, advanced & limit mates; component patterns (linear, circular, feature-driven, chain); mirroring with opposite-hand parts; copy with mates; exploded views (linear, entity-aligned, radial); mate controller; belt & chain features; hole alignment checks; measured degrees of freedom; Pack & Go |
+| 🏭 **Sheet Metal & Weldments** | 17 | Base flanges, edge flanges, hems, sketched bends, swept flanges, normal cuts, forming tools, corner relief / trim, flat pattern unfolding & 1:1 DXF export; structural members, weldment profiles, trim/extend, end caps, cut lists |
+| 🔍 **Selection & Inspection** | 16 | SelectByID2, 3D raycasting selection, B-Rep topology query by geometric criteria, active selection management; viewport orientation, zoom to fit, labeled viewport image badge export; bounding boxes, center of mass, mate references, draft & thickness analysis, undercut analysis, geometry check |
+| 📦 **Data & Export** | 31 | Materials (including custom libraries); mass properties & inertia tensors (model origin, CG, or user coordinate system); custom properties; equations; configurations (tables via CSV/JSON); STEP/IGES/Parasolid/STL/3MF/3D PDF/eDrawings export with integrity check; import; high-res images |
+| 🔬 **Simulation (FEA)** | 23 | Static, frequency, buckling and steady-state thermal studies; fixtures, forces, torques, pressure, gravity, temperature, bearing & remote loads; global and local contacts (bonded, no-penetration); standard & curvature-based mesh with local mesh controls; automated solver; results (von Mises, displacements, strains, heat flux, FOS location, reaction forces/moments); color plots |
 
 ### Things you can ask
 
@@ -151,12 +154,12 @@ The full list is in [`LIMITI.md`](LIMITI.md).
 ## Tests
 
 ```bash
-python tests/test_offline.py                          # no SOLIDWORKS needed (also runs on Linux and on every push)
-.venv\Scripts\python.exe tests\test_modeling_live.py  # one live test per area, on a dedicated hidden instance
-.venv\Scripts\python.exe tests\run_all.py             # full regression (~1 h 40 min), summary in test_output\
+python tests/test_offline.py                          # no SOLIDWORKS needed (runs on Linux and CI on every push)
+.venv\Scripts\python.exe tests\test_modeling_live.py  # targeted live tests on dedicated hidden instance
+.venv\Scripts\python.exe tests\run_all.py             # full regression (12 suites, 1853/1853 PASS), summary in test_output\
 ```
 
-The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. The latest results are in [`STATO.md`](STATO.md).
+The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All 1853 checks in the regression suite pass with 100% green status on a dedicated instance with zero orphan processes. The latest results are in [`STATO.md`](STATO.md).
 
 ## Project documents
 
