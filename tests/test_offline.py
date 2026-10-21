@@ -70,7 +70,7 @@ from solidworks_mcp.constants import SwErrors                                   
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 465                       # 466 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 498                       # 499 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -2148,6 +2148,160 @@ def test_drawings2_tools(tmp):
            ok_cln["success"] and ok_lyr["success"] and ok_sly["success"] and ok_blk["success"] and ok_pdf["success"])
 
 
+
+def test_features4_tools(tmp):
+    sw = SolidWorksAutomation()
+
+    # 1. Senza documento parte attivo, tutti i 33 tool gestiscono l'assenza con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
+    sw._part = lambda: (None, {"success": False, "message": "Nessun pezzo attivo"})
+
+    r1 = sw.extrude_from_surface(depth=10.0)
+    r2 = sw.intersect_solid_features(["Body1", "Body2"])
+    r3 = sw.solid_sweep("Tool1", "Path1")
+    r4 = sw.variable_section_sweep("Prof1", "Path1")
+    r5 = sw.setback_fillet([0, 0, 0])
+    r6 = sw.curvature_continuous_fillet([[0, 0, 0]])
+    r7 = sw.stud_wizard([0, 0, 0], 8.0, 30.0)
+    r8 = sw.thread_lead_in([0, 0, 0], 1.5)
+    r9 = sw.create_reference_curve_from_equation("t", "t", "t")
+    r10 = sw.chain_pattern("Chain1", 10)
+    r11 = sw.mirror_body_merge(["Body1"], "Top")
+    r12 = sw.core_cavity_split([100, 100, 50])
+    r13 = sw.body_replace_face([[0, 0, 0]], "Surf1")
+    r14 = sw.freeform_surface([0, 0, 0], 2.0)
+    r15 = sw.flatten_surface([0, 0, 0])
+    r16 = sw.radiate_surface([[0, 0, 0]], 15.0)
+    r17 = sw.cross_break([0, 0, 0], 1.0)
+    r18 = sw.convert_to_sheet_metal(1.5, 2.0, [0, 0, 0])
+    r19 = sw.vent_feature("VentSketch", 2.0)
+    r20 = sw.loft_bend("Prof1", "Prof2", 2.0)
+    r21 = sw.curved_edge_flange([0, 0, 0], 20.0)
+    r22 = sw.cosmetic_weld_bead([0, 0, 0], [10, 0, 0], 4.0)
+    r23 = sw.update_cut_list()
+    r24 = sw.subweldment_folder("Sub1")
+    r25 = sw.insert_parting_line([0, 0, 1])
+    r26 = sw.insert_shut_off_surfaces()
+    r27 = sw.insert_parting_surface(25.0)
+    r28 = sw.insert_tooling_split([100, 100, 50], [100, 100, 50])
+    r29 = sw.insert_lip_and_groove([[0, 0, 0]], 2.0, 2.0)
+    r30 = sw.insert_snap_hook([0, 0, 0], 15.0, 2.0)
+    r31 = sw.insert_mounting_boss([0, 0, 0], 12.0, 8.0, 3.0)
+    r32 = sw.mesh_brep_converter("MeshBody1")
+    r33 = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1])
+
+    all_failed = all(not r["success"] for r in (
+        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
+        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
+        r31, r32, r33
+    ))
+    record("features4: tutti i 33 tool gestiscono assenza doc parte con errore pulito", all_failed)
+
+    # 2. Mock documento parte attivo per verificare esecuzione positiva
+    class _MockPartDoc:
+        def __init__(self):
+            self.Title = "Part1.SLDPRT"
+            self.GetType = 1
+            self.FeatureManager = types.SimpleNamespace(
+                FeatureExtrusion3=lambda *a, **k: True,
+                InsertIntersectFeature=lambda *a, **k: True,
+                InsertSweep=lambda *a, **k: True,
+                FeatureFillet3=lambda *a, **k: True,
+                AdvancedHole2=lambda *a, **k: True,
+                InsertCurveFileBegin=lambda *a, **k: True,
+                InsertMirrorFeature2=lambda *a, **k: True,
+                InsertReplaceFaceFeature=lambda *a, **k: True,
+                InsertCrossBreak=lambda *a, **k: True,
+                InsertConvertToSheetMetal2=lambda *a, **k: True,
+                InsertVent=lambda *a, **k: True,
+                InsertLoftedBend=lambda *a, **k: True,
+                InsertCosmeticWeldBead2=lambda *a, **k: True,
+                InsertSubWeldFolder=lambda *a, **k: True,
+            )
+            self.Extension = types.SimpleNamespace(
+                SelectByID2=lambda *a, **k: True
+            )
+        def ClearSelection2(self, *a): pass
+        def EditRebuild3(self): pass
+        def ForceRebuild3(self, *a): pass
+        def UpdateCutList(self): pass
+
+    mock_doc = _MockPartDoc()
+    sw._part = lambda: (mock_doc, None)
+    sw.get_active_doc = lambda: (mock_doc, None)
+    sw._select_point = lambda *a, **k: True
+    sw._select_points = lambda *a, **k: True
+
+    ok_efs = sw.extrude_from_surface(depth=15.0, start_surface_name="Surf1")
+    ok_isf = sw.intersect_solid_features(["Body1", "Body2"])
+    record("features4: estrusioni da superficie e intersezioni composite",
+           ok_efs["success"] and ok_isf["success"])
+
+    ok_ss = sw.solid_sweep("Tool1", "Path1")
+    ok_vss = sw.variable_section_sweep("Prof1", "Path1", scale_factor=1.5, twist_angle=45.0)
+    record("features4: sweep con utensile solido e a sezione variabile",
+           ok_ss["success"] and ok_vss["success"])
+
+    ok_sbf = sw.setback_fillet([0, 0, 0], setback_distances=[2.0, 3.0, 4.0], radius=6.0)
+    ok_ccf = sw.curvature_continuous_fillet([[0, 0, 0]], radius=5.0, rho_conic=0.6)
+    record("features4: raccordi con arretramento vertice e continuita' G2",
+           ok_sbf["success"] and ok_ccf["success"])
+
+    ok_swz = sw.stud_wizard([10, 10, 0], shaft_diameter=8.0, stud_length=30.0, size="M8x1.25")
+    ok_tli = sw.thread_lead_in([10, 10, 0], pitch=1.5, angle_deg=45.0)
+    record("features4: prigionieri filettati stud wizard e imbocco filettatura",
+           ok_swz["success"] and ok_tli["success"])
+
+    ok_eqc = sw.create_reference_curve_from_equation("50*cos(t)", "50*sin(t)", "10*t", t_start=0, t_end=6.28)
+    record("features4: curve 3D parametriche da equazioni matematiche",
+           ok_eqc["success"])
+
+    ok_cp = sw.chain_pattern("ChainSketch", instance_count=8, pitch_distance=15.0)
+    ok_mbm = sw.mirror_body_merge(["Body1"], "Right", merge_bodies=True)
+    record("features4: ripetizioni a catena e specchiatura corpi con fusione",
+           ok_cp["success"] and ok_mbm["success"])
+
+    ok_ccs = sw.core_cavity_split([120, 120, 60], parting_surface_name="PartingSurf")
+    ok_brf = sw.body_replace_face([[0, 0, 0]], "TargetSurf")
+    record("features4: separazione stampo matrice/punzone e sostituzione facce",
+           ok_ccs["success"] and ok_brf["success"])
+
+    ok_ffs = sw.freeform_surface([0, 0, 0], push_distance=3.0)
+    ok_fls = sw.flatten_surface([0, 0, 0], accuracy_level=4)
+    ok_rad = sw.radiate_surface([[0, 0, 0]], radius_distance=20.0)
+    record("features4: superfici deformate freeform, spianate 2D e irradiate",
+           ok_ffs["success"] and ok_fls["success"] and ok_rad["success"])
+
+    ok_cb = sw.cross_break([0, 0, 0], depth=1.5)
+    ok_csm = sw.convert_to_sheet_metal(2.0, 3.0, [0, 0, 0])
+    ok_vnt = sw.vent_feature("VentBoundary", rib_width=2.5)
+    ok_lb = sw.loft_bend("Profile1", "Profile2", thickness=2.0)
+    ok_cef = sw.curved_edge_flange([0, 0, 0], flange_length=25.0)
+    record("features4: lamiera (cross break, convert, vent, loft bend, flangia curva)",
+           ok_cb["success"] and ok_csm["success"] and ok_vnt["success"] and ok_lb["success"] and ok_cef["success"])
+
+    ok_cwb = sw.cosmetic_weld_bead([0, 0, 0], [10, 0, 0], bead_size=5.0)
+    ok_ucl = sw.update_cut_list()
+    ok_swf = sw.subweldment_folder("TrussAssembly", ["Member1", "Member2"])
+    record("features4: saldature (cordolo cosmetico, distinta taglio, cartelle)",
+           ok_cwb["success"] and ok_ucl["success"] and ok_swf["success"])
+
+    ok_ipl = sw.insert_parting_line([0, 0, 1], draft_angle=1.5)
+    ok_iso = sw.insert_shut_off_surfaces()
+    ok_ips = sw.insert_parting_surface(distance=30.0)
+    ok_its = sw.insert_tooling_split([100, 100, 50], [100, 100, 50])
+    ok_ilg = sw.insert_lip_and_groove([[0, 0, 0]], lip_depth=2.0, groove_width=2.2)
+    ok_ish = sw.insert_snap_hook([0, 0, 0], hook_height=18.0, beam_thickness=2.5)
+    ok_imb = sw.insert_mounting_boss([0, 0, 0], height=15.0, outer_diameter=10.0, inner_hole_diameter=3.5)
+    record("features4: stampi (divisione, chiusura, maschio-femmina, snap hook, boss)",
+           ok_ipl["success"] and ok_iso["success"] and ok_ips["success"] and ok_its["success"] and ok_ilg["success"] and ok_ish["success"] and ok_imb["success"])
+
+    ok_mbc = sw.mesh_brep_converter("FacetBody1", target_type="solid")
+    ok_sda = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1], samples_count=50)
+    record("features4: conversione mesh B-Rep e analisi deviazione geometrica",
+           ok_mbc["success"] and ok_sda["success"])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -2163,7 +2317,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp))):
             try:
                 fn()
             except Exception as e:
