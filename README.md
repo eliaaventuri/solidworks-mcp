@@ -3,7 +3,7 @@
 **Let Claude drive SOLIDWORKS.** Describe a part, an assembly, a drawing or a simulation in plain words, and the model builds it in SOLIDWORKS for you, then checks the result with real numbers.
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
-![version](https://img.shields.io/badge/version-8.0.0-blue)
+![version](https://img.shields.io/badge/version-8.4.0-blue)
 ![tools](https://img.shields.io/badge/MCP%20tools-555-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
@@ -32,14 +32,14 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 | Area | Tools | What it can do |
 |---|:---:|---|
 | 🧱 **Core & Documents** | 27 | Connect to live or dedicated instance; batch tool sequence execution; tool search & discovery; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
-| 📐 **Modeling & Sketching** | 179 | Advanced 2D/3D sketching (rebuild diagnostics & error inspection); (centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim); boss/cut lofts, sweeps, boundary features, ribs, domes, wraps, flex, cosmetic & modeled threads; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns |
+| 📐 **Modeling & Sketching** | 212 | Advanced 2D/3D sketching (rebuild diagnostics & error inspection); centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim, intersection curves, silhouette entities, offset on surface, geodesic sketch chains, equation curves; boss/cut lofts, sweeps (solid tool & variable section), boundary features, ribs, domes, wraps, flex, cosmetic & stud wizard modeled threads, G2 curvature continuity fillets; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns; sheet metal cross breaks & swept flanges; core/cavity tooling separation; cosmetic weld beads; mesh B-Rep converter & deviation analysis |
 | 🌀 **Curves & Surfaces** | 21 | Standard & variable-pitch helices, spirals, projected & composite curves, split lines; planar surface from sketch, surface extrude, revolve, sweep, loft, offset, knit, extend, untrim, ruled surface |
-| 📄 **Drawings** | 39 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); automatic layout & scaling; standard, projected, section, detail, auxiliary, broken & crop views; clean automatic dimensioning; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
-| ⚙️ **Assemblies** | 53 | Component insertion (floating/fixed); standard, advanced & limit mates; component patterns (linear, circular, feature-driven, chain); mirroring with opposite-hand parts; copy with mates; exploded views (linear, entity-aligned, radial); mate controller; belt & chain features; hole alignment checks; measured degrees of freedom; Pack & Go |
+| 📄 **Drawings** | 65 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); sheet format reload and in-place editing; automatic layout & scaling; standard, projected, section, half-section, detail, auxiliary, broken, crop, aligned, and relative views; sheet metal flat pattern & alternate position views; clean automatic dimensioning; ordinate & chamfer dimensions, tolerances, GD&T, surface finish, ISO 13715 edge symbols, welding symbols; hole tables, BOM, revision tables, cut lists, balloons; layered multi-level PDF, DXF, DWG export |
+| ⚙️ **Assemblies** | 87 | Component insertion (floating/fixed); standard, advanced & limit mates; mechanical mates (gear, rack & pinion, cam-follower, slot, hinge, screw, linear coupler, universal joint); component patterns (linear, circular, feature-driven, chain); mirroring with opposite-hand parts; copy with mates; exploded views (linear, entity-aligned, radial); mate controller; belt & chain features; hole alignment checks; measured degrees of freedom; in-context virtual parts & assembly promotion; envelope components; cavity & join bodies; SpeedPak; smart components; component isolation; Pack & Go |
 | 🏭 **Sheet Metal & Weldments** | 17 | Base flanges, edge flanges, hems, sketched bends, swept flanges, normal cuts, forming tools, corner relief / trim, flat pattern unfolding & 1:1 DXF export; structural members, weldment profiles, trim/extend, end caps, cut lists |
 | 🔍 **Selection & Inspection** | 16 | SelectByID2, 3D raycasting selection, B-Rep topology query by geometric criteria, active selection management; viewport orientation, zoom to fit, labeled viewport image badge export; bounding boxes, center of mass, mate references, draft & thickness analysis, undercut analysis, geometry check |
-| 📦 **Data & Export** | 31 | Materials (including custom libraries); mass properties & inertia tensors (model origin, CG, or user coordinate system); custom properties; equations; configurations (tables via CSV/JSON); STEP/IGES/Parasolid/STL/3MF/3D PDF/eDrawings export with integrity check; import; high-res images |
-| 🔬 **Simulation (FEA)** | 23 | Static, frequency, buckling and steady-state thermal studies; fixtures, forces, torques, pressure, gravity, temperature, bearing & remote loads; global and local contacts (bonded, no-penetration); standard & curvature-based mesh with local mesh controls; automated solver; results (von Mises, displacements, strains, heat flux, FOS location, reaction forces/moments); color plots |
+| 📦 **Data & Export** | 55 | Materials (including custom libraries with full mechanical constants); mass properties & inertia tensors (model origin, CG, or user coordinate system); configuration-specific & summary custom properties; synchronized equation text files; design tables via CSV/JSON & derived configurations; projected area & clearance envelope; advanced exports (AP242 with PMI, flat pattern DXF, JT, IFC, glTF, 3D PDF, STEP, IGES, Parasolid, STL, 3MF) with integrity checks; 3D MBD / DimXpert PMI tolerances; photorealistic appearances & backgrounds |
+| 🔬 **Simulation (FEA)** | 55 | Static, frequency, buckling, thermal (steady/transient), drop test, fatigue (S-N), topology optimization, and linear dynamic harmonic studies; fixtures, elastic supports, prescribed displacements, cylindrical restraints, centrifugal loads, thermal shrinkage, forces, torques, pressure, gravity, temperatures, bearing & remote loads; mechanical connectors (bolt, pin, spring, spot weld); convection, radiation, and heat power loads; contacts (bonded, shrink-fit interference, virtual walls); orthotropic materials, 2D shell and 1D beam formulations; curvature-based meshing with local controls and quality diagnostics; FFEPlus & Direct Sparse solver options; results (von Mises, displacements, strains, heat flux, mode shapes, buckling load factors, FOS location, reaction force vectors, spatial probing); color plots & automated HTML calculation reports |
 
 ### Things you can ask
 
@@ -145,7 +145,7 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 371 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 554 tools |
 | `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
 
 ## Safety
@@ -177,15 +177,15 @@ Any edge case or limitation encountered during automation is reported directly i
 ## Tests
 
 ```bash
-python tests/test_offline.py                          # no SOLIDWORKS needed (runs on Linux and CI on every push)
-.venv\Scripts\python.exe tests\test_modeling_live.py  # targeted live tests on dedicated hidden instance
-.venv\Scripts\python.exe tests\run_all.py             # full regression (12 suites, 1853/1853 PASS), summary in test_output\
+python tests/test_offline.py                            # no SOLIDWORKS needed (runs on Linux and CI on every push: 255/255 PASS)
+.venv\Scripts\python.exe tests\run_total_regression.py   # master total regression covering all 5 functional areas live
+.venv\Scripts\python.exe tests\run_all.py               # comprehensive regression suite across targeted modules
 ```
 
-The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All 1853 checks in the regression suite pass with 100% green status on a dedicated instance with zero orphan processes.
+The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All tests in the regression suite (255 offline checks + 171 targeted live checks across all 5 functional areas) pass with 100% green status on a dedicated instance with zero orphan processes.
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 372 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 555 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.
