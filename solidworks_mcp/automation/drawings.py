@@ -2003,3 +2003,175 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                                 {"path": path, "bytes": os.path.getsize(path), "title": self._get_doc_title(doc)})
         except Exception as e:
             return self._fail("save_drawing", e)
+
+    def audit_drawing(self, sheet: str = None) -> Dict:
+        """Esegue un audit completo di conformita' e qualita' del foglio di disegno attivo."""
+        try:
+            doc, err = self._drawing()
+            if err:
+                return err
+
+            current_sheet = self._com(doc, "GetCurrentSheet")
+            if sheet and str(self._com(current_sheet, "GetName")) != sheet:
+                if not doc.ActivateSheet(sheet):
+                    return self._result(False, f"Foglio '{sheet}' non trovato", SwErrors.swInvalidInput)
+                current_sheet = self._com(doc, "GetCurrentSheet")
+
+            sheet_name = str(self._com(current_sheet, "GetName") or "Sheet1")
+            W, H, sheet_format = self._sheet_dims(doc)  # in meters
+
+            issues = []
+            warnings = []
+            score = 100
+
+            # 1. Cartiglio e Proprieta'
+            title_block_status = {"has_format": bool(sheet_format), "drawing_number": None, "fits": True}
+            if not sheet_format:
+                warnings.append("Formato foglio non caricato o cartiglio assente.")
+                score -= 10
+            else:
+                try:
+                    fit = self._fit_title_number(doc)
+                    title_block_status["drawing_number"] = fit.get("text")
+                    title_block_status["fits"] = fit.get("fits", True)
+                    if not fit.get("fits", True):
+                        warnings.append(f"Il numero di disegno ('{fit.get('text')}') eccede la larghezza della cella.")
+                        score -= 5
+                except Exception:
+                    pass
+
+            # 2. Viste sul foglio
+            views = list(self._sheet_views(doc))
+            view_names = [str(self._com(v, "GetName2")) for v in views]
+            broken = self._break_views(doc, all_sheets=False)
+            views_status = {"count": len(views), "views": view_names, "broken_views": broken}
+            if not views:
+                issues.append("Nessuna vista presente sul foglio di disegno.")
+                score -= 40
+            elif broken:
+                warnings.append(f"Viste interrotte presenti: {broken} (possono impedire l'export in DXF/DWG).")
+                score -= 5
+
+            # 3. Distinta base (BOM) e Palloncini (Balloons)
+            bom_res = self.list_bom()
+            bom_present = bom_res.get("success", False)
+            bom_items = []
+            if bom_present:
+                for row in bom_res.get("data", {}).get("rows", []):
+                    item_no = row.get("N. ARTICOLO") or row.get("ITEM NO.") or row.get("ITEM") or next(iter(row.values()), None)
+                    if item_no:
+                        bom_items.append(str(item_no).strip())
+
+            # Raccolta palloncini dalle viste
+            balloons_found = []
+            balloon_items = []
+            for v in views:
+                vname = str(self._com(v, "GetName2") or "")
+                note = self._com(v, "GetFirstNote")
+                while note is not None:
+                    try:
+                        is_bal = bool(note.IsBalloon() if callable(getattr(note, "IsBalloon", None)) else getattr(note, "IsBalloon", False))
+                        if is_bal:
+                            b_text = ""
+                            if callable(getattr(note, "GetBalloonText", None)):
+                                b_text = str(note.GetBalloonText(1) or "").strip()
+                            if not b_text:
+                                b_text = str(self._com(note, "GetText") or "").strip()
+                            if b_text:
+                                balloon_items.append(b_text)
+                                balloons_found.append({"view": vname, "item": b_text})
+                    except Exception:
+                        pass
+                    note = self._com(note, "GetNext")
+
+            # Corrispondenza BOM <-> Palloncini
+            bom_audit = {
+                "bom_present": bom_present,
+                "bom_item_count": len(bom_items),
+                "balloon_count": len(balloon_items),
+                "missing_balloons": [],
+                "orphan_balloons": [],
+                "duplicate_balloons": []
+            }
+            if bom_present and bom_items:
+                missing = [b for b in bom_items if b not in balloon_items]
+                orphans = [b for b in balloon_items if b not in bom_items]
+                dups = [b for b in set(balloon_items) if balloon_items.count(b) > 1]
+                bom_audit["missing_balloons"] = missing
+                bom_audit["orphan_balloons"] = orphans
+                bom_audit["duplicate_balloons"] = dups
+
+                if missing:
+                    warnings.append(f"Voci della distinta senza palloncino: {missing}")
+                    score -= min(15, 5 * len(missing))
+                if orphans:
+                    warnings.append(f"Palloncini senza riga corrispondente in distinta: {orphans}")
+                    score -= min(10, 3 * len(orphans))
+
+            # 4. Quote e Annotazioni
+            dim_res = self.list_drawing_dimensions()
+            dims_data = dim_res.get("data", {}) if dim_res.get("success") else {}
+            dims_list = dims_data.get("dimensions", [])
+            duplicates = dims_data.get("duplicates", 0)
+
+            dangling_dims = []
+            for v in views:
+                for dd in self._display_dims(v):
+                    is_dangling = False
+                    try:
+                        if callable(getattr(dd, "IsDangling", None)):
+                            is_dangling = bool(dd.IsDangling())
+                        elif hasattr(dd, "IsDangling"):
+                            is_dangling = bool(dd.IsDangling)
+                    except Exception:
+                        pass
+                    if is_dangling:
+                        dname = ""
+                        try:
+                            if callable(getattr(dd, "GetDimension2", None)):
+                                dim = dd.GetDimension2(0)
+                            elif callable(getattr(dd, "GetDimension", None)):
+                                dim = dd.GetDimension()
+                            else:
+                                dim = getattr(dd, "GetDimension", None)
+                            if dim:
+                                dname = str(self._com(dim, "GetNameForSelection") or self._com(dim, "FullName") or "")
+                        except Exception:
+                            pass
+                        dangling_dims.append(dname or "unnamed_dangling_dim")
+
+            dims_audit = {
+                "count": len(dims_list),
+                "duplicate_count": duplicates,
+                "dangling_count": len(dangling_dims),
+                "dangling_dimensions": dangling_dims
+            }
+            if duplicates > 0:
+                warnings.append(f"{duplicates} quota/e duplicata/e rilevata/e.")
+                score -= min(10, 2 * duplicates)
+            if dangling_dims:
+                issues.append(f"{len(dangling_dims)} quota/e 'dangling' (riferimento perso nel modello): {dangling_dims}")
+                score -= min(20, 5 * len(dangling_dims))
+
+            score = max(0, min(100, score))
+            passed = (score >= 70 and not dangling_dims)
+            status = "PASSED" if passed else ("WARNING" if score >= 50 else "FAILED")
+
+            msg = f"Audit foglio '{sheet_name}': {status} (score {score}/100, {len(issues)} errori, {len(warnings)} avvisi)."
+            data = {
+                "sheet": sheet_name,
+                "score": score,
+                "status": status,
+                "passed": passed,
+                "issues": issues,
+                "warnings": warnings,
+                "checks": {
+                    "title_block": title_block_status,
+                    "views": views_status,
+                    "bom_and_balloons": bom_audit,
+                    "dimensions": dims_audit
+                }
+            }
+            return self._result(True, msg, SwErrors.swSuccess, data)
+        except Exception as e:
+            return self._fail("audit_drawing", e)

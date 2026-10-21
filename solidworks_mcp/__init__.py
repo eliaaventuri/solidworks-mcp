@@ -1,7 +1,7 @@
 """
 SolidWorks MCP Package
 ----------------------
-Server Model Context Protocol per usare SolidWorks da Claude (371 tool, 372 con execute_python).
+Server Model Context Protocol per usare SolidWorks da Claude (375 tool, 376 con execute_python).
 Derivato da alisamsam/solidworks-mcp (Samsaam Ali Baig, licenza MIT) e riscritto da Elia (elo-savage).
 """
 

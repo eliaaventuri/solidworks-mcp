@@ -69,7 +69,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 373                       # 374 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 375                       # 376 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1428,6 +1428,193 @@ def test_diagnostics_and_search():
            tree_res["success"] and "error_count" in td and "warning_count" in td and "features" in td)
 
 
+
+
+# ============================================================================ audit drawing & detect collisions
+def test_audit_and_collision():
+    sw = SolidWorksAutomation()
+
+    # 1. audit_drawing: rifiuto se non disegno
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun doc attivo"})
+    err_no_doc = sw.audit_drawing()
+    record("audit_drawing: senza documento attivo riporta errore", not err_no_doc["success"])
+
+    class _MockNote:
+        def __init__(self, text, is_bal, next_n=None):
+            self._text = text
+            self._is_bal = is_bal
+            self._next = next_n
+        def IsBalloon(self):
+            return self._is_bal
+        def GetBalloonText(self, idx):
+            return self._text
+        def GetText(self):
+            return self._text
+        def GetNext(self):
+            return self._next
+
+    class _MockDim:
+        def __init__(self, name):
+            self._name = name
+        def GetNameForSelection(self):
+            return self._name
+
+    class _MockDisplayDim:
+        def __init__(self, name, dangling=False, next_dd=None):
+            self._dim = _MockDim(name)
+            self._dangling = dangling
+            self._next = next_dd
+        def IsDangling(self):
+            return self._dangling
+        def GetDimension2(self, idx):
+            return self._dim
+        @property
+        def GetNext3(self):
+            return self._next
+
+    class _MockView:
+        def __init__(self, name, note=None, dd=None):
+            self._name = name
+            self._note = note
+            self._dd = dd
+        def GetName2(self):
+            return self._name
+        def GetBreakLines(self):
+            return None
+        def GetFirstNote(self):
+            return self._note
+        @property
+        def GetFirstDisplayDimension5(self):
+            return self._dd
+
+    class _MockSheet:
+        def GetName(self):
+            return "Foglio1"
+
+    class _MockDrawingDoc:
+        def GetType(self):
+            return 3  # DOC_DRAWING
+        def GetCurrentSheet(self):
+            return _MockSheet()
+        def ActivateSheet(self, name):
+            return True
+
+    mock_dw = _MockDrawingDoc()
+    sw.get_active_doc = lambda: (mock_dw, None)
+    sw._sheet_dims = lambda doc: (0.420, 0.297, "A3-ISO")
+    sw._fit_title_number = lambda doc: {"text": "PROV-001", "fits": True, "height_mm": 5.0}
+
+    # Setup 1 vista con 2 palloncini ("1", "2") e 2 quote (una dangling "D1@Vista1")
+    note2 = _MockNote("2", True, None)
+    note1 = _MockNote("1", True, note2)
+    dd2 = _MockDisplayDim("D1@Vista1", dangling=True, next_dd=None)
+    dd1 = _MockDisplayDim("RD1@Vista1", dangling=False, next_dd=dd2)
+    v1 = _MockView("Vista Frontale", note=note1, dd=dd1)
+
+    sw._sheet_views = lambda doc: [v1]
+    sw._break_views = lambda doc, all_sheets=False: []
+    sw.list_bom = lambda: {"success": True, "data": {"rows": [{"ITEM NO.": "1"}, {"ITEM NO.": "2"}, {"ITEM NO.": "3"}]}}
+    sw.list_drawing_dimensions = lambda: {"success": True, "data": {"dimensions": ["D1", "RD1"], "duplicates": 0}}
+
+    audit_res = sw.audit_drawing()
+    ad = audit_res.get("data", {})
+    checks = ad.get("checks", {})
+    bom_chk = checks.get("bom_and_balloons", {})
+    dims_chk = checks.get("dimensions", {})
+
+    record("audit_drawing: esecuzione completata con successo", audit_res["success"])
+    record("audit_drawing: rileva voce distinta mancante di palloncino ('3')", "3" in bom_chk.get("missing_balloons", []))
+    record("audit_drawing: rileva quota dangling e boccia lo stato di pass",
+           dims_chk.get("dangling_count") == 1 and not ad.get("passed"))
+
+    # 2. detect_collisions: rifiuto se non assieme
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun doc attivo"})
+    err_asm = sw.detect_collisions()
+    record("detect_collisions: senza documento attivo riporta errore", not err_asm["success"])
+
+    class _MockComp:
+        def __init__(self, name):
+            self.Name2 = name
+            self.Transform2 = None
+
+    class _MockInterference:
+        def __init__(self, c1, c2, vol_m3):
+            self.Components = [c1, c2]
+            self.Volume = vol_m3
+
+    class _MockIntMgr:
+        def __init__(self, ints):
+            self._ints = ints
+            self.TreatCoincidenceAsInterference = False
+            self.TreatSubAssembliesAsComponents = False
+            self.IncludeMultibodyPartInterferences = False
+        def GetInterferences(self):
+            return self._ints
+        def Done(self):
+            pass
+
+    class _MockAsmDoc:
+        def __init__(self, int_mgr):
+            self.InterferenceDetectionManager = int_mgr
+        def GetType(self):
+            return 2  # DOC_ASSEMBLY
+        def ForceRebuild2(self, top_only):
+            return True
+        def IsExploded(self):
+            return False
+
+    comp_a = _MockComp("perno-1")
+    comp_b = _MockComp("staffa-1")
+    int_mgr_static = _MockIntMgr([_MockInterference(comp_a, comp_b, 1.5e-7)]) # 150 mm3
+    asm_doc = _MockAsmDoc(int_mgr_static)
+
+    sw.get_active_doc = lambda: (asm_doc, None)
+    sw._as_collapse = lambda doc: False
+
+    # Modalita' statica
+    stat_res = sw.detect_collisions()
+    sd = stat_res.get("data", {})
+    record("detect_collisions: modalita' statica rileva interferenza e volume",
+           stat_res["success"] and sd.get("mode") == "static" and sd.get("collision_detected") and sd.get("total_volume_mm3") == 150.0)
+
+    # Modalita' dinamica
+    # Configura traiettoria su perno-1 che collide al passo 3
+    class _DynamicIntMgr:
+        def __init__(self, comp_mov, comp_obs):
+            self.comp_mov = comp_mov
+            self.comp_obs = comp_obs
+            self.step_counter = 0
+            self.TreatCoincidenceAsInterference = False
+            self.TreatSubAssembliesAsComponents = False
+            self.IncludeMultibodyPartInterferences = False
+        def GetInterferences(self):
+            self.step_counter += 1
+            if self.step_counter >= 3:
+                return [_MockInterference(self.comp_mov, self.comp_obs, 5.0e-8)]
+            return []
+        def Done(self):
+            pass
+
+    dyn_mgr = _DynamicIntMgr(comp_a, comp_b)
+    asm_doc_dyn = _MockAsmDoc(dyn_mgr)
+    sw.get_active_doc = lambda: (asm_doc_dyn, None)
+
+    init_M = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    init_t = [0.0, 0.0, 0.0]
+    sw._as_comp = lambda doc, name: (comp_a if name == "perno-1" else None, None)
+    sw._as_pose = lambda comp: (init_M, list(init_t))
+    comp_a.Transform2 = "initial_transform_obj"
+    sw._as_transform = lambda M, t: f"xf_{t}"
+
+    dyn_res = sw.detect_collisions(moving_component="perno-1", dx=10.0, dy=0.0, dz=0.0, steps=5, stop_on_collision=True)
+    dd = dyn_res.get("data", {})
+
+    record("detect_collisions: modalita' dinamica rileva primo passo di collisione",
+           dyn_res["success"] and dd.get("mode") == "dynamic" and dd.get("collision_detected") and dd.get("first_collision_step") == 3)
+    record("detect_collisions: calcola corsa libera e ripristina posa iniziale",
+           dd.get("max_safe_displacement") == 4.0 and dd.get("initial_pose_restored") and comp_a.Transform2 == "xf_[0.0, 0.0, 0.0]")
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1443,7 +1630,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search)):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision)):
             try:
                 fn()
             except Exception as e:

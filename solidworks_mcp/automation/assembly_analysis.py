@@ -301,6 +301,152 @@ class AssemblyAnalysisMixin:
             except Exception:
                 pass
 
+    def _run_interference_check(self, doc, target_names: set = None, include_coincident: bool = False,
+                                treat_subassemblies_as_components: bool = False) -> List[Dict]:
+        """Esegue il controllo interferenze nativo dell'assieme e restituisce la lista di collisioni."""
+        mgr = None
+        rows = []
+        try:
+            mgr = doc.InterferenceDetectionManager
+            mgr.TreatCoincidenceAsInterference = bool(include_coincident)
+            mgr.TreatSubAssembliesAsComponents = bool(treat_subassemblies_as_components)
+            try:
+                mgr.IncludeMultibodyPartInterferences = False
+            except Exception:
+                pass
+            ints = self._com(mgr, "GetInterferences") or ()
+            for it in ints:
+                names = [str(c.Name2) for c in (it.Components or ())]
+                if target_names is not None and not (target_names & set(names)):
+                    continue
+                vol = round(float(it.Volume) * 1e9, 4) if hasattr(it, "Volume") else 0.0
+                rows.append({"components": names, "volume_mm3": vol})
+        finally:
+            if mgr is not None:
+                try:
+                    mgr.Done()
+                except Exception:
+                    pass
+        return rows
+
+    def detect_collisions(self, moving_component: str = None,
+                          dx: float = 0.0, dy: float = 0.0, dz: float = 0.0,
+                          unit: str = None, steps: int = 10,
+                          stop_on_collision: bool = True,
+                          components: list = None,
+                          include_coincident: bool = False,
+                          treat_subassemblies_as_components: bool = False) -> Dict:
+        """Rileva collisioni/interferenze nell'assieme, in modalita' statica o dinamica lungo una traiettoria lineare."""
+        try:
+            doc, err = self._asm()
+            if err:
+                return err
+            self._as_collapse(doc)
+
+            target_names = None
+            if components:
+                cs, e = self._as_comps(doc, components, False)
+                if e:
+                    return self._result(False, e, SwErrors.swSelectionError)
+                target_names = {str(c.Name2) for c in cs}
+
+            # 1. Modalita' STATICA: nessuna componente in movimento specificata
+            if not moving_component:
+                doc.ForceRebuild2(False)
+                rows = self._run_interference_check(doc, target_names, include_coincident, treat_subassemblies_as_components)
+                total = round(sum(r["volume_mm3"] for r in rows), 4)
+                has_collision = len(rows) > 0
+                msg = (f"Rilevate {len(rows)} interferenze (volume {total} mm3)" if has_collision else "Nessuna collisione rilevata nell'assieme.")
+                return self._result(True, msg, SwErrors.swSuccess, {
+                    "mode": "static",
+                    "collision_detected": has_collision,
+                    "count": len(rows),
+                    "total_volume_mm3": total,
+                    "collisions": rows
+                })
+
+            # 2. Modalita' DINAMICA: traiettoria del componente mobile
+            comp, e = self._as_comp(doc, moving_component)
+            if not comp:
+                return self._result(False, f"Componente '{moving_component}' non trovato", SwErrors.swSelectionError)
+            moving_name = str(comp.Name2)
+            if target_names is None:
+                target_names = {moving_name}
+            else:
+                target_names.add(moving_name)
+
+            M0, t0 = self._as_pose(comp)
+            dx_m = self._mmu(float(dx or 0.0), unit)
+            dy_m = self._mmu(float(dy or 0.0), unit)
+            dz_m = self._mmu(float(dz or 0.0), unit)
+
+            total_dist_unit = math.sqrt((dx or 0.0)**2 + (dy or 0.0)**2 + (dz or 0.0)**2)
+            n_steps = max(1, min(100, int(steps or 10)))
+
+            trajectory_collisions = []
+            first_collision = None
+
+            try:
+                for k in range(1, n_steps + 1):
+                    frac = k / float(n_steps)
+                    tk = [t0[0] + dx_m * frac, t0[1] + dy_m * frac, t0[2] + dz_m * frac]
+                    try:
+                        comp.Transform2 = self._as_transform(M0, tk)
+                        doc.ForceRebuild2(False)
+                    except Exception as ex:
+                        logger.warning(f"detect_collisions step {k} transform error: {ex}")
+                        continue
+
+                    hits = self._run_interference_check(doc, target_names, include_coincident, treat_subassemblies_as_components)
+                    moving_hits = [h for h in hits if moving_name in h["components"]]
+                    if moving_hits:
+                        colliding_partners = sorted({c for h in moving_hits for c in h["components"] if c != moving_name})
+                        step_data = {
+                            "step": k,
+                            "fraction": round(frac, 4),
+                            "displacement": [round((dx or 0.0) * frac, 4), round((dy or 0.0) * frac, 4), round((dz or 0.0) * frac, 4)],
+                            "distance_traveled": round(total_dist_unit * frac, 4),
+                            "colliding_with": colliding_partners,
+                            "interferences": moving_hits
+                        }
+                        trajectory_collisions.append(step_data)
+                        if first_collision is None:
+                            first_collision = step_data
+                        if stop_on_collision:
+                            break
+            finally:
+                # Ripristino tassativo della posa iniziale
+                try:
+                    comp.Transform2 = self._as_transform(M0, t0)
+                    doc.ForceRebuild2(False)
+                except Exception:
+                    pass
+
+            has_collision = len(trajectory_collisions) > 0
+            u = unit or "mm"
+            if has_collision:
+                fc_step = first_collision["step"]
+                safe_frac = (fc_step - 1) / float(n_steps)
+                max_safe = round(total_dist_unit * safe_frac, 4)
+                msg = f"Collisione rilevata al passo {fc_step}/{n_steps} con {first_collision['colliding_with']} (corsa libera: {max_safe} {u})."
+            else:
+                max_safe = round(total_dist_unit, 4)
+                msg = f"Nessuna collisione rilevata lungo la traiettoria ({total_dist_unit} {u} su {n_steps} passi)."
+
+            return self._result(True, msg, SwErrors.swSuccess, {
+                "mode": "dynamic",
+                "moving_component": moving_name,
+                "collision_detected": has_collision,
+                "steps_tested": len(trajectory_collisions) if (stop_on_collision and has_collision) else n_steps,
+                "first_collision_step": first_collision["step"] if first_collision else None,
+                "max_safe_displacement": max_safe,
+                "unit": u,
+                "initial_pose_restored": True,
+                "collisions": trajectory_collisions
+            })
+        except Exception as e:
+            return self._as_fail("detect_collisions", e)
+
     def check_clearance(self, entity1, entity2, unit: str = None) -> Dict:
         """Distanza minima (gioco) fra due componenti ('perno-1') o due entita' ({"face":[x,y,z]}, 'Assi1@staffa-1'...).
         Distanza 0 = a contatto o interferenti."""

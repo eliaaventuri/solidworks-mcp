@@ -228,6 +228,10 @@ _TOOLS = {
     "save_drawing": ("save_drawing", "Save the active drawing as a .SLDDRW file under `filepath` (required; to save in place "
                      "pass the current path, or use save_document without filepath).",
         {"filepath": (S, "Destination path")}, ["filepath"]),
+    "audit_drawing": ("audit_drawing",
+        "Perform a comprehensive quality and standards audit of the active drawing sheet: checks title block completeness, "
+        "BOM table & balloon alignment (identifies missing or unlinked balloons), dangling dimensions, and annotation boundaries.",
+        {"sheet": (S, "Sheet name to audit (default: active sheet)")}, []),
 }
 
 
