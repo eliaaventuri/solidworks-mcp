@@ -13,7 +13,7 @@ from pathlib import Path
 
 os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECTED_TOOLS tool, execute_python incluso
 
-EXPECTED_TOOLS = 371    # numero di tool con execute_python attivo (370 senza execute_python)
+EXPECTED_TOOLS = 372    # numero di tool con execute_python attivo (371 senza execute_python)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

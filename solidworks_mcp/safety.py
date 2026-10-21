@@ -100,6 +100,16 @@ def decorate_tools(tools: List[Tool]) -> List[Tool]:
 
 def check_call(name: str, arguments: dict) -> Optional[str]:
     """Messaggio di rifiuto se la chiamata sovrascriverebbe un file esistente senza overwrite=true, altrimenti None."""
+    if name == "execute_tool_sequence":
+        for idx, step in enumerate((arguments or {}).get("steps", [])):
+            if not isinstance(step, dict):
+                continue
+            s_tool = step.get("tool") or step.get("name")
+            s_args = step.get("arguments") or {}
+            refusal = check_call(s_tool, s_args)
+            if refusal:
+                return f"Step {idx + 1} ({s_tool}): {refusal}"
+        return None
     arg = OVERWRITE_GUARDS.get(name)
     if not arg or name == "save_document":      # save_document controlla da se' (conosce il file del documento)
         return None

@@ -69,7 +69,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 370                       # 371 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 371                       # 372 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1227,6 +1227,77 @@ def test_resources_and_prompts():
     record("get_prompt con nome sconosciuto -> ValueError", unknown_p_failed)
 
 
+
+
+
+def test_execute_tool_sequence(tmp):
+    # 1. Empty steps
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": []}))
+    text = res[0].text
+    record("execute_tool_sequence: steps vuoto -> successo", text.startswith("[SUCCESS]"))
+
+    # 2. Steps non lista
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": "non_una_lista"}))
+    text = res[0].text
+    record("execute_tool_sequence: steps non lista -> rifiuto", text.startswith("[ERROR]"))
+
+    # 3. Chiamata annidata vietata
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {
+        "steps": [{"tool": "execute_tool_sequence", "arguments": {"steps": []}}]
+    }))
+    text = res[0].text
+    record("execute_tool_sequence: annidamento rifiutato", text.startswith("[ERROR]") and "nested" in text.lower())
+
+    # 4. Tool bloccato (execute_python senza SW_MCP_ALLOW_PYTHON)
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {
+        "steps": [{"tool": "execute_python", "arguments": {"code": "print(1)"}}]
+    }))
+    text = res[0].text
+    record("execute_tool_sequence: tool bloccato fermato con spiegazione",
+           text.startswith("[ERROR]") and "execute_python" in text)
+
+    # 5. Sequenza valida di piu' passi
+    steps = [
+        {"tool": "set_units", "arguments": {"unit": "inch"}},
+        {"tool": "set_units", "arguments": {"unit": "mm"}},
+    ]
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps}))
+    text = res[0].text
+    record("execute_tool_sequence: sequenza valida completata con successo",
+           text.startswith("[SUCCESS]") and "2/2" in text and srv.sw_automation.units.default_unit.value == "mm")
+
+    # 6. stop_on_error=True (default) ferma l'esecuzione al primo errore
+    steps_err = [
+        {"tool": "set_units", "arguments": {"unit": "inch"}},
+        {"tool": "tool_inesistente_xyz", "arguments": {}},
+        {"tool": "set_units", "arguments": {"unit": "mm"}},
+    ]
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps_err, "stop_on_error": True}))
+    text = res[0].text
+    unit_after_stop = srv.sw_automation.units.default_unit.value
+    record("execute_tool_sequence: stop_on_error=True blocca i passi successivi",
+           text.startswith("[ERROR]") and "step 2/3" in text and unit_after_stop == "inch")
+
+    # 7. stop_on_error=False esegue tutti i passi anche se uno fallisce
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps_err, "stop_on_error": False}))
+    text = res[0].text
+    unit_after_all = srv.sw_automation.units.default_unit.value
+    record("execute_tool_sequence: stop_on_error=False esegue comunque i passi successivi",
+           text.startswith("[ERROR]") and "2/3" in text and unit_after_all == "mm")
+
+    # 8. Guardia di sovrascrittura: rifiuto preventivo se un passo sovrascrive senza overwrite=true
+    dup_file = Path(tmp) / "batch_existing.step"
+    dup_file.write_text("test")
+    steps_overwrite = [
+        {"tool": "set_units", "arguments": {"unit": "mm"}},
+        {"tool": "export_model", "arguments": {"filepath": str(dup_file), "format": "step"}},
+    ]
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps_overwrite}))
+    text = res[0].text
+    record("execute_tool_sequence: rifiuto preventivo di sovrascrittura senza overwrite",
+           text.startswith("[ERROR]") and ("esiste gia'" in text or "SOVRASCRITTO" in text))
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1241,7 +1312,8 @@ def main():
                          ("D3 eDrawings", lambda: test_edrawings(tmp)),("unita'", test_units),
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
-                         ("risorse e prompt", test_resources_and_prompts)):
+                         ("risorse e prompt", test_resources_and_prompts),
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp))):
             try:
                 fn()
             except Exception as e:

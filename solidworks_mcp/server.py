@@ -99,6 +99,39 @@ async def list_tools() -> list[Tool]:
             description="Get SolidWorks installation information.",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
+        Tool(
+            name="execute_tool_sequence",
+            description="Execute an ordered sequence of MCP tools in a single batch on the SolidWorks COM thread. Reduces IPC latency for multi-step workflows. Stops on the first error by default.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "Ordered list of tool objects to execute in sequence",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool": {
+                                    "type": "string",
+                                    "description": "Name of the MCP tool to execute (e.g. 'create_sketch', 'draw_line', 'extrude_sketch')"
+                                },
+                                "arguments": {
+                                    "type": "object",
+                                    "description": "Dictionary of arguments passed to the tool"
+                                }
+                            },
+                            "required": ["tool"]
+                        }
+                    },
+                    "stop_on_error": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "If true (default), halts execution immediately if any step fails. If false, continues attempting remaining steps."
+                    }
+                },
+                "required": ["steps"]
+            }
+        ),
         
         # Document Tools
         Tool(
@@ -513,6 +546,23 @@ def _active_title():
         return None
 
 
+def _dispatch_single_tool(name: str, arguments: dict) -> Dict:
+    """Smista un singolo tool verso SPECIAL_HANDLERS o DISPATCH_TABLES (sul thread COM)."""
+    doc_arg = arguments.pop("document", None) if (isinstance(arguments, dict) and name != "close_document") else None
+    if doc_arg:
+        act = sw_automation.activate_document(name=doc_arg)
+        if not act.get("success"):
+            return act
+    if name in SPECIAL_HANDLERS:
+        return SPECIAL_HANDLERS[name](arguments)
+    for table in DISPATCH_TABLES:
+        if name in table:
+            method, allowed = table[name]
+            kwargs = {k: v for k, v in arguments.items() if k in allowed}
+            return getattr(sw_automation, method)(**kwargs)
+    return sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+
+
 def _dispatch_tool(name: str, arguments: dict) -> Dict:
     """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool.
     Parametro comune `document` (titolo di un documento aperto): lo rende attivo prima del tool. Senza, se il documento
@@ -531,18 +581,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
             if _LAST_ACTIVE_TITLE[0] and cur and cur != _LAST_ACTIVE_TITLE[0]:
                 _pending_notice = (f"ATTENZIONE: il documento attivo era '{_LAST_ACTIVE_TITLE[0]}' e ora e' '{cur}': "
                                    f"il tool ha agito su '{cur}'. Passa document='<titolo>' per scegliere.")
-        result = None
-        if name in SPECIAL_HANDLERS:
-            result = SPECIAL_HANDLERS[name](arguments)
-        else:
-            for table in DISPATCH_TABLES:
-                if name in table:
-                    method, allowed = table[name]
-                    kwargs = {k: v for k, v in arguments.items() if k in allowed}
-                    result = getattr(sw_automation, method)(**kwargs)
-                    break
-            else:
-                result = sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+        result = _dispatch_single_tool(name, arguments)
         notice = sw_automation.__dict__.pop("_restart_notice", None)    # istanza dedicata rilanciata durante questo tool
         if notice and isinstance(result, dict):
             result["message"] = f"{notice} {result.get('message', '')}"
@@ -932,6 +971,101 @@ def _execute_python_handler(arguments: dict) -> Dict:
     return _execute_python_fixed(code)
 
 
+def _execute_tool_sequence_handler(arguments: dict) -> Dict:
+    steps = arguments.get("steps")
+    if not isinstance(steps, list):
+        return sw_automation._result(False, "Parameter 'steps' must be a list of tool objects", SwErrors.swInvalidInput)
+    if not steps:
+        return sw_automation._result(True, "Empty steps list; nothing executed", data={"total_steps": 0, "executed_steps": 0, "successful_steps": 0, "stopped_on_error": False, "results": []})
+
+    stop_on_error = arguments.get("stop_on_error", True)
+    results = []
+    stopped_on_error = False
+
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            err_msg = f"Step {i + 1} is invalid: must be an object with 'tool' and optional 'arguments'"
+            results.append({"step": i + 1, "tool": "unknown", "success": False, "message": err_msg})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
+
+        tool_name = step.get("tool") or step.get("name")
+        if not tool_name or not isinstance(tool_name, str):
+            err_msg = f"Step {i + 1}: missing or invalid 'tool' name"
+            results.append({"step": i + 1, "tool": "unknown", "success": False, "message": err_msg})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
+
+        if tool_name == "execute_tool_sequence":
+            err_msg = f"Step {i + 1}: nested 'execute_tool_sequence' is not allowed"
+            results.append({"step": i + 1, "tool": tool_name, "success": False, "message": err_msg})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
+
+        blocked = _tool_blocked_reason(tool_name)
+        if blocked:
+            results.append({"step": i + 1, "tool": tool_name, "success": False, "message": blocked})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
+
+        tool_args = dict(step.get("arguments") or {})
+        refusal = check_call(tool_name, tool_args)
+        if refusal:
+            results.append({"step": i + 1, "tool": tool_name, "success": False, "message": refusal})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
+
+        res = _dispatch_single_tool(tool_name, tool_args)
+        step_ok = bool(isinstance(res, dict) and res.get("success", False))
+        results.append({
+            "step": i + 1,
+            "tool": tool_name,
+            "success": step_ok,
+            "message": res.get("message", "") if isinstance(res, dict) else str(res),
+            "data": res.get("data") if isinstance(res, dict) else None,
+        })
+
+        if not step_ok and stop_on_error:
+            stopped_on_error = True
+            break
+
+    total = len(steps)
+    executed = len(results)
+    successful = sum(1 for r in results if r["success"])
+    all_ok = (executed == total and successful == total)
+
+    if all_ok:
+        msg = f"Successfully executed all {total} steps ({total}/{total}) in sequence."
+    elif stopped_on_error:
+        last = results[-1] if results else {}
+        msg = f"Sequence stopped at step {executed}/{total} ('{last.get('tool', 'unknown')}'): {last.get('message', '')}"
+    else:
+        msg = f"Sequence completed with errors: {successful}/{total} steps succeeded."
+
+    return sw_automation._result(
+        all_ok,
+        msg,
+        SwErrors.swSuccess if all_ok else SwErrors.swUnknownError,
+        {
+            "total_steps": total,
+            "executed_steps": executed,
+            "successful_steps": successful,
+            "stopped_on_error": stopped_on_error,
+            "results": results,
+        }
+    )
+
+
 # tool base che chiamano un metodo di SolidWorksAutomation: nome -> (metodo, parametri ammessi); i default sono quelli del metodo
 BASE_DISPATCH = {
     "connect_solidworks": ("connect", set()),
@@ -958,6 +1092,7 @@ BASE_DISPATCH = {
 # tool base con un gestore proprio: nome -> funzione(arguments)
 SPECIAL_HANDLERS = {
     "get_solidworks_info": _solidworks_info_handler,
+    "execute_tool_sequence": _execute_tool_sequence_handler,
     "list_features": lambda arguments: _list_features_fixed(),
     "close_sketch": lambda arguments: _close_sketch_handler(),
     "get_sketch_status": lambda arguments: _get_sketch_status_handler(),

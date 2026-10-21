@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-7.1.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-371-green)
+![tools](https://img.shields.io/badge/MCP%20tools-372-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,7 +23,7 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **371 tools** (370 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **372 tools** (371 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
 Every tool has been tested against a live SOLIDWORKS session. The tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. A tool only counts as done when those numbers match.
 
@@ -31,7 +31,7 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 
 | Area | Tools | What it can do |
 |---|:---:|---|
-| 🧱 **Core & Documents** | 25 | Connect to live or dedicated instance; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
+| 🧱 **Core & Documents** | 26 | Connect to live or dedicated instance; batch tool sequence execution; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
 | 📐 **Modeling & Sketching** | 148 | Advanced 2D/3D sketching (centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim); boss/cut lofts, sweeps, boundary features, ribs, domes, wraps, flex, cosmetic & modeled threads; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns |
 | 🌀 **Curves & Surfaces** | 21 | Standard & variable-pitch helices, spirals, projected & composite curves, split lines; planar surface from sketch, surface extrude, revolve, sweep, loft, offset, knit, extend, untrim, ruled surface |
 | 📄 **Drawings** | 38 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); automatic layout & scaling; standard, projected, section, detail, auxiliary, broken & crop views; clean automatic dimensioning; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
@@ -139,7 +139,7 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 370 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 371 tools |
 
 ## Safety
 
@@ -179,6 +179,6 @@ The live tests build parts **only through the MCP tools** and compare the measur
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 371 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 372 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.
