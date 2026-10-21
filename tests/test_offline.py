@@ -65,11 +65,12 @@ STUBBED = _stub_com()
 import solidworks_mcp.server as srv                                   # noqa: E402
 from solidworks_mcp.automation import SolidWorksAutomation             # noqa: E402
 from solidworks_mcp.automation import data_export as dx                # noqa: E402
-from solidworks_mcp import safety                                      # noqa: E402
+from solidworks_mcp import safety
+from solidworks_mcp.constants import SwErrors                                      # noqa: E402
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 405                       # 406 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 439                       # 440 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1875,6 +1876,153 @@ def test_sketch5_tools():
            ok_reg["success"] and ok_r3d["data"]["copy"] and ok_mrg["success"] and ok_blk["success"] and ok_prf["data"]["add_to_db"])
 
 
+
+
+def test_assembly3_tools(tmp):
+    sw = SolidWorksAutomation()
+
+    # 1. Senza documento assieme attivo, tutti i 34 tool gestiscono l'assenza con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
+    sw._asm = lambda: (None, {"success": False, "message": "Nessun assieme attivo"})
+
+    r1 = sw.make_component_independent("Comp1")
+    r2 = sw.reorder_components(["Comp2"], "Comp1", position="after")
+    r3 = sw.select_components_by_size(15.0)
+    r4 = sw.set_component_transparency("Comp1", True)
+    r5 = sw.insert_new_virtual_part("Front Plane")
+    r6 = sw.insert_new_virtual_assembly("Sub1")
+    r7 = sw.edit_part_in_context("Comp1")
+    r8 = sw.exit_part_in_context()
+    r9 = sw.save_virtual_component_external("Comp1", os.path.join(tmp, "part.sldprt"))
+    r10 = sw.lock_mate_rotation("Concentric1", True)
+    r11 = sw.add_concentric_mate_with_tolerance("Face1", "Face2", tolerance=0.05)
+    r12 = sw.flip_mate_alignment("Coincident1")
+    r13 = sw.add_gear_mate("Face1", "Face2", 2.0, 1.0)
+    r14 = sw.add_rack_pinion_mate("Edge1", "Face1", 40.0)
+    r15 = sw.add_cam_mate(["Face1", "Face2"], "Face3")
+    r16 = sw.add_slot_mate("Slot1", "Pin1", "center")
+    r17 = sw.add_hinge_mate("Cyl1", "Cyl2", "Face1", "Face2")
+    r18 = sw.add_screw_mate("Axis1", "Axis2", pitch=1.5)
+    r19 = sw.add_linear_coupler_mate("Face1", "Face2", 1.0)
+    r20 = sw.add_universal_joint_mate("Shaft1", "Shaft2")
+    r21 = sw.dissolve_component_pattern("Pattern1")
+    r22 = sw.edit_explode_step(0, distance=50.0)
+    r23 = sw.set_subassembly_flexible("Sub1", True)
+    r24 = sw.promote_subassembly_component("Sub1/Comp1")
+    r25 = sw.demote_subassembly_component("Comp1", "Sub1")
+    r26 = sw.isolate_components(["Comp1"])
+    r27 = sw.exit_isolate()
+    r28 = sw.auto_repair_mates()
+    r29 = sw.check_mate_redundancy()
+    r30 = sw.create_speedpak("Spd1")
+    r31 = sw.set_envelope_component("Comp1", True)
+    r32 = sw.insert_cavity_feature(["Tool1"], 1.5)
+    r33 = sw.insert_join_feature(["Comp1", "Comp2"])
+    r34 = sw.create_smart_component("Comp1")
+
+    all_failed = all(not r["success"] for r in (
+        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
+        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
+        r31, r32, r33, r34
+    ))
+    record("assembly3: tutti i 34 tool gestiscono assenza doc assieme con errore pulito", all_failed)
+
+    # 2. Mock documento assieme attivo per verificare la logica di successo
+    class _MockComp:
+        def __init__(self, name="Part1-1"):
+            self.Name2 = name
+            self.Transparency = 0
+            self.Solving = 0
+            self.Envelope = False
+            self.ExcludeFromBOM = False
+
+    class _MockDoc:
+        def __init__(self):
+            self.Title = "Assy1.SLDASM"
+            self.GetType = 2
+            self.Extension = types.SimpleNamespace(
+                SelectByID2=lambda *a, **k: True
+            )
+        def ClearSelection2(self, *a): pass
+        def EditRebuild3(self): pass
+        def MakeIndependent(self): return True
+        def MakeIndependent2(self, *a): return True
+        def ReorderComponents(self, *a): return True
+        def SelectComponentsBySize(self, pct): return 3
+        def SetComponentTransparent(self, *a): pass
+        def InsertNewVirtualPart(self, *a): return _MockComp("[Part1^Assy1]")
+        def InsertNewVirtualAssembly(self, *a): return _MockComp("[SubAssy1^Assy1]")
+        def EditPart2(self, *a): return True
+        def EditAssembly(self): pass
+        def SaveVirtualComponent(self, *a): return True
+        def AddMate5(self, *a): return True
+        def DissolveComponentPattern(self): return True
+        def Isolate(self): pass
+        def ExitIsolate(self): pass
+        def AutoMateRepair(self): pass
+        def CreateSpeedPak(self, *a): return True
+        def InsertCavity4(self, *a): return True
+        def InsertJoin2(self, *a): return True
+
+    mock_doc = _MockDoc()
+    sw._asm = lambda: (mock_doc, None)
+    sw.get_active_doc = lambda: (mock_doc, None)
+    sw._as_comp = lambda doc, name, *a: (_MockComp(name), None)
+    sw._as_select_comps = lambda doc, comps: None
+    sw._as_select_entity = lambda doc, spec, u, mark, append: ({"name": str(spec)}, None)
+    sw._as_mate_features = lambda doc: []
+    sw._get_doc_title = lambda doc: "Assy1.SLDASM"
+    sw.add_mate = lambda mate_type, **kw: sw._result(True, f"Mate {mate_type} creato", SwErrors.swSuccess, kw)
+
+    ok_ind = sw.make_component_independent("Comp1")
+    ok_ord = sw.reorder_components(["Comp2"], "Comp1", position="before")
+    ok_siz = sw.select_components_by_size(10.0)
+    ok_trn = sw.set_component_transparency("Comp1", True)
+    record("assembly3: indipendenza, riordino, selezione per dimensione e trasparenza",
+           ok_ind["success"] and ok_ord["data"]["position"] == "before" and ok_siz["data"]["selected_count"] == 3 and ok_trn["data"]["transparent"])
+
+    ok_vp = sw.insert_new_virtual_part()
+    ok_va = sw.insert_new_virtual_assembly()
+    ok_ep = sw.edit_part_in_context("Comp1")
+    ok_xp = sw.exit_part_in_context()
+    target_part = os.path.join(tmp, "virtual_saved.sldprt")
+    ok_sv = sw.save_virtual_component_external("Comp1", target_part)
+    record("assembly3: parti/assiemi virtuali, in-context e salvataggio esterno",
+           ok_vp["success"] and ok_va["success"] and ok_ep["success"] and ok_xp["success"] and ok_sv["success"])
+
+    ok_gear = sw.add_gear_mate("Gear1", "Gear2", 3.0, 1.0)
+    ok_rack = sw.add_rack_pinion_mate("Rack", "Pinion", 50.0)
+    ok_cam = sw.add_cam_mate(["C1", "C2"], "Foll")
+    ok_slot = sw.add_slot_mate("Slot", "Pin", "center")
+    ok_hinge = sw.add_hinge_mate("C1", "C2", "F1", "F2", min_angle=0.0, max_angle=90.0)
+    ok_screw = sw.add_screw_mate("Ax1", "Ax2", pitch=2.0)
+    ok_coupl = sw.add_linear_coupler_mate("S1", "S2", 2.0)
+    ok_ujoint = sw.add_universal_joint_mate("Sh1", "Sh2")
+    record("assembly3: 8 accoppiamenti meccanici/avanzati (gear, rack, cam, slot, hinge, screw, coupler, ujoint)",
+           ok_gear["success"] and ok_rack["success"] and ok_cam["success"] and ok_slot["success"] and
+           ok_hinge["success"] and ok_screw["success"] and ok_coupl["success"] and ok_ujoint["success"])
+
+    ok_dis = sw.dissolve_component_pattern("Pattern1")
+    ok_exp = sw.edit_explode_step(1, distance=75.0)
+    ok_flx = sw.set_subassembly_flexible("Sub1", True)
+    ok_pro = sw.promote_subassembly_component("Sub1/C1")
+    ok_dem = sw.demote_subassembly_component("C1", "Sub1")
+    ok_iso = sw.isolate_components(["C1", "C2"])
+    ok_xis = sw.exit_isolate()
+    ok_rep = sw.auto_repair_mates()
+    ok_chk = sw.check_mate_redundancy()
+    ok_spd = sw.create_speedpak("SpeedPak1")
+    ok_env = sw.set_envelope_component("C1", True)
+    ok_cav = sw.insert_cavity_feature(["Tool1"], 2.0)
+    ok_joi = sw.insert_join_feature(["C1", "C2"])
+    ok_smt = sw.create_smart_component("C1")
+    record("assembly3: pattern, esploso, flessibilita', isolamento, speedpak, busta, cavita', join, smart comp",
+           ok_dis["success"] and ok_exp["data"]["distance"] == 75.0 and ok_flx["data"]["flexible"] and
+           ok_pro["success"] and ok_dem["success"] and ok_iso["success"] and ok_xis["success"] and
+           ok_rep["success"] and ok_chk["success"] and ok_spd["success"] and ok_env["data"]["is_envelope"] and
+           ok_cav["success"] and ok_joi["success"] and ok_smt["success"])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1890,7 +2038,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools)):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp))):
             try:
                 fn()
             except Exception as e:
