@@ -49,6 +49,22 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 - *"Create three configurations, 150, 200 and 250 mm long, and export each one as STEP."*
 - *"Make an exploded view of the assembly and put it on a drawing with a BOM."*
 
+### MCP Resources & Prompts
+
+The server implements full standard MCP resource and prompt protocols:
+
+- **Resources:**
+  - `solidworks://status`: Live connection state, SolidWorks version, PID, mode, UI language, and default unit.
+  - `solidworks://documents`: List of open documents, file paths, modified flags, and active document marker.
+  - `solidworks://active-document`: Deep inspection of the active document (configurations, assigned material, solid bodies count, sheets).
+  - `solidworks://configuration`: Server parameters, timeouts, active toolset groups, and logging paths.
+- **Prompts:**
+  - `create-part`: Guided workflow for parametric 3D modeling with sketches, features, and mass property verification.
+  - `create-drawing`: Guided workflow to generate an ISO drawing sheet with standard views, dimensions, and PDF export.
+  - `run-simulation`: Guided workflow for FEA studies (static, frequency, buckling, thermal) with load setup and FOS review.
+  - `create-assembly`: Guided workflow for multi-component assemblies, mating kinematics, and exploded views.
+  - `export-model`: Guided workflow for CAD model exchange (STEP, STL, 3MF, etc.) with format integrity checks.
+
 ## Tested scenarios
 
 Seven real end-to-end runs are documented step by step in [`docs/esempi/`](docs/esempi/README.md): the request, every tool call with its result, and the measured numbers. They were last re-run on a clean install on 2026-10-18. The scenario files are written in Italian; the tool calls and numbers can be read in any language.

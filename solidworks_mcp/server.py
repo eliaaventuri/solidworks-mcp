@@ -20,7 +20,8 @@ from logging.handlers import RotatingFileHandler
 # MCP imports
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, Resource, Prompt, GetPromptResult
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 
 # Local imports
 from . import __version__
@@ -34,6 +35,8 @@ from .assembly_tools import ASSEMBLY_TOOLS, ASSEMBLY_DISPATCH
 from .data_tools import DATA_TOOLS, DATA_DISPATCH
 from .simulation_tools import SIMULATION_TOOLS, SIMULATION_DISPATCH
 from .safety import decorate_tools, check_call
+from .resources import RESOURCES, read_resource_content
+from .prompts import PROMPTS, get_prompt_content
 
 # Configure logging: %LOCALAPPDATA%\solidworks-mcp\ (o la cartella di Home fuori da Windows), 5 file da 5 MB
 config = get_config()
@@ -1015,6 +1018,46 @@ def _tool_blocked_reason(name: str):
         return None
     return (f"il tool '{name}' appartiene al gruppo '{group}', che non e' attivo. Aggiungere '{group}' a SW_MCP_TOOLSETS "
             f"(es. base,{group}) nella configurazione del server MCP e riavviare il client.")
+
+
+# ============================================================================
+# Resource Handlers
+# ============================================================================
+
+@server.list_resources()
+async def list_resources() -> list[Resource]:
+    """List all available SolidWorks resources"""
+    return RESOURCES
+
+
+@server.read_resource()
+async def read_resource(uri) -> list[ReadResourceContents]:
+    """Read a SolidWorks resource by URI"""
+    return await read_resource_content(
+        str(uri),
+        sw_automation,
+        config,
+        _SW_EXECUTOR,
+        _tool_timeout(),
+        _enabled_toolsets(),
+        _python_enabled()
+    )
+
+
+# ============================================================================
+# Prompt Handlers
+# ============================================================================
+
+@server.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    """List all available SolidWorks prompt templates"""
+    return PROMPTS
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
+    """Get a SolidWorks prompt template by name"""
+    return get_prompt_content(name, arguments)
 
 
 # ============================================================================

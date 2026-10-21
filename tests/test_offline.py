@@ -17,6 +17,7 @@ Uso:  python tests/test_offline.py          (oppure .venv\\Scripts\\python.exe t
 import os
 import re
 import sys
+import json
 import types
 import asyncio
 import inspect
@@ -1100,6 +1101,132 @@ def test_autorestart():
                 os.environ[k] = v
 
 
+def test_resources_and_prompts():
+    # 1. list_resources
+    resources = asyncio.run(srv.list_resources())
+    uris = [str(r.uri) for r in resources]
+    expected_uris = [
+        "solidworks://status",
+        "solidworks://documents",
+        "solidworks://active-document",
+        "solidworks://configuration",
+    ]
+    record("risorse: 4 risorse esposte con URI attesi", uris == expected_uris, str(uris))
+    record("risorse: mimeType application/json per tutte", all(r.mimeType == "application/json" for r in resources))
+
+    # 2. read_resource (offline / disconnected)
+    status_content = asyncio.run(srv.read_resource("solidworks://status"))
+    status_json = json.loads(status_content[0].content)
+    record("read_resource solidworks://status: JSON valido con connected e default_unit",
+           "connected" in status_json and "default_unit" in status_json,
+           f"connected={status_json.get('connected')}")
+
+    docs_content = asyncio.run(srv.read_resource("solidworks://documents"))
+    docs_json = json.loads(docs_content[0].content)
+    record("read_resource solidworks://documents: JSON valido con lista documents",
+           "documents" in docs_json and isinstance(docs_json["documents"], list))
+
+    active_content = asyncio.run(srv.read_resource("solidworks://active-document"))
+    active_json = json.loads(active_content[0].content)
+    record("read_resource solidworks://active-document: JSON valido",
+           "active_document" in active_json)
+
+    config_content = asyncio.run(srv.read_resource("solidworks://configuration"))
+    config_json = json.loads(config_content[0].content)
+    record("read_resource solidworks://configuration: include enabled_toolsets e tool_timeout",
+           "enabled_toolsets" in config_json and "tool_timeout" in config_json)
+
+    unknown_failed = False
+    try:
+        asyncio.run(srv.read_resource("solidworks://unknown-uri"))
+    except ValueError:
+        unknown_failed = True
+    record("read_resource con URI sconosciuto -> ValueError", unknown_failed)
+
+    # 3. read_resource with mock active document
+    real_app = srv.sw_automation._sw_app
+    real_connected = srv.sw_automation._connected
+    try:
+        mock_doc = types.SimpleNamespace(
+            GetTitle=lambda: "Pezzo1.SLDPRT",
+            GetType=lambda: 1,  # Part
+            GetPathName=lambda: "C:\\models\\Pezzo1.SLDPRT",
+            GetSaveFlag=lambda: False,
+            GetActiveConfiguration=lambda: types.SimpleNamespace(Name="Default"),
+            GetConfigurationNames=lambda: ("Default", "Lungo"),
+            GetMaterialPropertyName2=lambda x: ("", "AISI 304"),
+            GetBodies2=lambda x, y: [1, 2],
+        )
+        mock_app = types.SimpleNamespace(
+            ActiveDoc=mock_doc,
+            GetDocuments=lambda: [mock_doc],
+            RevisionNumber="34.4.1",
+            GetCurrentLanguage=lambda: "italian",
+        )
+        srv.sw_automation._sw_app = mock_app
+        srv.sw_automation._connected = True
+
+        act_res = asyncio.run(srv.read_resource("solidworks://active-document"))
+        act_data = json.loads(act_res[0].content)
+        doc_details = act_data.get("active_document") or {}
+        record("read_resource con pezzo attivo: legge configurazione, materiale e corpi",
+               doc_details.get("title") == "Pezzo1.SLDPRT" and
+               doc_details.get("type") == "Part" and
+               doc_details.get("material") == "AISI 304" and
+               doc_details.get("solid_bodies_count") == 2,
+               str(doc_details))
+
+        docs_res = asyncio.run(srv.read_resource("solidworks://documents"))
+        docs_data = json.loads(docs_res[0].content)
+        record("read_resource documents con doc attivo: riporta is_active=True",
+               docs_data.get("count") == 1 and docs_data["documents"][0].get("is_active") is True)
+    finally:
+        srv.sw_automation._sw_app = real_app
+        srv.sw_automation._connected = real_connected
+
+    # 4. list_prompts
+    prompts = asyncio.run(srv.list_prompts())
+    prompt_names = [p.name for p in prompts]
+    expected_prompts = [
+        "create-part",
+        "create-drawing",
+        "run-simulation",
+        "create-assembly",
+        "export-model",
+    ]
+    record("prompt: 5 template esposti con nomi attesi", prompt_names == expected_prompts, str(prompt_names))
+    record("prompt: tutti hanno argomenti e descrizioni",
+           all(bool(p.arguments) and bool(p.description) for p in prompts))
+
+    # 5. get_prompt
+    p_part = asyncio.run(srv.get_prompt("create-part", {"description": "flangia speciale", "unit": "mm"}))
+    record("get_prompt create-part: testo include descrizione e unita'",
+           "flangia speciale" in p_part.messages[0].content.text and "mm" in p_part.messages[0].content.text)
+
+    p_draw = asyncio.run(srv.get_prompt("create-drawing", {"part_name": "Albero", "sheet_format": "A2"}))
+    record("get_prompt create-drawing: testo include nome pezzo e formato A2",
+           "Albero" in p_draw.messages[0].content.text and "A2" in p_draw.messages[0].content.text)
+
+    p_sim = asyncio.run(srv.get_prompt("run-simulation", {"load_description": "1500 N trazione", "study_type": "static"}))
+    record("get_prompt run-simulation: testo include carico e studio",
+           "1500 N trazione" in p_sim.messages[0].content.text and "static" in p_sim.messages[0].content.text)
+
+    p_asm = asyncio.run(srv.get_prompt("create-assembly", {"components": "vite e dado", "assembly_name": "Giunto"}))
+    record("get_prompt create-assembly: testo include componenti e nome assieme",
+           "vite e dado" in p_asm.messages[0].content.text and "Giunto" in p_asm.messages[0].content.text)
+
+    p_exp = asyncio.run(srv.get_prompt("export-model", {"format": "step", "filepath": "C:\\out.step"}))
+    record("get_prompt export-model: testo include formato e percorso",
+           "STEP" in p_exp.messages[0].content.text and "out.step" in p_exp.messages[0].content.text)
+
+    unknown_p_failed = False
+    try:
+        asyncio.run(srv.get_prompt("unknown-prompt", {}))
+    except ValueError:
+        unknown_p_failed = True
+    record("get_prompt con nome sconosciuto -> ValueError", unknown_p_failed)
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1113,7 +1240,8 @@ def main():
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)),
                          ("D3 eDrawings", lambda: test_edrawings(tmp)),("unita'", test_units),
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
-                         ("ripresa", test_autorestart), ("descrizioni", test_descriptions)):
+                         ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
+                         ("risorse e prompt", test_resources_and_prompts)):
             try:
                 fn()
             except Exception as e:
