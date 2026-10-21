@@ -70,7 +70,7 @@ from solidworks_mcp.constants import SwErrors                                   
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 498                       # 499 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 522                       # 523 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -2302,6 +2302,128 @@ def test_features4_tools(tmp):
            ok_mbc["success"] and ok_sda["success"])
 
 
+
+def test_data2_tools(tmp):
+    sw = SolidWorksAutomation()
+
+    # 1. Senza documento attivo, tutti i 24 tool gestiscono l'assenza con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
+    sw._doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
+    sw._part_or_assembly = lambda: (None, {"success": False, "message": "Nessun pezzo o assieme attivo"})
+
+    r1 = sw.get_config_custom_property("Prop1")
+    r2 = sw.set_config_custom_property("Prop1", "Val1")
+    r3 = sw.set_document_summary_info(title="Test")
+    r4 = sw.create_custom_material("Titanium_Grade5")
+    r5 = sw.export_equations_to_file(os.path.join(tmp, "eq.txt"))
+    r6 = sw.insert_design_table()
+    r7 = sw.edit_design_table(1, "D1@Sketch1", "100")
+    r8 = sw.export_design_table(os.path.join(tmp, "table.csv"))
+    r9 = sw.create_derived_configuration("VariantB", "Default")
+    r10 = sw.get_projected_area([0, 0, 1])
+    r11 = sw.calculate_clearance_envelope()
+    r12 = sw.export_step_ap242_pmi(os.path.join(tmp, "out.step"))
+    r13 = sw.export_dxf_flat_pattern(os.path.join(tmp, "flat.dxf"))
+    r14 = sw.export_jt(os.path.join(tmp, "out.jt"))
+    r15 = sw.export_ifc(os.path.join(tmp, "out.ifc"))
+    r16 = sw.export_gltf_glb(os.path.join(tmp, "out.glb"))
+    r17 = sw.export_3d_pdf(os.path.join(tmp, "out.pdf"))
+    r18 = sw.add_dimxpert_dimension([0, 0, 0])
+    r19 = sw.add_dimxpert_datum([0, 0, 0], "A")
+    r20 = sw.add_dimxpert_geometric_tolerance([0, 0, 0], "flatness", 0.05)
+    r21 = sw.auto_dimension_scheme_dimxpert()
+    r22 = sw.list_dimxpert_annotations()
+    r23 = sw.set_view_background("white")
+    r24 = sw.apply_appearance("polished_chrome")
+
+    all_failed = all(not r["success"] for r in (
+        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
+        r17, r18, r19, r20, r21, r22, r23, r24
+    ))
+    record("data2: tutti i 24 tool gestiscono assenza doc con errore pulito", all_failed)
+
+    # 2. Mock documento attivo per verificare esecuzione positiva
+    class _MockDataDoc:
+        def __init__(self):
+            self.Title = "Model.SLDPRT"
+            self.GetType = 1
+            self.SummaryInfo = lambda *a, **k: True
+            self.ConfigurationManager = types.SimpleNamespace(
+                AddConfiguration2=lambda *a, **k: True
+            )
+            self.Extension = types.SimpleNamespace(
+                CustomPropertyManager=lambda cfg: types.SimpleNamespace(
+                    Get5=lambda *a: (True, "Val1", "ResolvedVal1", True),
+                    Add3=lambda *a, **k: True,
+                    Set2=lambda *a, **k: True,
+                )
+            )
+        def GetEquationMgr(self):
+            return types.SimpleNamespace(GetCount=1, Equation=lambda idx: '"D1@Sketch1"=100')
+        def InsertDesignTable2(self, *a): return True
+        def GetDesignTable(self):
+            return types.SimpleNamespace(SaveAs=lambda path: True)
+        def SaveAs3(self, *a): return True
+        def ExportFlatPatternView(self, *a): return True
+
+    mock_doc = _MockDataDoc()
+    sw._doc = lambda: (mock_doc, None)
+    sw._part_or_assembly = lambda: (mock_doc, None)
+    sw.get_active_doc = lambda: (mock_doc, None)
+    sw._get_active_config_name = lambda doc: "Default"
+    sw.get_bounding_box = lambda unit=None: {"success": True, "size_x": 100.0, "size_y": 50.0, "size_z": 20.0}
+
+    ok_gcp = sw.get_config_custom_property("PartNo")
+    ok_scp = sw.set_config_custom_property("PartNo", "ABC-123")
+    ok_smd = sw.set_document_summary_info(title="Staffa", author="Elia")
+    record("data2: proprieta' per configurazione e metadati di riepilogo",
+           ok_gcp["success"] and ok_scp["success"] and ok_smd["success"])
+
+    ok_cmat = sw.create_custom_material("Titanium_Grade5", density=4430.0, elastic_modulus=114000.0)
+    record("data2: materiali personalizzati con costanti meccaniche",
+           ok_cmat["success"])
+
+    eq_out = os.path.join(tmp, "equations_export.txt")
+    ok_eqx = sw.export_equations_to_file(eq_out, overwrite=True)
+    record("data2: export equazioni sincronizzate in formato testo",
+           ok_eqx["success"] and os.path.isfile(eq_out))
+
+    ok_idt = sw.insert_design_table()
+    ok_edt = sw.edit_design_table(1, "D1@Sketch1", "120")
+    dt_out = os.path.join(tmp, "design_table_out.csv")
+    ok_xdt = sw.export_design_table(dt_out, overwrite=True)
+    ok_dcf = sw.create_derived_configuration("Lunga", "Default")
+    record("data2: tabelle di progettazione e configurazioni derivate",
+           ok_idt["success"] and ok_edt["success"] and ok_xdt["success"] and ok_dcf["success"] and os.path.isfile(dt_out))
+
+    ok_pja = sw.get_projected_area([0, 0, 1])
+    ok_cle = sw.calculate_clearance_envelope(clearance_offset=10.0)
+    record("data2: area proiettata e clearance envelope",
+           ok_pja["success"] and ok_cle["success"] and ok_cle["data"]["offset_mm"] == 10.0)
+
+    ok_242 = sw.export_step_ap242_pmi(os.path.join(tmp, "model.step"), overwrite=True)
+    ok_dxf = sw.export_dxf_flat_pattern(os.path.join(tmp, "flat.dxf"), overwrite=True)
+    ok_jt = sw.export_jt(os.path.join(tmp, "model.jt"), overwrite=True)
+    ok_ifc = sw.export_ifc(os.path.join(tmp, "model.ifc"), overwrite=True)
+    ok_glb = sw.export_gltf_glb(os.path.join(tmp, "model.glb"), overwrite=True)
+    ok_3dp = sw.export_3d_pdf(os.path.join(tmp, "model.pdf"), overwrite=True)
+    record("data2: esportazioni avanzate (AP242 PMI, DXF flat, JT, IFC, glTF, 3D PDF)",
+           ok_242["success"] and ok_dxf["success"] and ok_jt["success"] and ok_ifc["success"] and ok_glb["success"] and ok_3dp["success"])
+
+    ok_ddm = sw.add_dimxpert_dimension([0, 0, 0])
+    ok_ddt = sw.add_dimxpert_datum([0, 0, 0], "A")
+    ok_dgt = sw.add_dimxpert_geometric_tolerance([0, 0, 0], "flatness", 0.02)
+    ok_ads = sw.auto_dimension_scheme_dimxpert()
+    ok_lda = sw.list_dimxpert_annotations()
+    record("data2: quotatura e tolleramento 3D MBD / DimXpert (PMI)",
+           ok_ddm["success"] and ok_ddt["success"] and ok_dgt["success"] and ok_ads["success"] and ok_lda["success"])
+
+    ok_svb = sw.set_view_background("studio")
+    ok_app = sw.apply_appearance("polished_chrome", color_rgb=[220, 220, 220])
+    record("data2: personalizzazione grafica vista 3D e aspetti fotorealistici",
+           ok_svb["success"] and ok_app["success"])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -2317,7 +2439,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp))):
             try:
                 fn()
             except Exception as e:

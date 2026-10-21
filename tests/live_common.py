@@ -13,7 +13,7 @@ from pathlib import Path
 
 os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECTED_TOOLS tool, execute_python incluso
 
-EXPECTED_TOOLS = 499    # numero di tool con execute_python attivo (498 senza execute_python)
+EXPECTED_TOOLS = 523    # numero di tool con execute_python attivo (522 senza execute_python)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -23,7 +23,11 @@ PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 SERVER = ROOT / "solidworks_mcp_server.py"
 
 # tool che scrivono file: i file di test_output vengono riscritti a ogni esecuzione (gruppo B)
-OVERWRITE_TOOLS = {"save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot", "create_drawing"}
+OVERWRITE_TOOLS = {
+    "save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot",
+    "create_drawing", "export_pdf_layers", "export_equations_to_file", "export_design_table", "export_step_ap242_pmi",
+    "export_dxf_flat_pattern", "export_jt", "export_ifc", "export_gltf_glb", "export_3d_pdf"
+}
 
 
 # --------------------------------------------------------------------------- lingua di SolidWorks

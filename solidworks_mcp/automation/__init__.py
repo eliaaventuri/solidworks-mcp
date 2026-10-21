@@ -35,6 +35,7 @@ from .ext_sketch5 import Sketch5Operations
 from .ext_assembly3 import Assembly3Operations
 from .ext_drawings2 import Drawings2Operations
 from .ext_features4 import Features4Operations
+from .ext_data2 import Data2Operations
 
 
 class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOperations, DocumentOperations, 
@@ -44,7 +45,7 @@ class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOper
                            ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations, AnalysisOperations,
                            Sketch3Operations, Features3Operations, SheetMetal2Operations, Assembly2Operations,
                            SelectionOperations, Sketch4Operations, Sketch5Operations, Assembly3Operations, Drawings2Operations,
-                           Features4Operations):
+                           Features4Operations, Data2Operations):
     """
     Complete SolidWorks automation class
     
