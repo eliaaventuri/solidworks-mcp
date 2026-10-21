@@ -7,20 +7,21 @@ import io
 import os
 import sys
 import json
+import base64
 import asyncio
 import logging
 import subprocess
 import time
 import traceback
 import concurrent.futures
-from typing import Dict
+from typing import Dict, List, Union
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 # MCP imports
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent, Resource, Prompt, GetPromptResult
+from mcp.types import Tool, TextContent, ImageContent, Resource, Prompt, GetPromptResult
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 
 # Local imports
@@ -432,8 +433,110 @@ def format_result(r: Dict) -> str:
 # Tool Handlers
 # ============================================================================
 
+# Image support for Vision LLMs
+_IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+_MAX_IMAGE_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB per image
+_MAX_IMAGES_PER_TOOL_CALL = 5
+
+
+def _image_attachment_enabled() -> bool:
+    """True se l'invio di ImageContent e' attivo (default True, disattivabile con SW_MCP_ATTACH_IMAGES=0)."""
+    return os.environ.get("SW_MCP_ATTACH_IMAGES", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _try_load_image_content(filepath: Union[str, Path]) -> ImageContent | None:
+    """Carica un file immagine dal disco e restituisce un ImageContent base64 valido per Vision LLMs."""
+    try:
+        if not filepath:
+            return None
+        p = Path(filepath)
+        mime = _IMAGE_MIME_TYPES.get(p.suffix.lower())
+        if not mime or not p.is_file():
+            return None
+        size = p.stat().st_size
+        if size == 0 or size > _MAX_IMAGE_ATTACHMENT_SIZE:
+            if size > _MAX_IMAGE_ATTACHMENT_SIZE:
+                logger.warning(f"File immagine '{filepath}' ({size} byte) supera la soglia di {_MAX_IMAGE_ATTACHMENT_SIZE} byte: ImageContent inline saltato.")
+            return None
+        b64_data = base64.b64encode(p.read_bytes()).decode("ascii")
+        return ImageContent(type="image", data=b64_data, mimeType=mime)
+    except Exception as e:
+        logger.warning(f"Errore nel caricamento dell'immagine '{filepath}' per ImageContent: {e}")
+        return None
+
+
+def _collect_image_paths_from_dict(data: dict) -> List[str]:
+    """Estrae percorsi di file immagine da un dizionario di dati di ritorno del tool."""
+    paths: List[str] = []
+    if not isinstance(data, dict):
+        return paths
+    for key in ("filepath", "path", "image_path", "image_file"):
+        val = data.get(key)
+        if isinstance(val, str) and val not in paths:
+            paths.append(val)
+    if isinstance(data.get("images"), list):
+        for item in data["images"]:
+            if isinstance(item, str) and item not in paths:
+                paths.append(item)
+            elif isinstance(item, dict):
+                p = item.get("filepath") or item.get("path")
+                if isinstance(p, str) and p not in paths:
+                    paths.append(p)
+    return paths
+
+
+def _format_tool_response(name: str, arguments: dict, result: Dict) -> list[Union[TextContent, ImageContent]]:
+    """Formatta la risposta MCP restituendo TextContent e, se presenti immagini esportate valide, ImageContent."""
+    contents: list[Union[TextContent, ImageContent]] = [TextContent(type="text", text=format_result(result))]
+
+    if not isinstance(result, dict) or not result.get("success"):
+        return contents
+
+    if not _image_attachment_enabled() or (isinstance(arguments, dict) and arguments.get("attach_image") is False):
+        return contents
+
+    image_paths: List[str] = []
+
+    if name == "execute_tool_sequence":
+        sub_results = (result.get("data") or {}).get("results", [])
+        if isinstance(sub_results, list):
+            for step in sub_results:
+                if isinstance(step, dict) and step.get("success"):
+                    step_data = step.get("data") or {}
+                    image_paths.extend(_collect_image_paths_from_dict(step_data))
+    else:
+        data = result.get("data") or {}
+        image_paths.extend(_collect_image_paths_from_dict(data))
+        if not image_paths and isinstance(arguments, dict):
+            arg_fp = arguments.get("filepath") or arguments.get("path")
+            if isinstance(arg_fp, str):
+                image_paths.append(arg_fp)
+
+    images: list[ImageContent] = []
+    seen_paths = set()
+    for fp in image_paths:
+        if fp in seen_paths:
+            continue
+        seen_paths.add(fp)
+        img = _try_load_image_content(fp)
+        if img is not None:
+            images.append(img)
+            if len(images) >= _MAX_IMAGES_PER_TOOL_CALL:
+                break
+
+    contents.extend(images)
+    return contents
+
+
 @server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[Union[TextContent, ImageContent]]:
     """Handle MCP tool calls"""
     try:
         logger.info(f"Tool: {name}, Args: {arguments}")
@@ -462,7 +565,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=f"[ERROR] {_timeout_message(name, timeout)}")]
 
         logger.info(f"Result: success={result['success']}")
-        return [TextContent(type="text", text=format_result(result))]
+        return _format_tool_response(name, arguments or {}, result)
         
     except Exception as e:
         logger.error(f"Tool error: {e}\n{traceback.format_exc()}")

@@ -49,6 +49,12 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 - *"Create three configurations, 150, 200 and 250 mm long, and export each one as STEP."*
 - *"Make an exploded view of the assembly and put it on a drawing with a BOM."*
 
+### Vision LLMs & Native ImageContent
+
+When capturing screenshots, rendered views, simulation plots, or labeled viewport images (`export_model_image`, `export_simulation_plot`, `export_labeled_viewport_image`, and `export_drawing` to PNG/JPG), the server returns both structured JSON metadata in `TextContent` and the image as native MCP `ImageContent` (base64-encoded).
+
+Multimodal Vision LLMs (e.g. Claude 3.5/3.7 Sonnet) receive the rendered CAD geometry directly in their context window for immediate visual verification and geometric feedback. Image attachment also works seamlessly inside batch workflows (`execute_tool_sequence`).
+
 ### MCP Resources & Prompts
 
 The server implements full standard MCP resource and prompt protocols:
@@ -140,6 +146,7 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
 | `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 371 tools |
+| `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
 
 ## Safety
 

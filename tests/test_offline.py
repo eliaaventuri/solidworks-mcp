@@ -1298,6 +1298,85 @@ def test_execute_tool_sequence(tmp):
            text.startswith("[ERROR]") and ("esiste gia'" in text or "SOVRASCRITTO" in text))
 
 
+# ============================================================================ ImageContent per Vision LLM
+def test_image_content(tmp):
+    import base64
+
+    # 1. Helper _try_load_image_content con file inesistente, non-immagine o vuoto
+    record("image_content: file inesistente -> None", srv._try_load_image_content("non_esiste.png") is None)
+
+    txt_file = Path(tmp) / "note.txt"
+    txt_file.write_text("hello")
+    record("image_content: estensione non immagine (.txt) -> None", srv._try_load_image_content(str(txt_file)) is None)
+
+    empty_png = Path(tmp) / "empty.png"
+    empty_png.write_bytes(b"")
+    record("image_content: file vuoto (0 byte) -> None", srv._try_load_image_content(str(empty_png)) is None)
+
+    # 2. Caricamento valido di PNG con verifica base64 e mimeType
+    good_png = Path(tmp) / "sample.png"
+    sample_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+    good_png.write_bytes(sample_bytes)
+    img_content = srv._try_load_image_content(str(good_png))
+    record("image_content: PNG valido -> ImageContent con mimeType image/png",
+           img_content is not None and img_content.type == "image" and img_content.mimeType == "image/png"
+           and base64.b64decode(img_content.data) == sample_bytes)
+
+    # 3. MIME types corretti per JPG e BMP
+    good_jpg = Path(tmp) / "sample.jpg"
+    good_jpg.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 10)
+    ic_jpg = srv._try_load_image_content(str(good_jpg))
+    record("image_content: JPG -> mimeType image/jpeg", ic_jpg is not None and ic_jpg.mimeType == "image/jpeg")
+
+    # 4. Limite dimensione: file oltre 10 MB saltato
+    saved_max = srv._MAX_IMAGE_ATTACHMENT_SIZE
+    try:
+        srv._MAX_IMAGE_ATTACHMENT_SIZE = 10  # soglia a 10 byte per il test
+        record("image_content: file sopra la soglia massima -> None", srv._try_load_image_content(str(good_png)) is None)
+    finally:
+        srv._MAX_IMAGE_ATTACHMENT_SIZE = saved_max
+
+    # 5. _format_tool_response: tool fallito -> solo TextContent
+    res_fail = {"success": False, "message": "Failed", "error_code": 1, "error_name": "swError", "data": {"filepath": str(good_png)}}
+    out_fail = srv._format_tool_response("export_model_image", {}, res_fail)
+    record("image_content: tool fallito -> solo TextContent (nessuna immagine)", len(out_fail) == 1 and out_fail[0].type == "text")
+
+    # 6. _format_tool_response: successo con filepath immagine -> TextContent + ImageContent
+    res_ok = {"success": True, "message": "Saved", "error_code": 0, "error_name": "swSuccess", "data": {"filepath": str(good_png)}}
+    out_ok = srv._format_tool_response("export_model_image", {}, res_ok)
+    record("image_content: successo con filepath -> TextContent + ImageContent",
+           len(out_ok) == 2 and out_ok[0].type == "text" and out_ok[1].type == "image" and out_ok[1].mimeType == "image/png")
+
+    # 7. attach_image=False disabilita l'allegato
+    out_no_attach = srv._format_tool_response("export_model_image", {"attach_image": False}, res_ok)
+    record("image_content: attach_image=False -> solo TextContent", len(out_no_attach) == 1)
+
+    # 8. SW_MCP_ATTACH_IMAGES=0 disabilita l'allegato globalmente
+    os.environ["SW_MCP_ATTACH_IMAGES"] = "0"
+    try:
+        out_env_disabled = srv._format_tool_response("export_model_image", {}, res_ok)
+        record("image_content: SW_MCP_ATTACH_IMAGES=0 -> solo TextContent", len(out_env_disabled) == 1)
+    finally:
+        os.environ.pop("SW_MCP_ATTACH_IMAGES", None)
+
+    # 9. execute_tool_sequence con passo di export immagine include ImageContent
+    seq_res = {
+        "success": True,
+        "message": "Sequence finished",
+        "error_code": 0,
+        "error_name": "swSuccess",
+        "data": {
+            "results": [
+                {"step": 1, "tool": "set_units", "success": True, "data": {}},
+                {"step": 2, "tool": "export_model_image", "success": True, "data": {"filepath": str(good_png)}},
+            ]
+        }
+    }
+    out_seq = srv._format_tool_response("execute_tool_sequence", {}, seq_res)
+    record("image_content: execute_tool_sequence raccoglie ImageContent dai singoli passi",
+           len(out_seq) == 2 and out_seq[1].type == "image" and out_seq[1].mimeType == "image/png")
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1313,7 +1392,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp))):
             try:
                 fn()
             except Exception as e:

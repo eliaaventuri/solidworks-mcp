@@ -127,7 +127,7 @@ _TOOLS = {
          "interconnect": (B, "3D Interconnect: true = assembly stays linked to the source file, false = converted to SolidWorks documents; default = current setting"),
          "diagnose": (B, "Run import diagnosis and repair (close gaps, fix faces) on an imported part; result.diagnosis has before/after numbers (default false)")}, ["filepath"]),
     "export_model_image": ("export_model_image",
-        "PNG/JPG/BMP image of the part/assembly. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
+        "PNG/JPG/BMP image of the part/assembly. Returns native ImageContent for Vision LLMs. view: isometric|front|back|left|right|top|bottom|trimetric|dimetric; "
         "style: shaded_edges|shaded|hidden_lines|hidden_gray|wireframe; width/height in pixels (PNG only, both needed); hide_reference=true (default) "
         "hides planes, axes, origins, points and sketches; white_background for a white backdrop; perspective=true shoots in perspective. "
         "Up to about 2000x1400 the screen capture is used; larger sizes use SolidWorks' print capture (up to 6600x5100 px), so images can be "

@@ -107,7 +107,7 @@ _TOOLS = {
          "step": (N, "Solution step number, 1-based (default 1)")},
         ["faces"]),
     "export_simulation_plot": ("export_simulation_plot",
-        "Export the results plot (color map) as PNG: von_mises | displacement | strain.",
+        "Export the results plot (color map) as PNG: von_mises | displacement | strain. Returns native ImageContent for Vision LLMs.",
         {"filepath": (S, "Output PNG file path"), "result": (S, "von_mises | displacement | strain, or a plot name (default von_mises)"),
          "view": (S, "isometric | front | back | left | right | top | bottom (default isometric)"), "study": _ST}, ["filepath"]),
 }

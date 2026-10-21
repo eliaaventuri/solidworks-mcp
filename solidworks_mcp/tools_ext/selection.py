@@ -75,7 +75,7 @@ TOOLS = {
     ),
     "export_labeled_viewport_image": (
         "export_labeled_viewport_image",
-        "Capture a rendered screenshot with overlay numbered labels on visible model faces and edges.",
+        "Capture a rendered screenshot with overlay numbered labels on visible model faces and edges. Returns native ImageContent for Vision LLMs.",
         {
             "filepath": (S, "Output image file path (.png)"),
             "entity_type": (S, "Entity labels to overlay: 'face' (default) | 'edge' | 'both'"),
