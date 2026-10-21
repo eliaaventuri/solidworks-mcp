@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 *.log
@@ -14,3 +14,15 @@ test_output/
 scripts_tmp/
 .aider*
 opencode.json
+
+# Internal development and planning documents (kept on local machine, never pushed)
+/*.md
+!/README.md
+*.rtf
+ATLANTE.md
+STATO.md
+STATO_STORICO.md
+CLAUDE.md
+CHANGELOG.md
+LIMITI.md
+PIANO_*.md

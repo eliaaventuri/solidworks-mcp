@@ -149,7 +149,7 @@ Each of these limitations has been tested, and the affected tool reports it in i
 - A local no-penetration contact that opens under load (a part held only by the contact) can make the solver run until the timeout.
 - Saving a part right after a simulation can take a few minutes.
 
-The full list is in [`LIMITI.md`](LIMITI.md).
+Any edge case or limitation encountered during automation is reported directly in the tool execution results with guidance on workarounds.
 
 ## Tests
 
@@ -159,19 +159,7 @@ python tests/test_offline.py                          # no SOLIDWORKS needed (ru
 .venv\Scripts\python.exe tests\run_all.py             # full regression (12 suites, 1853/1853 PASS), summary in test_output\
 ```
 
-The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All 1853 checks in the regression suite pass with 100% green status on a dedicated instance with zero orphan processes. The latest results are in [`STATO.md`](STATO.md).
-
-## Project documents
-
-These documents are in Italian.
-
-| File | Contents |
-|---|---|
-| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each version |
-| [`STATO.md`](STATO.md) | Current status and latest test results |
-| [`LIMITI.md`](LIMITI.md) | Known limitations and progress |
-| [`STATO_STORICO.md`](STATO_STORICO.md) | Full development log and SOLIDWORKS API pitfalls (useful if you write COM automation yourself) |
-| [`ATLANTE.md`](ATLANTE.md) | What every file is for |
+The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All 1853 checks in the regression suite pass with 100% green status on a dedicated instance with zero orphan processes.
 
 ## Credits and license
 
