@@ -69,7 +69,7 @@ from solidworks_mcp import safety                                      # noqa: E
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
 RESULTS = []
-EXPECTED_TOOLS = 375                       # 376 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 390                       # 391 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -1615,6 +1615,142 @@ def test_audit_and_collision():
            dd.get("max_safe_displacement") == 4.0 and dd.get("initial_pose_restored") and comp_a.Transform2 == "xf_[0.0, 0.0, 0.0]")
 
 
+
+
+# ============================================================================ sketch4 tools unit tests
+def test_sketch4_tools():
+    sw = SolidWorksAutomation()
+
+    # Senza documento attivo, devono fallire con errore controllato
+    sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun doc attivo"})
+    sw._part = lambda: (None, {"success": False, "message": "Nessun pezzo attivo"})
+    sw._s2_active_or_open = lambda sketch=None: (None, None, {"success": False, "message": "Nessun schizzo attivo"})
+
+    r1 = sw.insert_intersection_curve()
+    r2 = sw.insert_silhouette_entities()
+    r3 = sw.sketch_offset_on_surface()
+    r4 = sw.make_sketch_chain()
+    r5 = sw.segment_sketch_entity()
+    r6 = sw.draw_3point_arc_slot(0, 0, 10, 0, 5, 5, 2)
+    r7 = sw.draw_sketch_text_along_curve("Test")
+    r8 = sw.draw_equation_curve_3d("t", "t", "t")
+    r9 = sw.stretch_sketch_entities(1, 1)
+    r10 = sw.align_sketch_entities([[0, 0]], [[1, 1]])
+    r11 = sw.show_sketch_curvature()
+    r12 = sw.get_spline_curvature_analysis()
+    r13 = sw.diagnose_sketch_relations()
+    r14 = sw.insert_sketch_picture("nonexistent.png")
+    r15 = sw.insert_sketch_block_from_file("nonexistent.sldblk")
+
+    all_failed_cleanly = all(not r["success"] for r in (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15))
+    record("sketch4: tutti i 15 tool gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
+
+    # Con mock di schizzo attivo
+    class _MockPt:
+        def __init__(self, x=0.0, y=0.0, z=0.0):
+            self.X = x
+            self.Y = y
+            self.Z = z
+
+    class _MockSeg:
+        def __init__(self, name, seg_type=0):
+            self._name = name
+            self._type = seg_type
+            self.ShowCurvature = False
+            self.CurvatureScale = 1.0
+            self.CurvatureDensity = 10
+            self.ShowInflectionPoints = False
+            self.ShowMinimumRadius = False
+        def GetName(self):
+            return self._name
+        def GetType(self):
+            return self._type
+        def Select4(self, append, data):
+            return True
+        def GetStartPoint2(self):
+            return _MockPt(0.0, 0.0, 0.0)
+        def GetEndPoint2(self):
+            return _MockPt(1.0, 0.0, 0.0)
+
+    class _MockSketchMgr:
+        def __init__(self):
+            self.ActiveSketch = self
+        def InsertIntersectionCurve(self):
+            return True
+        def InsertSilhouetteEntities(self, t, b, le, a, uts, eil):
+            return True
+        def InsertOffsetOnSurface(self, dist, rev, geod, mc):
+            return True
+        def MakeSketchChain(self):
+            return True
+        def CreateSketchPath(self):
+            return self
+        def CreateSegmentPoints(self, count, is_seg):
+            return True
+        def SplitOpenSegment(self, x, y, z):
+            return True
+        def CreatePoint(self, x, y, z):
+            return self
+        def CreateSketchSlot(self, *args):
+            return True
+        def CreateText(self, x, y, z, text):
+            return True
+        def StretchEntities(self, *args):
+            return True
+        def AlignEntities1Point(self, *args):
+            return True
+        def CreateSpline(self, pts):
+            return True
+        def InsertSketchPicture2(self, path):
+            return self
+        def SetOrigin(self, x, y):
+            pass
+        def SetSize(self, w, h, p):
+            pass
+        def MakeSketchBlockFromFile(self, *args):
+            return self
+
+    class _MockDoc:
+        def __init__(self):
+            self.SketchManager = _MockSketchMgr()
+            self.Extension = self
+        def SelectByID2(self, *args):
+            return True
+        def GetBodies2(self, *args):
+            return ()
+        def ClearSelection2(self, *args):
+            return True
+
+    mock_doc = _MockDoc()
+    mock_seg = _MockSeg("Line1", seg_type=3) # Spline
+    sw._s2_active_or_open = lambda sketch=None: (mock_doc, mock_doc.SketchManager, None)
+    sw._s4_segs = lambda doc: [mock_seg]
+    sw._seg_id = lambda s: s.GetName()
+    sw._part = lambda: (mock_doc, None)
+
+    # Test esecuzione mock per i tool principali
+    ok_int = sw.insert_intersection_curve()
+    ok_sil = sw.insert_silhouette_entities()
+    ok_off = sw.sketch_offset_on_surface(5.0)
+    ok_chn = sw.make_sketch_chain(["Line1"])
+    ok_seg = sw.segment_sketch_entity("Line1", count=5, is_segments=True)
+    ok_slt = sw.draw_3point_arc_slot(0, 0, 20, 0, 10, 5, width=4)
+    ok_curv = sw.show_sketch_curvature("Line1", scale=15.0, density=30, visible=True)
+    ok_ana = sw.get_spline_curvature_analysis("Line1")
+    ok_eq3d = sw.draw_equation_curve_3d("10*cos(t)", "10*sin(t)", "2*t", start=0, end=3.14, samples=20)
+
+    record("sketch4: insert_intersection_curve genera struttura dati corretta", ok_int["success"] and "added_segments_count" in ok_int["data"])
+    record("sketch4: insert_silhouette_entities eseguito con successo", ok_sil["success"] and ok_sil["data"]["exclude_internal_loops"])
+    record("sketch4: sketch_offset_on_surface calcola distanza e geodetica", ok_off["success"] and ok_off["data"]["geodesic"])
+    record("sketch4: make_sketch_chain combina segmenti", ok_chn["success"] and ok_chn["data"]["segment_count"] == 1)
+    record("sketch4: segment_sketch_entity suddivide entita' in N segmenti", ok_seg["success"] and ok_seg["data"]["count"] == 5 and ok_seg["data"]["is_segments"])
+    record("sketch4: draw_3point_arc_slot crea asola 3 punti con endpoints", ok_slt["success"] and ok_slt["data"]["slot_type"] == "3point_arc")
+    record("sketch4: show_sketch_curvature e get_spline_curvature_analysis analizzano spline",
+           ok_curv["success"] and ok_curv["data"]["density"] == 30 and ok_ana["success"] and "min_radius_mm" in ok_ana["data"])
+    record("sketch4: draw_equation_curve_3d valuta formule parametriche e crea punti 3D",
+           ok_eq3d["success"] and ok_eq3d["data"]["samples_count"] == 20 and len(ok_eq3d["data"]["start_point_m"]) == 3)
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -1630,7 +1766,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision)):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools)):
             try:
                 fn()
             except Exception as e:

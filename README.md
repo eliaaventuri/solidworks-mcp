@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-8.0.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-376-green)
+![tools](https://img.shields.io/badge/MCP%20tools-391-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,7 +23,7 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **376 tools** (375 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **391 tools** (390 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
 Every tool has been tested against a live SOLIDWORKS session. The tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. A tool only counts as done when those numbers match.
 
@@ -32,7 +32,7 @@ Every tool has been tested against a live SOLIDWORKS session. The tests build re
 | Area | Tools | What it can do |
 |---|:---:|---|
 | 🧱 **Core & Documents** | 27 | Connect to live or dedicated instance; batch tool sequence execution; tool search & discovery; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
-| 📐 **Modeling & Sketching** | 149 | Advanced 2D/3D sketching (rebuild diagnostics & error inspection); (centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim); boss/cut lofts, sweeps, boundary features, ribs, domes, wraps, flex, cosmetic & modeled threads; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns |
+| 📐 **Modeling & Sketching** | 164 | Advanced 2D/3D sketching (rebuild diagnostics & error inspection); (centerlines, 3-point/tangent arcs, ellipses, parabolas, conics, splines, blocks, dynamic mirror, power trim); boss/cut lofts, sweeps, boundary features, ribs, domes, wraps, flex, cosmetic & modeled threads; multibody combine, split, intersect, scale; linear, circular, curve, sketch, table, and fill patterns |
 | 🌀 **Curves & Surfaces** | 21 | Standard & variable-pitch helices, spirals, projected & composite curves, split lines; planar surface from sketch, surface extrude, revolve, sweep, loft, offset, knit, extend, untrim, ruled surface |
 | 📄 **Drawings** | 39 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); automatic layout & scaling; standard, projected, section, detail, auxiliary, broken & crop views; clean automatic dimensioning; tolerances, GD&T, surface finish; hole tables, BOM, balloons; PDF/DXF/DWG export |
 | ⚙️ **Assemblies** | 53 | Component insertion (floating/fixed); standard, advanced & limit mates; component patterns (linear, circular, feature-driven, chain); mirroring with opposite-hand parts; copy with mates; exploded views (linear, entity-aligned, radial); mate controller; belt & chain features; hole alignment checks; measured degrees of freedom; Pack & Go |
