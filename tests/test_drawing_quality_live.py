@@ -523,6 +523,14 @@ async def sheet_assieme(c):
     record("assieme: 7 linee (perno-boccola-staffa + 6 viti con il loro foro)",
            len(names_) == 7 and any(len(g) == 3 for g in names_) and sum(1 for g in names_ if len(g) == 2 and any("vite" in n for n in g)) == 6,
            str(names_)[:200])
+    # linee di esplosione libere (segmenti con coordinate, nuovo schizzo di esplosione): 2 segmenti chiesti, 2 nello schizzo
+    ok_, text_, d_ = await c.call("draw_explode_line", segments=[[0, 0, 0, 0, 0, 60], [0, 0, 0, 60, 0, 0]])
+    record("draw_explode_line: linee di esplosione libere: 2 segmenti",
+           ok_ and d_.get("drawn") == 2 and not d_.get("failed") and d_.get("segments_added") == 2,
+           f"drawn={d_.get('drawn')} segments_added={d_.get('segments_added')} existing={d_.get('existing_segments')} "
+           f"failed={d_.get('failed')} | {text_.splitlines()[0][:120]}")
+    ok_, text_, _ = await c.call("draw_explode_line", segments=[[1, 2, 3, 1, 2, 3]])
+    record("draw_explode_line: segmento di lunghezza nulla rifiutato", not ok_, text_.split("\n")[0][:190])
     await T(c, "save_document", "assieme: salva con le linee di esplosione", filepath=str(asm))
     await c.call("close_document", discard=True)
     drw, paper, sc, d = await make_drawing(c, "assieme", asm, ["front", "isometric"], exploded=True)
@@ -715,7 +723,7 @@ async def run():
                 print(f"Istanza dedicata PID {my_pid} (diversa da {sorted(elia_pids)})")
                 record("PID dedicato diverso dall'istanza utente", my_pid not in elia_pids, str(my_pid))
                 need = ["arrange_drawing_dimensions", "get_drawing_layout", "set_dimension_tolerance", "add_hole_table",
-                        "add_general_roughness", "add_explode_lines"]
+                        "add_general_roughness", "add_explode_lines", "draw_explode_line"]
                 record("nuovi tool di tavola esposti", all(n in tools for n in need), f"{len(tools)} tool totali")
                 await scenario(c)
     finally:

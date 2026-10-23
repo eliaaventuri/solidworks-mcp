@@ -218,6 +218,72 @@ class AssemblyAnalysisMixin:
         except Exception as e:
             return self._as_fail("add_explode_lines", e)
 
+    def draw_explode_line(self, segments: list, view_name: str = None, unit: str = "mm") -> Dict:
+        """Linee di esplosione LIBERE: segmenti rettilinei [[x1,y1,z1,x2,y2,z2], ...] (coordinate dell'assieme nella posa ESPLOSA)
+        disegnati nello schizzo di esplosione, quello gia' esistente se c'e' (InsertExplodeLineSketch + SketchManager.CreateLine con AddToDB, cosi' gli
+        estremi non si agganciano alla geometria). Per assi che non sono cilindri coassiali (maniglie, pezzi inclinati) o per
+        linee che devono sporgere oltre i pezzi. DOPO si salva l'assieme perche' le viste di disegno la leggano."""
+        try:
+            doc, err = self._asm()
+            if err:
+                return err
+            segs = []
+            for s in (segments or []):
+                if not isinstance(s, (list, tuple)) or len(s) != 6:
+                    return self._result(False, f"Segmento non valido (servono 6 numeri x1,y1,z1,x2,y2,z2): {s}", SwErrors.swInvalidInput)
+                p = [self._mmu(float(v), unit) for v in s]
+                if math.dist(p[:3], p[3:]) < 1e-6:
+                    return self._result(False, f"Segmento di lunghezza nulla: {s}", SwErrors.swInvalidInput)
+                segs.append(p)
+            if not segs:
+                return self._result(False, "Nessun segmento indicato", SwErrors.swInvalidInput)
+            names = self._ex_names(doc)
+            if not names:
+                return self._result(False, "L'assieme non ha una vista esplosa (create_exploded_view / auto_explode).",
+                                    SwErrors.swInvalidInput)
+            vname = view_name or names[0]
+            if vname not in names:
+                return self._result(False, f"Vista esplosa '{vname}' non trovata. Presenti: {names}", SwErrors.swInvalidInput)
+            if not bool(self._com(doc, "IsExploded")):
+                doc.ShowExploded2(True, vname)
+            if not bool(self._com(doc, "IsExploded")):
+                return self._result(False, "Impossibile attivare la vista esplosa", SwErrors.swFeatureError)
+            doc.ClearSelection2(True)
+            if not doc.SketchManager.InsertExplodeLineSketch:
+                return self._result(False, "InsertExplodeLineSketch non riuscito (esiste gia' uno schizzo di esplosione in modifica?)",
+                                    SwErrors.swFeatureError)
+            sm = doc.SketchManager
+            sk = doc.GetActiveSketch2
+
+            def nsegs():
+                try:
+                    return len(sk.GetSketchSegments or ())
+                except Exception:
+                    return 0
+            # se l'esploso ha gia' uno schizzo di linee, InsertExplodeLineSketch apre QUELLO: si conta la differenza
+            before = nsegs()
+            old_db = bool(sm.AddToDB)
+            sm.AddToDB = True
+            made, failed = [], []
+            try:
+                for p, s in zip(segs, segments):
+                    seg = sm.CreateLine(*p)
+                    (made if seg is not None else failed).append(s)
+            finally:
+                sm.AddToDB = old_db
+            added = nsegs() - before
+            doc.ClearSelection2(True)
+            sm.InsertSketch(True)
+            doc.ClearSelection2(True)
+            ok = bool(made) and not failed and added == len(made)
+            msg = f"Linee di esplosione libere: {len(made)} segmenti disegnati" + (f", {len(failed)} NON riusciti" if failed else "")
+            return self._result(ok, msg, SwErrors.swSuccess if ok else SwErrors.swFeatureError,
+                                {"drawn": len(made), "failed": failed, "segments_added": added, "existing_segments": before,
+                                 "explode_view": vname,
+                                 "note": "salva l'assieme (save_document) perche' le viste di disegno vedano le linee"})
+        except Exception as e:
+            return self._as_fail("draw_explode_line", e)
+
     def show_exploded(self, exploded: bool = True, view_name: str = None) -> Dict:
         """Esplode (True) o comprime (False) l'assieme."""
         try:

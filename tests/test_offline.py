@@ -80,7 +80,7 @@ if not STUBBED:
                                                                         SwErrors.swConnectionError)
 
 RESULTS = []
-EXPECTED_TOOLS = 554                       # 555 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 555                       # 556 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 

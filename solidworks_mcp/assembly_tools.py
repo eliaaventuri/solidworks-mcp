@@ -180,6 +180,12 @@ _TOOLS = {
          "direction": ("string", "x | y | z | auto (default: the direction with the most lines)"),
          "view_name": ("string", "Exploded view name (default: the first one)"),
          "tolerance": ("number", "Max lateral axis offset, in mm (default 0.5)")}, []),
+    "draw_explode_line": ("draw_explode_line",
+        "Free explode lines: straight segments added to the explode-line sketch (the existing one, if any), for axes that are not coaxial cylinders "
+        "(handles, tilted parts) or lines that must extend beyond the parts. Coordinates are assembly coordinates in the EXPLODED "
+        "pose (see list_exploded_views poses). Save the assembly afterwards so exploded drawing views show the lines.",
+        {"segments": (A, "[[x1,y1,z1,x2,y2,z2], ...] in mm (`unit`)"),
+         "view_name": (S, "Exploded view name (default: the first one)"), "unit": _UNIT}, ["segments"]),
     "delete_explode_step": ("delete_explode_step", "Delete an explode step by name.",
         {"step": (S, "Step name (as in list_exploded_views)")}, ["step"]),
     # ---------------------------------------------------------------- analisi
