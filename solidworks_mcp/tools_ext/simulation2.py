@@ -1,6 +1,6 @@
 """Lotto SIMULAZIONE 2: schemi dei tool estesi FEA (studi speciali, carichi avanzati, connettori, termica, mesh shell/beam, sonde e report) -> automation/ext_simulation2.py (Simulation2Operations)."""
 
-from ._common import S, N, B, UNIT, PT3, DIR
+from ._common import S, N, B, A, PT3
 
 TOOLS = {
     # 1. Creazione e Gestione Studi FEA
@@ -28,7 +28,7 @@ TOOLS = {
         {
             "study_name": (S, "Name of the thermal study (default 'Thermal 1')"),
             "transient": (B, "Whether the study is transient time-dependent (default false for steady-state)"),
-            "total_time_seconds": (N, "Total transient duration in seconds (`unit`) (default 60.0)"),
+            "total_time_seconds": (N, "Total transient duration in seconds (default 60.0)"),
         },
         [],
     ),
@@ -37,7 +37,8 @@ TOOLS = {
         "Create an explicit dynamic drop test impact study onto a rigid target floor.",
         {
             "study_name": (S, "Name of the drop test study (default 'Drop Test 1')"),
-            "drop_height": (N, "Drop height in mm (`unit`) (default 1000.0)"),
+            "drop_height": (N, "Drop height in mm from the lowest point (default 1000.0)"),
+            "gravity_plane": (S, "Plane whose normal is the gravity direction: front|top|right or plane name (default top)"),
         },
         [],
     ),
@@ -46,16 +47,17 @@ TOOLS = {
         "Create an alternating stress fatigue life study based on S-N Wöhler material curves.",
         {
             "study_name": (S, "Name of the fatigue life study (default 'Fatigue 1')"),
-            "event_cycles": (N, "Loading event duration cycles count (default 100000)"),
+            "event_cycles": (N, "Cycles count of the constant-amplitude event (default 100000)"),
+            "static_study": (S, "Existing static study the fatigue event is based on (without it the study has no events)"),
         },
         [],
     ),
     "create_topology_study": (
         "create_topology_study",
-        "Create a topology optimization study to maximize stiffness while reducing target mass.",
+        "Create a topology optimization study (needs the matching license; fails if SolidWorks refuses). The mass target is not settable via API.",
         {
             "study_name": (S, "Name of the topology optimization study (default 'Topology 1')"),
-            "target_mass_percent": (N, "Target mass reduction percent ratio (default 50.0)"),
+            "target_mass_percent": (N, "Desired mass target percent (NOT applied: reported for the user to set in SolidWorks)"),
         },
         [],
     ),
@@ -64,7 +66,7 @@ TOOLS = {
         "Create a linear dynamic structural study for modal harmonic or random vibration response.",
         {
             "study_name": (S, "Name of the linear dynamic study (default 'Dynamic 1')"),
-            "dynamic_type": (S, "Dynamic study type ('harmonic', 'random_vibration', 'time_history') (default 'harmonic')"),
+            "dynamic_type": (S, "harmonic | random_vibration | time_history | response_spectrum (default harmonic)"),
         },
         [],
     ),
@@ -72,24 +74,22 @@ TOOLS = {
     # 2. Vincoli, Fissaggi e Supporti
     "add_elastic_support": (
         "add_elastic_support",
-        "Apply an elastic foundation support on faces with specified subgrade spring stiffness.",
+        "Apply an elastic foundation support on faces (distributed stiffness, values read back from SolidWorks).",
         {
             "face_point": PT3,
-            "stiffness": (N, "Foundation subgrade spring stiffness in N/mm3 (`unit`)"),
+            "stiffness": (N, "Normal distributed stiffness in N/mm3 (N/mm per mm2 of face)"),
+            "shear_stiffness": (N, "Tangential distributed stiffness in N/mm3 (default = normal)"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["face_point", "stiffness"],
     ),
     "add_prescribed_displacement": (
         "add_prescribed_displacement",
-        "Apply a prescribed nonzero translation displacement or rotation on model faces.",
+        "Prescribed displacement. LIMIT: nonzero values are ignored by the SolidWorks Simulation API (measured), so a nonzero value returns an error; 0 creates a fixed restraint.",
         {
             "face_point": PT3,
-            "displacement_mm": (N, "Prescribed displacement magnitude in mm (`unit`)"),
-            "direction": DIR,
+            "displacement_mm": (N, "Displacement in mm (only 0 is supported, see description)"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["face_point", "displacement_mm"],
     ),
@@ -109,22 +109,20 @@ TOOLS = {
     # 3. Carichi Meccanici Esterni
     "add_centrifugal_load": (
         "add_centrifugal_load",
-        "Apply a rotating body centrifugal acceleration load defined by angular velocity around an axis.",
+        "Apply a centrifugal load (one per study) with angular velocity around an axis given by a straight edge or a cylindrical face.",
         {
-            "angular_velocity_rad_s": (N, "Rotational angular speed in rad/s (`unit`)"),
-            "axis_point": PT3,
-            "axis_direction": DIR,
+            "angular_velocity_rad_s": (N, "Angular velocity in rad/s"),
+            "axis_point": (A, "Point [x,y,z] mm ON a straight edge or cylindrical face that defines the axis"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
-        ["angular_velocity_rad_s"],
+        ["angular_velocity_rad_s", "axis_point"],
     ),
     "add_thermal_shrinkage_load": (
         "add_thermal_shrinkage_load",
-        "Apply thermal expansion or contraction strain pre-stress caused by a uniform temperature delta.",
+        "Static study: bring the WHOLE body containing the face to zero-strain temperature + delta (thermal expansion/shrinkage).",
         {
             "face_point": PT3,
-            "delta_temperature_c": (N, "Temperature difference delta in C (`unit`)"),
+            "delta_temperature_c": (N, "Temperature change in C relative to the study zero-strain temperature"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
         ["face_point", "delta_temperature_c"],
@@ -133,50 +131,49 @@ TOOLS = {
     # 4. Connettori Meccanici (Bulloni, Perni, Molle)
     "add_bolt_connector": (
         "add_bolt_connector",
-        "Insert a preloaded bolt connector fastener with thread size, torque or tensile clamping force.",
+        "Insert a bolt-with-nut connector: head and nut are concentric CIRCULAR EDGES; shank diameter and axial preload read back.",
         {
-            "bolt_face_point": PT3,
-            "bolt_diameter": (N, "Nominal bolt thread diameter in mm (`unit`)"),
-            "preload_force_n": (N, "Axial bolt preload tension force in N (`unit`)"),
-            "tightening_torque_nm": (N, "Bolt tightening torque in Nm (`unit`)"),
+            "head_edge_point": (A, "Point [x,y,z] mm ON the circular edge under the bolt head"),
+            "nut_edge_point": (A, "Point [x,y,z] mm ON the circular edge under the nut"),
+            "bolt_diameter": (N, "Shank diameter in mm"),
+            "preload_force_n": (N, "Axial preload in N (default 0)"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
-        ["bolt_face_point", "bolt_diameter"],
+        ["head_edge_point", "nut_edge_point", "bolt_diameter"],
     ),
     "add_pin_connector": (
         "add_pin_connector",
-        "Insert a cylindrical pin or dowel connector between coaxial cylindrical faces with shear capacity.",
+        "Insert a pin connector between two coaxial cylindrical faces of different bodies/components.",
         {
-            "pin_face_point": PT3,
-            "pin_diameter": (N, "Cylindrical pin diameter in mm (`unit`)"),
+            "face1_point": (A, "Point [x,y,z] mm ON the first cylindrical face"),
+            "face2_point": (A, "Point [x,y,z] mm ON the second cylindrical face"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
-        ["pin_face_point", "pin_diameter"],
+        ["face1_point", "face2_point"],
     ),
     "add_spring_connector": (
         "add_spring_connector",
-        "Connect two entities with a linear or torsional elastic spring connector with specified stiffness.",
+        "Connect two parallel PLANAR faces with a spring of given TOTAL stiffness (values read back).",
         {
-            "point1": PT3,
-            "point2": PT3,
-            "stiffness_n_mm": (N, "Translational spring stiffness in N/mm (`unit`)"),
+            "point1": (A, "Point [x,y,z] mm ON the first planar face"),
+            "point2": (A, "Point [x,y,z] mm ON the second planar face"),
+            "stiffness_n_mm": (N, "Total normal stiffness in N/mm"),
+            "shear_stiffness_n_mm": (N, "Total tangential stiffness in N/mm (default = normal)"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["point1", "point2", "stiffness_n_mm"],
     ),
     "add_spot_weld_connector": (
         "add_spot_weld_connector",
-        "Connect overlapping sheet metal plates with a resistance spot weld nugget.",
+        "Spot weld between two parallel faces; weld locations are model VERTICES.",
         {
-            "point": PT3,
-            "spot_diameter": (N, "Resistance spot weld nugget diameter in mm (`unit`)"),
+            "face1_point": (A, "Point [x,y,z] mm ON the first face"),
+            "face2_point": (A, "Point [x,y,z] mm ON the second face"),
+            "location_points": (A, "Weld locations: [[x,y,z],...] mm, each ON a vertex"),
+            "spot_diameter": (N, "Spot weld diameter in mm"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
-        ["point", "spot_diameter"],
+        ["face1_point", "face2_point", "location_points", "spot_diameter"],
     ),
 
     # 5. Condizioni Termiche (Convezione, Irraggiamento)
@@ -185,8 +182,8 @@ TOOLS = {
         "Apply a surface film convection cooling/heating condition with film coefficient and ambient temperature.",
         {
             "face_point": PT3,
-            "convection_coefficient": (N, "Film heat transfer coefficient h in W/m2*K (`unit`)"),
-            "ambient_temperature_c": (N, "Bulk ambient fluid temperature in C (`unit`)"),
+            "convection_coefficient": (N, "Film coefficient h in W/(m2 K)"),
+            "ambient_temperature_c": (N, "Bulk ambient temperature in C (default 20)"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
         ["face_point", "convection_coefficient"],
@@ -197,7 +194,8 @@ TOOLS = {
         {
             "face_point": PT3,
             "emissivity": (N, "Surface optical emissivity factor ratio between 0.0 and 1.0 (default 0.9)"),
-            "ambient_temperature_c": (N, "Surrounding ambient radiation temperature in C (`unit`)"),
+            "ambient_temperature_c": (N, "Ambient temperature in C (default 20)"),
+            "view_factor": (N, "View factor 0..1 (default 1)"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
         ["face_point"],
@@ -207,7 +205,7 @@ TOOLS = {
         "Apply a thermal heat source power load in Watts on solid bodies or surfaces.",
         {
             "face_point": PT3,
-            "heat_power_w": (N, "Thermal heat source power in W (`unit`)"),
+            "heat_power_w": (N, "Total heat power in W"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
         ["face_point", "heat_power_w"],
@@ -216,27 +214,26 @@ TOOLS = {
     # 6. Contatti tra Corpi e Giunzioni
     "add_shrink_fit_contact": (
         "add_shrink_fit_contact",
-        "Apply interference fit contact between shaft and hub to compute contact stresses.",
+        "Shrink-fit contact between a hub hole and a shaft (cylindrical faces); the interference comes from the GEOMETRY and is reported.",
         {
-            "face_hub_point": PT3,
-            "face_shaft_point": PT3,
-            "radial_interference_mm": (N, "Radial diametral interference fit in mm (`unit`)"),
-            "friction_coefficient": (N, "Coulomb friction coefficient ratio factor (default 0.15)"),
+            "face_hub_point": (A, "Point [x,y,z] mm ON the hub (hole) cylindrical face"),
+            "face_shaft_point": (A, "Point [x,y,z] mm ON the shaft cylindrical face"),
+            "friction_coefficient": (N, "Friction coefficient ratio (optional)"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
-        ["face_hub_point", "face_shaft_point", "radial_interference_mm"],
+        ["face_hub_point", "face_shaft_point"],
     ),
     "add_virtual_wall_contact": (
         "add_virtual_wall_contact",
         "Apply a virtual wall boundary condition to simulate planar floor/wall contact without modeling the fixture.",
         {
             "face_point": PT3,
-            "friction_coefficient": (N, "Contact friction factor ratio (default 0.1)"),
-            "rigid_wall": (B, "Whether the virtual wall is rigid (default true)"),
+            "wall_plane": (S, "Wall plane: front|top|right or a reference plane name"),
+            "friction_coefficient": (N, "Friction coefficient ratio (optional; reported if SolidWorks does not accept it)"),
+            "rigid_wall": (B, "Rigid wall (default true) or flexible"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
-        ["face_point"],
+        ["face_point", "wall_plane"],
     ),
 
     # 7. Materiali e Proprietà di Calcolo
@@ -244,12 +241,11 @@ TOOLS = {
         "set_orthotropic_material",
         "Assign an orthotropic or composite material with direction-dependent stiffness moduli Ex, Ey, Ez.",
         {
-            "body_name": (S, "Name of the target body or component"),
-            "ex_mpa": (N, "Young modulus Ex along primary fiber axis in MPa (`unit`)"),
-            "ey_mpa": (N, "Young modulus Ey along transverse axis in MPa (`unit`)"),
-            "ez_mpa": (N, "Young modulus Ez along through-thickness axis in MPa (`unit`)"),
+            "body_name": (S, "Part of the simulation body name (default first body)"),
+            "ex_mpa": (N, "Young modulus Ex in MPa"),
+            "ey_mpa": (N, "Young modulus Ey in MPa"),
+            "ez_mpa": (N, "Young modulus Ez in MPa"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["ex_mpa", "ey_mpa", "ez_mpa"],
     ),
@@ -257,25 +253,22 @@ TOOLS = {
     # 8. Mesh Solida, Shell e Beam (1D/2D/3D)
     "define_shell_mesh": (
         "define_shell_mesh",
-        "Convert thin planar or curved faces into 2D shell elements with specified thickness.",
+        "Define a shell (thickness in mm) on faces of a surface/sheet body. SolidWorks refuses faces of a solid body: reported as error.",
         {
             "face_point": PT3,
-            "thickness": (N, "Shell membrane thickness in mm (`unit`)"),
-            "mid_plane": (B, "Position shell formulation on mid-surface (default true)"),
+            "thickness": (N, "Shell thickness in mm"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["face_point", "thickness"],
     ),
     "define_beam_mesh": (
         "define_beam_mesh",
-        "Model structural weldments or slender extrusions as 1D beam elements with cross-section properties.",
+        "Treat a body as a 1D beam (checked through the study beam count).",
         {
-            "body_name": (S, "Name of the solid body or structural member"),
-            "beam_type": (S, "Beam element formulation ('beam', 'truss') (default 'beam')"),
+            "body_name": (S, "Part of the simulation body name (default first body)"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
-        ["body_name"],
+        [],
     ),
     "get_mesh_quality_metrics": (
         "get_mesh_quality_metrics",
@@ -291,7 +284,7 @@ TOOLS = {
         "set_solver_options",
         "Configure FEA numerical solver type (FFEPlus, Direct Sparse) and large displacement formulation.",
         {
-            "solver_type": (S, "Numeric equation solver ('FFEPlus', 'DirectSparse', 'IntelDirectSparse') (default 'FFEPlus')"),
+            "solver_type": (S, "automatic | FFEPlus | DirectSparse | IntelDirectSparse (default FFEPlus); static studies only"),
             "large_displacement": (B, "Enable geometric non-linear large displacement formulation (default false)"),
             "study_name": (S, "Study name (or active study if omitted)"),
         },
@@ -327,31 +320,29 @@ TOOLS = {
     ),
     "get_reaction_forces_detail": (
         "get_reaction_forces_detail",
-        "Calculate total and component reaction forces (Fx, Fy, Fz, resultant) on restrained support faces.",
+        "Reaction force (Fx, Fy, Fz, resultant in N) on the nodes of the given restrained faces of a solved static study.",
         {
-            "face_point": PT3,
+            "face_point": (A, "Point [x,y,z] mm ON a restrained face, or a list of points"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["face_point"],
     ),
     "probe_simulation_results": (
         "probe_simulation_results",
-        "Probe local stress, displacement and strain field values at specific spatial 3D coordinates (X, Y, Z).",
+        "Von Mises stress (MPa) and displacements UX/UY/UZ/URES (mm) at the mesh node nearest to (x, y, z) of a solved static study.",
         {
-            "x": (N, "X coordinate location in mm (`unit`)"),
-            "y": (N, "Y coordinate location in mm (`unit`)"),
-            "z": (N, "Z coordinate location in mm (`unit`)"),
+            "x": (N, "X in mm"),
+            "y": (N, "Y in mm"),
+            "z": (N, "Z in mm"),
             "study_name": (S, "Study name (or active study if omitted)"),
-            "unit": UNIT,
         },
         ["x", "y", "z"],
     ),
     "export_simulation_report": (
         "export_simulation_report",
-        "Generate a formal engineering simulation calculation report in HTML or Word document format.",
+        "Write an HTML report of the study with data read from SolidWorks (type, loads, mesh, results if solved).",
         {
-            "filepath": (S, "Destination summary report file path (.html or .docx)"),
+            "filepath": (S, "Destination .html file path"),
             "study_name": (S, "Study name (or active study if omitted)"),
             "overwrite": (B, "Overwrite existing report if present (default false)"),
         },

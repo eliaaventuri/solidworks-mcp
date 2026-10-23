@@ -69,6 +69,16 @@ from solidworks_mcp import safety
 from solidworks_mcp.constants import SwErrors                                      # noqa: E402
 from solidworks_mcp.utils.units import UnitConverter                   # noqa: E402
 
+if not STUBBED:
+    # Con pywin32 vero (Windows) i tool chiamati qui si connettono da soli a un SolidWorks raggiungibile via COM
+    # (verificato il 2026-10-23: studi creati nell'istanza del worker di sviluppo) o tentano di avviarne uno.
+    # Il test offline non deve mai toccare SolidWorks: tutte le vie di connessione vengono chiuse.
+    from solidworks_mcp.automation import base as _base                # noqa: E402
+    _base.find_solidworks = lambda *a, **k: None
+    SolidWorksAutomation._try_connect_com = lambda self: False
+    SolidWorksAutomation._connect_dedicated = lambda self: self._result(False, "test offline: SolidWorks non usato",
+                                                                        SwErrors.swConnectionError)
+
 RESULTS = []
 EXPECTED_TOOLS = 554                       # 555 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
@@ -2441,16 +2451,19 @@ def test_simulation2_tools(tmp):
     ok_esp = sw.add_elastic_support([0, 0, 0], stiffness=100.0)
     ok_pds = sw.add_prescribed_displacement([0, 0, 0], displacement_mm=2.5)
     ok_cyl = sw.add_cylindrical_restraint([0, 0, 0], radial_free=False, axial_free=False, circumferential_free=True)
-    ok_cen = sw.add_centrifugal_load(angular_velocity_rad_s=100.0)
+    ok_cen = sw.add_centrifugal_load(angular_velocity_rad_s=100.0, axis_point=[0, 0, 0])
     ok_tsh = sw.add_thermal_shrinkage_load([0, 0, 0], delta_temperature_c=-50.0)
     record("simulation2: vincoli e carichi avanzati (supporto elastico, spostamento imposto, cilindrico, centrifugo, contrazione)",
            not ok_esp["success"] and not ok_pds["success"] and not ok_cyl["success"] and not ok_cen["success"] and not ok_tsh["success"])
+    ok_pd_msg = sw.add_prescribed_displacement([0, 0, 0], displacement_mm=1.0)
+    record("simulation2: spostamento imposto non nullo dichiarato come limite (nessun successo finto)",
+           not ok_pd_msg["success"] and "non realizzabile" in ok_pd_msg["message"])
 
     # 3. Connettori e condizioni termiche
-    ok_blt = sw.add_bolt_connector([0, 0, 0], bolt_diameter=10.0, preload_force_n=5000.0)
-    ok_pin = sw.add_pin_connector([0, 0, 0], pin_diameter=12.0)
+    ok_blt = sw.add_bolt_connector([0, 0, 0], [0, 0, 10], bolt_diameter=10.0, preload_force_n=5000.0)
+    ok_pin = sw.add_pin_connector([0, 0, 0], [0, 0, 10])
     ok_spg = sw.add_spring_connector([0, 0, 0], [10, 0, 0], stiffness_n_mm=250.0)
-    ok_wld = sw.add_spot_weld_connector([0, 0, 0], spot_diameter=6.0)
+    ok_wld = sw.add_spot_weld_connector([0, 0, 0], [0, 0, 5], [[0, 0, 0]], spot_diameter=6.0)
     ok_cnv = sw.add_convection_load([0, 0, 0], convection_coefficient=25.0)
     ok_rad = sw.add_radiation_load([0, 0, 0], emissivity=0.85)
     ok_hpw = sw.add_heat_power_load([0, 0, 0], heat_power_w=150.0)
@@ -2458,11 +2471,11 @@ def test_simulation2_tools(tmp):
            not ok_blt["success"] and not ok_pin["success"] and not ok_spg["success"] and not ok_wld["success"] and not ok_cnv["success"] and not ok_rad["success"] and not ok_hpw["success"])
 
     # 4. Contatti, materiali e mesh
-    ok_shk = sw.add_shrink_fit_contact([0, 0, 0], [0, 0, 0], radial_interference_mm=0.02)
-    ok_vwl = sw.add_virtual_wall_contact([0, 0, 0], friction_coefficient=0.15)
+    ok_shk = sw.add_shrink_fit_contact([0, 0, 0], [0, 0, 0], friction_coefficient=0.15)
+    ok_vwl = sw.add_virtual_wall_contact([0, 0, 0], "top", friction_coefficient=0.15)
     ok_ort = sw.set_orthotropic_material(ex_mpa=120000.0, ey_mpa=10000.0, ez_mpa=10000.0)
     ok_shl = sw.define_shell_mesh([0, 0, 0], thickness=2.0)
-    ok_bem = sw.define_beam_mesh("SolidBody1", "beam")
+    ok_bem = sw.define_beam_mesh("SolidBody1")
     ok_mqm = sw.get_mesh_quality_metrics()
     ok_slv = sw.set_solver_options("FFEPlus", large_displacement=False)
     record("simulation2: contatti speciali, materiali ortotropi, mesh 1D/2D, qualita' e solutore",
