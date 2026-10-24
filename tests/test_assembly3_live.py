@@ -246,6 +246,62 @@ async def run():
                 record("add_cam_mate: rifiutato perche' non implementato", (not ok_cam) and "non e' implementato" in text_cam,
                        text_cam[:80])
 
+                # 9. Esploso: edit_explode_step (distanza e verso riletti da SolidWorks, posa esplosa del perno misurata)
+                await fresh_pair()
+                ok_es, text_es, _ = await c.call("add_explode_step", components=["asm3_pin-1"], direction="x", distance=30)
+                record("add_explode_step (prep): perno 30 mm lungo x", ok_es, "" if ok_es else text_es[:60])
+                ok_ed, text_ed, d_ed = await c.call("edit_explode_step", step_index=0, distance=75)
+                pos = ((d_ed or {}).get("exploded_positions") or {}).get("asm3_pin-1") or {}
+                dx = pos["after_mm"][0] - pos["before_mm"][0] if pos.get("after_mm") and pos.get("before_mm") else None
+                record("edit_explode_step: 30 -> 75 mm, il perno esploso avanza di 45 mm in x",
+                       ok_ed and dx is not None and abs(dx - 45.0) < 1e-3, f"dx {dx}" if ok_ed else text_ed[:80])
+                ok_ev, text_ev, d_ev = await c.call("edit_explode_step", step_index=0, reverse=True)
+                pos = ((d_ev or {}).get("exploded_positions") or {}).get("asm3_pin-1") or {}
+                xb, xa = (pos.get("before_mm") or [None])[0], (pos.get("after_mm") or [None])[0]
+                record("edit_explode_step: verso invertito, x esploso del perno da +75 a -75 mm (inserito a x=0)",
+                       ok_ev and xb is not None and abs(xb - 75.0) < 1e-3 and abs(xa + 75.0) < 1e-3, f"{xb} -> {xa}")
+                ok_lv, _, d_lv = await c.call("list_exploded_views")
+                st0 = ((d_lv or {}).get("steps") or [{}])[0]
+                record("list_exploded_views rilegge 75 mm e verso invertito", ok_lv and st0.get("distance_mm") == 75.0 and st0.get("reverse") is True,
+                       f"{st0.get('distance_mm')} mm, reverse {st0.get('reverse')}")
+                ok_bad, text_bad, _ = await c.call("edit_explode_step", step_index=5, distance=10)
+                record("edit_explode_step: indice inesistente rifiutato", not ok_bad, text_bad[:80])
+                ok_z, text_z, _ = await c.call("edit_explode_step", step_index=0, distance=0)
+                record("edit_explode_step: distanza 0 rifiutata", not ok_z, text_z[:80])
+
+                # 10. check_mate_redundancy: perno coassiale (inserito a 0,0,0), concentrico + coincidente + coincidente uguale.
+                # Attesi (misurati sopprimendo un accoppiamento alla volta): i due coincidenti ridondanti, il concentrico no;
+                # perno con 1 grado di liberta' (rotazione attorno all'asse), 3 senza il concentrico.
+                await c.call("close_document", discard=True)
+                await c.call("create_new_assembly")
+                await c.call("insert_component", file_path=str(PART_BOX), x=0, y=0, z=0, fixed=True)
+                await c.call("insert_component", file_path=str(PART_PIN), x=0, y=0, z=0, fixed=False)
+                F_CYL0 = {"component": "asm3_pin-1", "face": pt_on(mp, ax, mp[ax], 10, 0)}
+                F_PEND0 = {"component": "asm3_pin-1", "face": pt_on(mp, ax, bb_pin["min"][ax], 0, 0)}
+                F_PEND1 = {"component": "asm3_pin-1", "face": pt_on(mp, ax, bmax[ax], 0, 0)}   # dopo il coincidente
+                _, _, d_m1 = await c.call("add_mate", mate_type="concentric", entity1=F_HOLE_B, entity2=F_CYL0)
+                _, _, d_m2 = await c.call("add_mate", mate_type="coincident", entity1=F_TOP_B, entity2=F_PEND0)
+                ok_m3, text_m3, d_m3 = await c.call("add_mate", mate_type="coincident", entity1=F_TOP_B, entity2=F_PEND1)
+                record("add_mate (prep): coincidente ripetuto accettato da SolidWorks senza errori", ok_m3, text_m3[:80])
+                n_conc, n_c1, n_c2 = ((d or {}).get("name") for d in (d_m1, d_m2, d_m3))
+                ok_rd, text_rd, d_rd = await c.call("check_mate_redundancy")
+                red = set((d_rd or {}).get("redundant_mates") or [])
+                record("check_mate_redundancy: ridondanti = i due coincidenti, non il concentrico",
+                       ok_rd and red == {n_c1, n_c2} and n_conc not in red, f"{sorted(red)} (attesi {n_c1}, {n_c2})" if ok_rd else text_rd[:80])
+                gained = {t["name"]: t["dof_gained_when_suppressed"] for t in (d_rd or {}).get("tested", [])}
+                record("check_mate_redundancy: perno 1 grado di liberta', 3 senza il concentrico",
+                       ((d_rd or {}).get("base_dof") or {}).get("asm3_pin-1") == 1 and gained.get(n_conc, {}).get("asm3_pin-1") == [1, 3],
+                       f"base {((d_rd or {}).get('base_dof') or {})}, senza concentrico {gained.get(n_conc)}")
+                record("check_mate_redundancy: pose e accoppiamenti ripristinati",
+                       (d_rd or {}).get("poses_restored") is True and not (d_rd or {}).get("still_suppressed"),
+                       f"spostati {(d_rd or {}).get('moved_mm')}")
+                ok_ds, text_ds, _ = await c.call("add_mate", mate_type="distance", entity1=F_TOP_B, entity2=F_PEND1, distance=5)
+                record("add_mate: distanza 5 mm in conflitto con il coincidente segnalata in errore", not ok_ds, text_ds[:90])
+                ok_r2, text_r2, d_r2 = await c.call("check_mate_redundancy")
+                conf = (d_r2 or {}).get("conflicting_mates") or []
+                record("check_mate_redundancy: 1 accoppiamento in conflitto (distanza, codice 47)",
+                       ok_r2 and len(conf) == 1 and conf[0].get("type") == "distance" and conf[0].get("error_code") == 47, str(conf)[:100])
+
                 # Chiudi documento
                 await c.call("close_document", discard=True)
 

@@ -1048,12 +1048,22 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
         return out
 
     def _as_feat_error(self, feat) -> int:
+        return self._as_feat_error2(feat)[0]
+
+    def _as_feat_error2(self, feat):
+        """-> (codice, e' solo un avviso). Sulle feature d'accoppiamento GetErrorCode2 arriva come METODO (vuole il flag per
+        riferimento): letto come proprieta' dava sempre 0 e nessun accoppiamento risultava in errore (trovato il 2026-10-24:
+        distanza in conflitto con un coincidente = codice 47, i coincidenti coinvolti = 1 con avviso)."""
         try:
-            code = feat.GetErrorCode2
-            code = code[0] if isinstance(code, tuple) else code
-            return int(code or 0)
+            m = feat.GetErrorCode2
+            if callable(m):
+                bf = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, False)
+                return int(m(bf) or 0), bool(bf.value)
+            if isinstance(m, tuple):
+                return int(m[0] or 0), bool(m[1]) if len(m) > 1 else False
+            return int(m or 0), False
         except Exception:
-            return 0
+            return 0, False
 
     def _as_mate_dim(self, doc, feat, idx: int = 1):
         name = str(self._com(feat, "Name"))
@@ -1113,9 +1123,11 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             info["suppressed"] = bool(self._com(feat, "IsSuppressed"))
         except Exception:
             pass
-        code = self._as_feat_error(feat)
+        code, warn = self._as_feat_error2(feat)
         info["error_code"] = code
-        info["in_error"] = code != 0
+        info["in_error"] = code != 0 and not warn
+        if code and warn:
+            info["warning_code"] = code       # es. coincidente coinvolto in un conflitto: avviso, l'accoppiamento resta valido
         return info
 
     def add_mate(self, mate_type: str, entity1, entity2, entity3=None, align: str = "closest", flip: bool = False,

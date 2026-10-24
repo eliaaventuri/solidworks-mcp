@@ -28,8 +28,6 @@ NOT_IMPLEMENTED = {
     "create_smart_component": _WHY_NO_COM,
     "promote_subassembly_component": _WHY_NO_COM,
     "demote_subassembly_component": _WHY_NO_COM,
-    "edit_explode_step": _WHY_NO_COM + " (la distanza del passo non cambiava)",
-    "check_mate_redundancy": "gli accoppiamenti ridondanti erano sempre 0, senza analisi",
     "insert_new_virtual_part": "InsertNewVirtualPart risponde 6 senza componente creato (2 prove dal vivo, con e senza piano)",
     "save_virtual_component_external": "IComponent2.SaveVirtualComponent da' 'Errore interno dell'applicazione' (61704) dal vivo",
     "set_envelope_component": "IComponent2 espone solo IsEnvelope in sola lettura: nessun modo di impostare la busta",

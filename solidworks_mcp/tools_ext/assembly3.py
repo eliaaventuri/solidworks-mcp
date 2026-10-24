@@ -211,13 +211,14 @@ TOOLS = {
     ),
     "edit_explode_step": (
         "edit_explode_step",
-        "Edit displacement distance, direction vector, or components of an existing exploded step in an exploded view.",
+        "Edit the distance and/or the direction sense of an existing translation step of the exploded view of the active "
+        "configuration. The new values are read back from SolidWorks and the exploded poses of the step's components are "
+        "returned. To change the direction axis or the components, delete the step (delete_explode_step) and add a new one.",
         {
-            "step_index": (N, "0-based index of the explode step (default 0)"),
-            "distance": (N, "New explode distance in mm (`unit`, optional)"),
-            "direction": (A, "New explode direction vector [dx, dy, dz] (optional)"),
-            "reverse": (B, "Reverse explode direction (optional)"),
-            "view_name": (S, "Name of the exploded view configuration (optional, defaults to active)"),
+            "step_index": (N, "0-based index of the explode step, as listed by list_exploded_views (default 0)"),
+            "step": (S, "Name of the explode step (e.g. 'Explode Step1'); overrides step_index"),
+            "distance": (N, "New explode distance in mm (`unit`), > 0"),
+            "reverse": (B, "Reverse the translation sense of the step"),
             "unit": UNIT,
         },
         [],
@@ -271,8 +272,14 @@ TOOLS = {
     ),
     "check_mate_redundancy": (
         "check_mate_redundancy",
-        "Analyze assembly mates to detect redundant, over-constraining, or conflicting constraints.",
-        {},
+        "Analyze the top-level mates of the active assembly. Conflicting / broken mates come from SolidWorks error codes. "
+        "Redundant mates (consistent duplicates that SolidWorks accepts silently) are found by measurement: each active mate "
+        "is suppressed in turn and the measured degrees of freedom of every component are compared; if nothing gains freedom "
+        "the mate is redundant. The mates are restored at the end and the result says whether the poses were restored.",
+        {
+            "max_mates": (N, "Maximum number of mates tested for redundancy (default 30; each test moves the components "
+                             "slightly and restores them)"),
+        },
         [],
     ),
     "create_speedpak": (

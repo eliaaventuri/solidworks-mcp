@@ -703,11 +703,14 @@ async def c5_accoppiamenti_avanzati(c):
            f"deriva {drift:.3f} mm con dx=20; traslazioni libere {d.get('free_translation_directions')}, rotazioni libere {d.get('free_rotation_axes')}")
     # il solutore completo (accoppiamento d'angolo che chiede 50 gradi) non ruota il componente bloccato
     _, _, tf2 = await pos_of(c, "cx_perno-1")
-    ok_a, _, _ = await c.call("add_mate", mate_type="angle", entity1={"component": "cx_perno-1", "plane": "Top"}, entity2="Top", angle=50)
+    # dal 2026-10-24 il codice d'errore degli accoppiamenti si legge davvero: l'angolo in conflitto col blocco e' segnalato
+    ok_a, text_a, _ = await c.call("add_mate", mate_type="angle", entity1={"component": "cx_perno-1", "plane": "Top"}, entity2="Top", angle=50)
     _, _, tf3 = await pos_of(c, "cx_perno-1")
     dmax = max(abs(a - b) for a, b in zip(tf2, tf3))
-    record("blocco: un angolo di 50 gradi imposto dal solutore NON ruota il componente bloccato (C5)", ok_a and dmax < 1e-9,
+    record("blocco: un angolo di 50 gradi imposto dal solutore NON ruota il componente bloccato (C5)", dmax < 1e-9,
            f"variazione massima della matrice {dmax:.2e}")
+    record("blocco: l'angolo in conflitto con il blocco e' segnalato in errore da add_mate", not ok_a and "ERRORE" in text_a.upper(),
+           text_a[:90])
     await c.call("close_document", discard=True)
     # ---------------------------------------------------------------- ingranaggio
     await need(c, "create_new_assembly", "ingranaggio")

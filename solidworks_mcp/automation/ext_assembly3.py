@@ -629,17 +629,66 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("dissolve_component_pattern", e)
 
-    def edit_explode_step(self, step_index: int = 0, distance: float = None, direction: list = None, reverse: bool = None, view_name: str = None, unit: str = None) -> Dict:
-        """Modifica i parametri di un passo di esplosione esistente (distanza, direzione o verso)."""
+    def edit_explode_step(self, step_index: int = 0, step: str = None, distance: float = None, reverse: bool = None,
+                          unit: str = None) -> Dict:
+        """Modifica distanza e/o verso di un passo dell'esploso della configurazione attiva. IExplodeStep.ExplodeDistance e
+        ReverseTranslationDirection sono scrivibili e valgono subito (misurato 2026-10-24: 30 -> 75 mm, poi verso invertito,
+        posa esplosa x 30 -> 75 -> -75 mm); dopo serve la commutazione esploso/compresso (`_ex_refresh`) per rileggere le pose."""
         try:
             doc, err = self._asm()
             if err:
                 return err
-            dist_val = self._mmu(distance, unit) if distance is not None else None
-            return self._result(
-                True, f"Passo di esplosione {step_index} aggiornato (distanza: {distance} mm).",
-                SwErrors.swSuccess, {"step_index": step_index, "distance": distance, "distance_m": dist_val, "direction": direction, "reverse": reverse, "view": view_name}
-            )
+            if distance is None and reverse is None:
+                return self._result(False, "edit_explode_step: indica distance e/o reverse", SwErrors.swInvalidInput)
+            cfg = self._ex_config(doc)
+            steps = self._ex_steps(doc)
+            if not steps:
+                return self._result(False, "edit_explode_step: la configurazione attiva non ha passi di esplosione",
+                                    SwErrors.swInvalidInput)
+            if step:
+                idx = next((s["index"] for s in steps if s["name"].lower() == str(step).lower()), None)
+                if idx is None:
+                    return self._result(False, f"edit_explode_step: passo '{step}' non trovato; passi: {[s['name'] for s in steps]}",
+                                        SwErrors.swSelectionError)
+            else:
+                idx = int(step_index or 0)
+                if not 0 <= idx < len(steps):
+                    return self._result(False, f"edit_explode_step: step_index {idx} fuori dai {len(steps)} passi", SwErrors.swInvalidInput)
+            before = steps[idx]
+            if reverse is not None and before.get("type") not in ("translate", "?"):
+                return self._result(False, f"edit_explode_step: il verso si cambia solo nei passi di traslazione (questo e' {before.get('type')})",
+                                    SwErrors.swInvalidInput)
+            want_d = None
+            if distance is not None:
+                want_d = abs(self._mmu(distance, unit))
+                if want_d <= 0:
+                    return self._result(False, "edit_explode_step: distance deve essere > 0", SwErrors.swInvalidInput)
+            was_exploded = bool(self._com(doc, "IsExploded"))
+            self._ex_refresh(doc)
+            poses0 = self._ex_poses(doc)
+            st = cfg.GetExplodeStep(idx)
+            if want_d is not None:
+                st.ExplodeDistance = want_d
+            if reverse is not None:
+                st.ReverseTranslationDirection = bool(reverse)
+            self._ex_refresh(doc)
+            after = self._ex_steps(doc)[idx]
+            poses1 = self._ex_poses(doc)
+            if not was_exploded:
+                self._as_collapse(doc)
+            bad = []
+            if want_d is not None and abs(after["distance_mm"] - want_d * 1000) > 1e-3:
+                bad.append(f"distanza riletta {after['distance_mm']} mm invece di {round(want_d * 1000, 4)}")
+            if reverse is not None and after["reverse"] != bool(reverse):
+                bad.append(f"verso riletto {after['reverse']}")
+            moved = {n: {"before_mm": poses0.get(n, {}).get("position_mm"), "after_mm": poses1.get(n, {}).get("position_mm")}
+                     for n in after["components"]}
+            data = {"step": after["name"], "index": idx, "before": before, "after": after, "exploded_positions": moved}
+            if bad:
+                return self._result(False, "edit_explode_step: SolidWorks non ha applicato la modifica: " + "; ".join(bad),
+                                    SwErrors.swFeatureError, data)
+            return self._result(True, f"Passo '{after['name']}': distanza {before['distance_mm']} -> {after['distance_mm']} mm, "
+                                      f"verso invertito {before['reverse']} -> {after['reverse']}", SwErrors.swSuccess, data)
         except Exception as e:
             return self._as_fail("edit_explode_step", e)
 
@@ -762,23 +811,80 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("auto_repair_mates", e)
 
-    def check_mate_redundancy(self) -> Dict:
-        """Analizza l'assieme per rilevare vincoli iperstatici ridondanti o conflitti."""
+    def check_mate_redundancy(self, max_mates: int = 30) -> Dict:
+        """Accoppiamenti in conflitto (codici d'errore di SolidWorks) e RIDONDANTI (misurati). SolidWorks accetta in silenzio un
+        accoppiamento ridondante ma coerente (secondo coincidente uguale, parallelo fra facce gia' coincidenti, secondo
+        concentrico: codice 0, misurato 2026-10-24); una distanza in conflitto da' invece codice 47 e avvisi sui coincidenti.
+        Ridondanza: si sopprime un accoppiamento alla volta e si misurano i gradi di liberta' di tutti i componenti
+        (`_as_dof_snapshot`, catene comprese); se nessuno ne guadagna, l'accoppiamento e' ridondante. Poi lo si riattiva."""
         try:
             doc, err = self._asm()
             if err:
                 return err
-            mates = self._as_mate_features(doc)
-            redundant = []
-            broken = []
-            for m in mates:
-                info = self._as_mate_info(doc, m)
-                if info.get("in_error"):
-                    broken.append(info.get("name"))
-            return self._result(
-                True, f"Analisi accoppiamenti completata: {len(broken)} vincoli con errori, {len(redundant)} ridondanti su {len(mates)} totali.",
-                SwErrors.swSuccess, {"total_mates": len(mates), "broken_mates": broken, "redundant_mates": redundant}
-            )
+            self._as_collapse(doc)
+            try:
+                doc.ForceRebuild2(False)
+            except Exception:
+                pass
+            infos = [self._as_mate_info(doc, m) for m in self._as_mate_features(doc)]
+            conflicting = [{"name": i["name"], "type": i.get("type"), "error_code": i["error_code"]} for i in infos if i.get("in_error")]
+            warned = [{"name": i["name"], "type": i.get("type"), "warning_code": i["warning_code"]} for i in infos if i.get("warning_code")]
+            active = [i for i in infos if not i.get("suppressed") and not i.get("in_error")]
+            limit = max(0, int(max_mates if max_mates is not None else 30))
+            comps = {str(c.Name2): c for c in self._as_top_components(doc, True)}
+            pose0 = {n: self._as_pose(c)[1] for n, c in comps.items()}
+            base = self._as_dof_snapshot(doc)
+            tested, redundant, problems = [], [], []
+
+            def set_supp(name, suppress):
+                f = self._as_mate_by_name(doc, name)
+                if f is None:
+                    return False
+                doc.ClearSelection2(True)
+                f.Select2(False, 0)
+                self._com(doc, "EditSuppress2" if suppress else "EditUnsuppress2")
+                doc.ClearSelection2(True)
+                try:
+                    doc.ForceRebuild2(False)
+                except Exception:
+                    pass
+                f = self._as_mate_by_name(doc, name)
+                return f is not None and bool(self._com(f, "IsSuppressed")) == bool(suppress)
+
+            for i in active[:limit]:
+                name = i["name"]
+                if not set_supp(name, True):
+                    problems.append(f"{name}: soppressione non riuscita")
+                    set_supp(name, False)
+                    continue
+                snap = self._as_dof_snapshot(doc)
+                if not set_supp(name, False):
+                    problems.append(f"{name}: NON riattivato")
+                gained = {n: [base[n]["dof_count"], s["dof_count"]] for n, s in snap.items()
+                          if n in base and s["dof_count"] > base[n]["dof_count"]}
+                tested.append({"name": name, "type": i.get("type"), "components": i.get("components"),
+                               "dof_gained_when_suppressed": gained})
+                if not gained:
+                    redundant.append(name)
+            moved = {}
+            for n, c in comps.items():
+                t1 = self._as_pose(c)[1]
+                d = sum((a - b) ** 2 for a, b in zip(t1, pose0[n])) ** 0.5 * 1000
+                if d > 1e-3:
+                    moved[n] = round(d, 4)
+            final = {i["name"]: i for i in (self._as_mate_info(doc, m) for m in self._as_mate_features(doc))}
+            still_suppressed = [n for n in (t["name"] for t in tested) if final.get(n, {}).get("suppressed")]
+            data = {"total_mates": len(infos), "tested": tested, "redundant_mates": redundant,
+                    "conflicting_mates": conflicting, "warnings": warned,
+                    "not_tested": [i["name"] for i in active[limit:]], "base_dof": {n: v["dof_count"] for n, v in base.items()},
+                    "poses_restored": not moved, "moved_mm": moved, "still_suppressed": still_suppressed, "problems": problems}
+            if still_suppressed or problems:
+                return self._result(False, f"check_mate_redundancy: stato non ripristinato ({problems or still_suppressed})",
+                                    SwErrors.swFeatureError, data)
+            return self._result(True, f"{len(infos)} accoppiamenti: {len(redundant)} ridondanti {redundant}, {len(conflicting)} in "
+                                      f"conflitto, {len(warned)} con avviso; {len(tested)} provati"
+                                      + ("" if not moved else f"; ATTENZIONE: componenti spostati {moved} mm"),
+                                SwErrors.swSuccess, data)
         except Exception as e:
             return self._as_fail("check_mate_redundancy", e)
 
