@@ -508,13 +508,25 @@ async def run(names):
     return True
 
 
+async def run_each(names):
+    """Una istanza dedicata NUOVA per ogni sezione. Dal 2026-10-24 (Windows 11 26H2, SW 2026 SP4.1 Student) Simulation si
+    degrada nella stessa sessione: dopo gli studi con contatti locali di E1 i carichi remoti di E4 finiscono con
+    "<studio> : Non riuscita" (solutore fermo al caricamento dei dati, 0 DOF), e uno studio con contatto locale dopo altri tre
+    studi si e' bloccato senza messaggi. Ogni sezione da sola passa: il test misura i tool, non la tenuta di Simulation."""
+    for n in names:
+        print(f"\n######## sezione {n}: istanza dedicata nuova")
+        if not await run([n]):
+            return False
+    return True
+
+
 if __name__ == "__main__":
     names = [a.upper() for a in sys.argv[1:]] or list(SECTIONS)
     bad = [n for n in names if n not in SECTIONS]
     if bad:
         print(f"Sezioni sconosciute: {bad}. Disponibili: {list(SECTIONS)}")
         sys.exit(2)
-    done = asyncio.run(run(names))
+    done = asyncio.run(run_each(names))
     print("\n==== RIEPILOGO ====")
     for tool, res, note in RESULTS:
         print(f"{res:5} {tool:90} {note}"[:260])

@@ -28,6 +28,9 @@ _PLOT_PREFIXES = {
     "strain": ("strain", "deformazione"),
 }
 
+# messaggio di Simulation a fine analisi non riuscita: "<studio> : Non riuscita" (it), "<studio> : Failed" (en)
+SIM_FAILED_WORDS = ("non riuscit", "failed")
+
 # testo del cartiglio quando una proprieta' manca: "ERRORE:<nome>" (it), "ERROR:<nome>" (en)
 TITLE_BLOCK_ERROR_RE = re.compile(r"(?:ERRORE|ERROR):([A-Za-z0-9_]+)")
 

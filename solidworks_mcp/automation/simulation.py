@@ -56,7 +56,7 @@ import pythoncom
 from win32com.client import VARIANT
 
 from ..constants import SwErrors
-from ..utils.sw_lang import plot_candidates
+from ..utils.sw_lang import plot_candidates, SIM_FAILED_WORDS
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,48 @@ def _br():
 
 def _nullv():
     return VARIANT(pythoncom.VT_DISPATCH, None)
+
+
+def _dialog_texts(pid: int, press_ok: bool = False) -> List[str]:
+    """Testi delle finestre di dialogo (#32770) del processo `pid`, anche nascoste: un messaggio modale dell'istanza nascosta
+    blocca RunAnalysis senza che nessuno lo veda (es. "Simulation Student Edition | OK | <studio> : Non riuscita", 2026-10-24).
+    press_ok: preme il pulsante OK delle finestre che ne hanno uno (solo per l'istanza dedicata)."""
+    try:
+        import win32gui
+        import win32con
+        import win32process
+    except ImportError:
+        return []
+    out: List[str] = []
+
+    def child(h, parts):
+        try:
+            t = win32gui.GetWindowText(h)
+            cls = win32gui.GetClassName(h)
+            if t and cls in ("Static", "Button", "Edit") and t not in parts:
+                parts.append(t)
+            if press_ok and cls == "Button" and t.replace("&", "").strip().upper() == "OK":
+                win32gui.PostMessage(h, win32con.BM_CLICK, 0, 0)
+        except Exception:
+            pass
+        return True
+
+    def top(h, _):
+        try:
+            if win32process.GetWindowThreadProcessId(h)[1] != pid or win32gui.GetClassName(h) != "#32770":
+                return True
+            parts = [win32gui.GetWindowText(h)]
+            win32gui.EnumChildWindows(h, child, parts)
+            out.append(" | ".join(p for p in parts if p)[:400])
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(top, None)
+    except Exception:
+        pass
+    return out
 
 
 class SimulationOperations:
@@ -308,8 +350,11 @@ class SimulationOperations:
                         bo.BucklingModes = int(modes)
                     data["modes"] = int(bo.BucklingModes)
                 elif t == 3:
-                    st.ThermalStudyOptions.SolutionType = 1        # stazionario (0 = transitorio)
-                    data["solution"] = "steady" if int(st.ThermalStudyOptions.SolutionType) == 1 else "transient"
+                    # oggetto tenuto in una variabile: scrivere su quello temporaneo e rileggerlo da un secondo
+                    # temporaneo faceva chiudere SolidWorks (heap danneggiato in ntdll, 0xc0000374, 2026-10-24)
+                    to = st.ThermalStudyOptions
+                    to.SolutionType = 1        # stazionario (0 = transitorio)
+                    data["solution"] = "steady" if int(to.SolutionType) == 1 else "transient"
             except Exception as ex:
                 data["options_error"] = str(ex)
             n = int(sm.StudyCount)
@@ -1063,14 +1108,22 @@ class SimulationOperations:
                 return err
             if int(st.Mesh.MeshState) != 1:
                 return self._result(False, "Mesh assente o non aggiornata: usa create_simulation_mesh", SwErrors.swInvalidInput)
-            flag = {"done": False, "killed": False}
+            flag = {"done": False, "killed": False, "dialogs": []}
             pid = self._dedicated_pid
 
             def watchdog():
-                end = time.time() + float(timeout)
+                t_start = time.time()
+                end = t_start + float(timeout)
+                next_scan = t_start + 20
                 while time.time() < end:
                     if flag["done"]:
                         return
+                    if pid and time.time() >= next_scan:
+                        next_scan = time.time() + 10
+                        for d in _dialog_texts(pid, press_ok=self.is_dedicated_mode()):
+                            if d not in flag["dialogs"]:
+                                flag["dialogs"].append(d)
+                                logger.warning(f"run_simulation: finestra aperta da SolidWorks durante l'analisi: {d}")
                     time.sleep(0.5)
                 if not flag["done"] and pid and self.is_dedicated_mode():
                     import subprocess
@@ -1086,14 +1139,20 @@ class SimulationOperations:
                 if flag["killed"]:
                     self._connected = False
                     self._sw_app = None
-                    return self._result(False, f"Timeout di {timeout} s: istanza dedicata (PID {pid}) terminata", SwErrors.swUnknownError)
+                    seen = f"; finestre aperte da SolidWorks: {flag['dialogs']}" if flag["dialogs"] else ""
+                    return self._result(False, f"Timeout di {timeout} s: istanza dedicata (PID {pid}) terminata{seen}",
+                                        SwErrors.swUnknownError, {"dialogs": flag["dialogs"]})
                 raise e
             flag["done"] = True
             dt = time.time() - t0
             exceeded = dt > float(timeout)
+            seen = f"; messaggi di SolidWorks chiusi con OK: {flag['dialogs']}" if flag["dialogs"] else ""
             if rc != 0:
-                return self._result(False, f"Analisi fallita: errore {rc} ({_ERR_RUN.get(rc, '?')})", SwErrors.swUnknownError,
-                                    {"rc": rc})
+                return self._result(False, f"Analisi fallita: errore {rc} ({_ERR_RUN.get(rc, '?')}){seen}", SwErrors.swUnknownError,
+                                    {"rc": rc, "dialogs": flag["dialogs"]})
+            if any(w in d.lower() for d in flag["dialogs"] for w in SIM_FAILED_WORDS):
+                return self._result(False, f"Analisi fallita (rc {rc}){seen}", SwErrors.swUnknownError,
+                                    {"rc": rc, "dialogs": flag["dialogs"]})
             return self._result(True, f"Analisi completata in {dt:.1f} s", SwErrors.swSuccess,
                                 {"seconds": round(dt, 2), "timeout_exceeded": exceeded,
                                  "steps": int(st.Results.GetMaximumAvailableSteps)})
