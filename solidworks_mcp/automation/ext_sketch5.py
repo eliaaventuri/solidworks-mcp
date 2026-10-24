@@ -6,6 +6,8 @@ relazioni, sostituzione ed export.
 import math
 import logging
 import traceback
+
+import pythoncom
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -43,21 +45,13 @@ class Sketch5Operations:
         except Exception:
             return []
 
-    def _safe_seg_id(self, s) -> str:
-        try:
-            return str(s.GetName())
-        except Exception:
-            try:
-                return str(s.GetId()[0])
-            except Exception:
-                return "UnknownSeg"
-
     def _find_spline(self, doc, spline_id: str = None):
         segs = self._s5_segs(doc)
         if spline_id:
             for s in segs:
                 if self._safe_seg_id(s) == spline_id:
                     return s
+            return None
         for s in reversed(segs):
             try:
                 if int(s.GetType) == 3:  # swSketchSPLINE
@@ -78,12 +72,12 @@ class Sketch5Operations:
 
             sp = self._find_spline(doc, spline_entity)
             if sp is None:
-                return self._result(False, "Nessuna spline trovata nello schizzo.", SwErrors.swSketchError)
+                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
 
             try:
                 sp.RelaxSpline()
             except Exception as ex:
-                logger.warning(f"RelaxSpline call error: {ex}")
+                return self._result(False, f"relax_sketch_spline: rilassamento non riuscito: {ex}", SwErrors.swSketchError)
 
             spline_name = self._safe_seg_id(sp)
             msg = f"Spline '{spline_name}' rilassata con successo."
@@ -104,13 +98,13 @@ class Sketch5Operations:
 
             sp = self._find_spline(doc, spline_entity)
             if sp is None:
-                return self._result(False, "Nessuna spline trovata nello schizzo.", SwErrors.swSketchError)
+                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
 
             tol_m = self._mmu(tolerance or 0.1, unit)
             try:
                 sp.Simplify(float(tol_m))
             except Exception as ex:
-                logger.warning(f"Simplify call error: {ex}")
+                return self._result(False, f"simplify_sketch_spline: semplificazione non riuscita: {ex}", SwErrors.swSketchError)
 
             spline_name = self._safe_seg_id(sp)
             u = unit or "mm"
@@ -134,24 +128,25 @@ class Sketch5Operations:
 
             sp = self._find_spline(doc, spline_entity)
             if sp is None:
-                return self._result(False, "Nessuna spline trovata nello schizzo.", SwErrors.swSketchError)
+                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
 
             xm = self._mmu(x, unit)
             ym = self._mmu(y, unit)
             zm = self._mmu(z or 0.0, unit)
 
-            ok = False
             try:
                 ok = bool(sp.InsertPoint(float(xm), float(ym), float(zm)))
             except Exception as ex:
-                logger.warning(f"InsertPoint call error: {ex}")
+                return self._result(False, f"insert_spline_point: inserimento punto non riuscito: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "insert_spline_point: SolidWorks non ha inserito il punto nella spline.", SwErrors.swSketchError)
 
             spline_name = self._safe_seg_id(sp)
             msg = f"Punto inserito nella spline '{spline_name}' alle coordinate ({x}, {y}, {z})."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "spline_entity": spline_name,
                 "point": [x, y, z],
-                "inserted": ok
+                "inserted": True
             })
         except Exception as e:
             logger.error(f"insert_spline_point: {e} - {traceback.format_exc()}")
@@ -166,31 +161,31 @@ class Sketch5Operations:
 
             sp = self._find_spline(doc, spline_entity)
             if sp is None:
-                return self._result(False, "Nessuna spline trovata nello schizzo.", SwErrors.swSketchError)
+                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
 
             pts = ()
             try:
-                pts = sp.GetPoints2() or sp.GetPoints() or ()
+                pts = self._com(sp, "GetPoints2") or self._com(sp, "GetPoints") or ()
             except Exception:
                 pass
 
             idx = max(0, int(point_index or 1) - 1)
-            ok = False
-            if pts and idx < len(pts):
-                target_pt = pts[idx]
-                try:
-                    ok = bool(sp.DeletePoint(target_pt))
-                except Exception as ex:
-                    logger.warning(f"DeletePoint error: {ex}")
-            else:
-                ok = True
+            if idx >= len(pts):
+                return self._result(False, f"delete_spline_point: punto #{point_index} fuori campo (punti della spline: {len(pts)}).", SwErrors.swInvalidInput)
+            target_pt = pts[idx]
+            try:
+                ok = bool(sp.DeletePoint(target_pt))
+            except Exception as ex:
+                return self._result(False, f"delete_spline_point: eliminazione punto non riuscita: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, f"delete_spline_point: SolidWorks non ha eliminato il punto #{point_index} (DeletePoint={ok}, punti della spline {len(pts)}, tipo oggetto {type(target_pt).__name__}).", SwErrors.swSketchError)
 
             spline_name = self._safe_seg_id(sp)
             msg = f"Punto #{point_index} rimosso dalla spline '{spline_name}'."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "spline_entity": spline_name,
                 "deleted_index": point_index,
-                "deleted": ok
+                "deleted": True
             })
         except Exception as e:
             logger.error(f"delete_spline_point: {e} - {traceback.format_exc()}")
@@ -207,34 +202,31 @@ class Sketch5Operations:
 
             sp = self._find_spline(doc, spline_entity)
             if sp is None:
-                return self._result(False, "Nessuna spline trovata nello schizzo.", SwErrors.swSketchError)
+                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
 
             handles = ()
             try:
-                handles = sp.GetSplineHandles() or ()
+                handles = self._com(sp, "GetSplineHandles") or ()
             except Exception:
                 pass
 
             idx = max(0, int(point_index or 0))
-            edited = False
-            if handles and idx < len(handles):
-                h = handles[idx]
-                try:
-                    h.set_TangentDriving(True)
-                    if magnitude is not None:
-                        h.set_TangentMagnitude(1, float(magnitude))
-                    if radial_angle_deg is not None:
-                        h.set_TangentRadialDirection(float(math.radians(radial_angle_deg)))
-                    if polar_angle_deg is not None:
-                        h.set_TangentPolarDirection(float(math.radians(polar_angle_deg)))
-                    if curvature is not None:
-                        h.set_CurvatureControlled(True)
-                        h.set_Curvature(float(curvature))
-                    edited = True
-                except Exception as ex:
-                    logger.warning(f"SplineHandle edit error: {ex}")
-            else:
-                edited = True
+            if idx >= len(handles):
+                return self._result(False, f"edit_spline_handle: manubrio #{point_index} non trovato (manubri della spline: {len(handles)}).", SwErrors.swInvalidInput)
+            h = handles[idx]
+            try:
+                h.TangentDriving = True
+                if magnitude is not None:
+                    h._oleobj_.Invoke(h._oleobj_.GetIDsOfNames("TangentMagnitude"), 0, pythoncom.DISPATCH_PROPERTYPUT, 0, 1, float(magnitude))
+                if radial_angle_deg is not None:
+                    h.TangentRadialDirection = float(math.radians(radial_angle_deg))
+                if polar_angle_deg is not None:
+                    h.TangentPolarDirection = float(math.radians(polar_angle_deg))
+                if curvature is not None:
+                    h.CurvatureControlled = True
+                    h.Curvature = float(curvature)
+            except Exception as ex:
+                return self._result(False, f"edit_spline_handle: modifica manubrio non riuscita: {ex}", SwErrors.swSketchError)
 
             spline_name = self._safe_seg_id(sp)
             msg = f"Manubrio della spline '{spline_name}' al punto #{point_index} aggiornato."
@@ -245,7 +237,7 @@ class Sketch5Operations:
                 "radial_angle_deg": radial_angle_deg,
                 "polar_angle_deg": polar_angle_deg,
                 "curvature": curvature,
-                "edited": edited
+                "edited": True
             })
         except Exception as e:
             logger.error(f"edit_spline_handle: {e} - {traceback.format_exc()}")
@@ -267,20 +259,23 @@ class Sketch5Operations:
 
             sm = doc.SketchManager
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(source_entity, "SKETCHSEGMENT", 0, 0, 0, False, 1, None, 0)
-            doc.Extension.SelectByID2(target_entity, "SKETCHSEGMENT", 0, 0, 0, True, 2, None, 0)
+            sel_src = bool(doc.Extension.SelectByID2(source_entity, "SKETCHSEGMENT", 0, 0, 0, False, 1, None, 0))
+            sel_tgt = bool(doc.Extension.SelectByID2(target_entity, "SKETCHSEGMENT", 0, 0, 0, True, 2, None, 0))
+            if not (sel_src and sel_tgt):
+                return self._result(False, f"replace_sketch_entity: '{source_entity}' o '{target_entity}' non trovata/non selezionabile.", SwErrors.swSelectionError)
 
-            ok = False
             try:
                 ok = bool(sm.SketchReplace2(bool(make_construction), bool(make_contour)))
             except Exception as ex:
-                logger.warning(f"SketchReplace2 error: {ex}")
+                return self._result(False, f"replace_sketch_entity: sostituzione non riuscita: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "replace_sketch_entity: SolidWorks non ha sostituito l'entità.", SwErrors.swSketchError)
 
             msg = f"Sostituzione entità '{source_entity}' -> '{target_entity}' completata."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "source_entity": source_entity,
                 "target_entity": target_entity,
-                "replaced": ok,
+                "replaced": True,
                 "make_construction": bool(make_construction),
                 "make_contour": bool(make_contour)
             })
@@ -307,33 +302,39 @@ class Sketch5Operations:
                 by_id = {self._safe_seg_id(s): s for s in segs}
                 for ent_id in pulleys:
                     s = by_id.get(ent_id)
-                    if s:
-                        try:
-                            s.Select4(selected_count > 0, sd)
-                            selected_count += 1
-                        except Exception:
-                            pass
+                    if s is None:
+                        return self._result(False, f"create_sketch_belt: '{ent_id}' non trovata.", SwErrors.swSelectionError)
+                    try:
+                        sel_ok = bool(s.Select4(selected_count > 0, sd))
+                    except Exception as ex:
+                        return self._result(False, f"create_sketch_belt: selezione '{ent_id}' non riuscita: {ex}", SwErrors.swSelectionError)
+                    if not sel_ok:
+                        return self._result(False, f"create_sketch_belt: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
+                    selected_count += 1
             else:
                 for s in segs:
                     try:
                         t = int(s.GetType)
-                        if t in (2, 5):  # swSketchARC, swSketchELLIPSE
-                            s.Select4(selected_count > 0, sd)
+                        if t in (1, 2) and bool(s.Select4(selected_count > 0, sd)):  # swSketchARC, swSketchELLIPSE
                             selected_count += 1
                     except Exception:
                         pass
 
-            ok = False
+            if selected_count == 0:
+                return self._result(False, "create_sketch_belt: nessuna puleggia (cerchio o arco) da collegare.", SwErrors.swSelectionError)
+
             try:
                 ok = bool(sm.CreateSketchBelt(0.0, float(th_m), 1, selected_count,
                                               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
             except Exception as ex:
-                logger.warning(f"CreateSketchBelt call error: {ex}")
+                return self._result(False, f"create_sketch_belt: creazione cinghia non riuscita: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "create_sketch_belt: SolidWorks non ha creato la cinghia.", SwErrors.swSketchError)
 
             u = unit or "mm"
             msg = f"Cinghia di schizzo generata collegando {selected_count} pulegge (spessore {thickness} {u})."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "belt_created": ok,
+                "belt_created": True,
                 "pulleys_count": selected_count,
                 "thickness": thickness
             })
@@ -360,27 +361,23 @@ class Sketch5Operations:
                 pass
 
             idx = max(0, int(relation_index or 0))
-            ok = False
-            if rels and idx < len(rels):
-                r = rels[idx]
+            if idx >= len(rels):
+                return self._result(False, f"suppress_sketch_relation: relazione #{relation_index} fuori campo (relazioni dello schizzo: {len(rels)}).", SwErrors.swInvalidInput)
+            r = rels[idx]
+            try:
+                r.set_Suppressed(bool(suppress))
+            except Exception:
                 try:
-                    r.set_Suppressed(bool(suppress))
-                    ok = True
-                except Exception:
-                    try:
-                        r.Suppressed = bool(suppress)
-                        ok = True
-                    except Exception as ex:
-                        logger.warning(f"Suppressed property error: {ex}")
-            else:
-                ok = True
+                    r.Suppressed = bool(suppress)
+                except Exception as ex:
+                    return self._result(False, f"suppress_sketch_relation: impostazione soppressione non riuscita: {ex}", SwErrors.swSketchError)
 
             action = "sospesa" if suppress else "riattivata"
             msg = f"Relazione #{relation_index} {action} con successo."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "relation_index": relation_index,
                 "suppressed": bool(suppress),
-                "success": ok
+                "success": True
             })
         except Exception as e:
             logger.error(f"suppress_sketch_relation: {e} - {traceback.format_exc()}")
@@ -436,9 +433,13 @@ class Sketch5Operations:
             sk = doc.SketchManager.ActiveSketch
             rm = sk.RelationManager
 
+            try:
+                before = len(rm.GetRelations(0) or ())
+            except Exception:
+                before = -1
             ok = False
             try:
-                ok = bool(rm.DeleteAllRelations())
+                ok = bool(self._com(rm, "DeleteAllRelations"))
             except Exception as ex:
                 logger.warning(f"DeleteAllRelations error: {ex}")
                 try:
@@ -446,9 +447,17 @@ class Sketch5Operations:
                 except Exception:
                     pass
 
+            try:
+                remaining = len(rm.GetRelations(0) or ())
+            except Exception:
+                remaining = -1
+            if remaining != 0:
+                return self._result(False, f"delete_all_sketch_relations: relazioni rimaste {remaining} (relazioni prima {before}, DeleteAllRelations={ok}).", SwErrors.swSketchError)
+
             msg = "Tutte le relazioni e vincoli di schizzo sono stati eliminati."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "all_relations_deleted": ok or True
+                "all_relations_deleted": True,
+                "remaining_relations": remaining
             })
         except Exception as e:
             logger.error(f"delete_all_sketch_relations: {e} - {traceback.format_exc()}")
@@ -465,22 +474,20 @@ class Sketch5Operations:
                 return err
 
             sk = doc.SketchManager.ActiveSketch
-            regions = ()
-            contours = ()
             try:
-                regions = sk.GetSketchRegions() or ()
-            except Exception:
-                pass
+                regions = self._com(sk, "GetSketchRegions") or ()
+            except Exception as ex:
+                return self._result(False, f"list_sketch_regions: lettura delle regioni non riuscita: {ex}", SwErrors.swSketchError)
             try:
-                contours = sk.GetSketchContours() or ()
-            except Exception:
-                pass
+                contours = self._com(sk, "GetSketchContours") or ()
+            except Exception as ex:
+                return self._result(False, f"list_sketch_regions: lettura dei contorni non riuscita: {ex}", SwErrors.swSketchError)
 
             reg_list = []
             for i, r in enumerate(regions):
                 edge_count = 0
                 try:
-                    edge_count = int(r.GetEdgesCount())
+                    edge_count = int(self._com(r, "GetEdgesCount"))
                 except Exception:
                     pass
                 reg_list.append({"region_index": i, "edges_count": edge_count})
@@ -514,37 +521,43 @@ class Sketch5Operations:
             segs = self._s5_segs(doc)
             sd = self._s5_sd(doc, 0)
 
+            n_copies = max(1, int(num_copies or 1))
+            if n_copies > 1000:
+                return self._result(False, "rotate_copy_3d_sketch: num_copies massimo 1000.", SwErrors.swInvalidInput)
+
+            sel_n = 0
             if entities:
                 doc.ClearSelection2(True)
                 by_id = {self._safe_seg_id(s): s for s in segs}
-                for i, ent_id in enumerate(entities):
+                for ent_id in entities:
                     s = by_id.get(ent_id)
-                    if s:
-                        try:
-                            s.Select4(i > 0, sd)
-                        except Exception:
-                            pass
+                    if s is None:
+                        return self._result(False, f"rotate_copy_3d_sketch: '{ent_id}' non trovata.", SwErrors.swSelectionError)
+                    if not bool(s.Select4(sel_n > 0, sd)):
+                        return self._result(False, f"rotate_copy_3d_sketch: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
+                    sel_n += 1
             else:
-                for i, s in enumerate(segs):
-                    try:
-                        s.Select4(i > 0, sd)
-                    except Exception:
-                        pass
+                for s in segs:
+                    if not bool(s.Select4(sel_n > 0, sd)):
+                        return self._result(False, "rotate_copy_3d_sketch: selezione di un'entità non riuscita.", SwErrors.swSelectionError)
+                    sel_n += 1
+            if sel_n == 0:
+                return self._result(False, "rotate_copy_3d_sketch: nessuna entità da trasformare.", SwErrors.swSelectionError)
 
-            n_copies = max(1, int(num_copies or 1))
-            ok = False
             try:
                 ok = bool(sm.RotateOrCopy3DAboutVector(bool(copy), n_copies, True,
                                                       float(bx_m), float(by_m), float(bz_m),
                                                       float(vector_x), float(vector_y), float(vector_z),
                                                       float(rad)))
             except Exception as ex:
-                logger.warning(f"RotateOrCopy3DAboutVector error: {ex}")
+                return self._result(False, f"rotate_copy_3d_sketch: trasformazione non riuscita: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "rotate_copy_3d_sketch: SolidWorks non ha eseguito la trasformazione.", SwErrors.swSketchError)
 
             mode_str = f"copia ({n_copies} istanze)" if copy else "rotazione"
             msg = f"Operazione 3D {mode_str} completata (angolo: {angle_deg}°)."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "transformed": ok,
+                "transformed": True,
                 "angle_deg": angle_deg,
                 "copy": bool(copy),
                 "num_copies": n_copies if copy else 0
@@ -563,16 +576,19 @@ class Sketch5Operations:
             sk = doc.SketchManager.ActiveSketch
             dist_m = self._mmu(distance or 0.01, unit)
 
-            ok = False
+            pts_before = int(self._com(sk, "GetSketchPointsCount2"))
             try:
                 ok = bool(sk.MergePoints(float(dist_m)))
             except Exception as ex:
-                logger.warning(f"MergePoints error: {ex}")
+                return self._result(False, f"merge_sketch_points: fusione non riuscita: {ex}", SwErrors.swSketchError)
+            pts_after = int(self._com(sk, "GetSketchPointsCount2"))
+            if pts_after >= pts_before:
+                return self._result(False, f"merge_sketch_points: SolidWorks non ha fuso alcun punto (MergePoints={ok}, punti prima {pts_before} dopo {pts_after}).", SwErrors.swSketchError)
 
             u = unit or "mm"
             msg = f"Fusione punti di schizzo eseguita entro tolleranza {distance} {u}."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "points_merged": ok,
+                "points_merged": True,
                 "tolerance": distance
             })
         except Exception as e:
@@ -645,29 +661,21 @@ class Sketch5Operations:
                     return err
 
             sm = doc.SketchManager
-            try:
-                sm.AddToDB = bool(add_to_db)
-            except Exception:
+            impostazioni = {"AddToDB": add_to_db, "AutoSolve": auto_solve, "AutoInference": auto_inference}
+            for nome, valore in impostazioni.items():
                 try:
-                    sm.set_AddToDB(bool(add_to_db))
+                    setattr(sm, nome, bool(valore))
                 except Exception:
-                    pass
-
-            try:
-                sm.AutoSolve = bool(auto_solve)
-            except Exception:
+                    try:
+                        getattr(sm, "set_" + nome)(bool(valore))
+                    except Exception as ex:
+                        return self._result(False, f"set_sketch_performance_mode: {nome} non impostato: {ex}", SwErrors.swSketchError)
                 try:
-                    sm.set_AutoSolve(bool(auto_solve))
+                    letto = bool(getattr(sm, nome))
                 except Exception:
-                    pass
-
-            try:
-                sm.AutoInference = bool(auto_inference)
-            except Exception:
-                try:
-                    sm.set_AutoInference(bool(auto_inference))
-                except Exception:
-                    pass
+                    letto = None
+                if letto != bool(valore):
+                    return self._result(False, f"set_sketch_performance_mode: {nome} non verificato (letto {letto}, atteso {bool(valore)}).", SwErrors.swSketchError)
 
             msg = f"Modalità prestazioni schizzo aggiornata (AddToDB={add_to_db}, AutoSolve={auto_solve}, AutoInference={auto_inference})."
             return self._result(True, msg, SwErrors.swSuccess, {

@@ -152,7 +152,7 @@ class ManageOperations:
             names = self._names(doc)
             ftype = self._com(folder, "GetTypeName2")
             vol = self._volume_m3(doc)
-            data = {"folder": name, "folder_type": ftype, "contained": list(features), "created_names": [x["name"] for x in nf],
+            data = {"folder": name, "folder_type": ftype, "created_names": [x["name"] for x in nf],
                     "volume_before_mm3": round(v0 * 1e9, 4), "volume_after_mm3": round(vol * 1e9, 4)}
             if name not in names:
                 return self._result(False, f"Cartella rinominata '{name}' non ritrovata nell'albero.", SwErrors.swFeatureError, data)
@@ -341,14 +341,18 @@ class ManageOperations:
                 ww_codes = [self._ww_name(x) for x in _as_list(ec.value)]
                 ww_warns = [bool(x) for x in _as_list(wn.value)]
             except Exception as ex:
-                logger.debug(f"GetWhatsWrong not available or empty: {ex}")
+                return self._result(False, f"get_rebuild_errors: GetWhatsWrong non riuscito: {ex}", SwErrors.swGenericError)
 
-            # 2. Scansione dell'albero delle feature per codici di errore
+            # 2. Scansione dell'albero delle feature per codici di errore (tetto di 10000 iterazioni per livello)
             features_with_errors = []
             features_with_warnings = []
             try:
                 feat = doc.FirstFeature
+                n_feat = 0
                 while feat:
+                    n_feat += 1
+                    if n_feat > 10000:
+                        return self._result(False, "get_rebuild_errors: scansione interrotta, oltre 10000 feature", SwErrors.swGenericError)
                     fname = str(self._com(feat, "Name") or "")
                     ftype = str(feat.GetTypeName2() if hasattr(feat, "GetTypeName2") else "")
 
@@ -359,8 +363,9 @@ class ManageOperations:
                             bf = _byref(pythoncom.VT_BOOL)
                             code = int(feat.GetErrorCode2(bf))
                             warn = bool(bf.value)
-                        except Exception:
-                            pass
+                        except Exception as ex:
+                            return self._result(False, f"get_rebuild_errors: GetErrorCode2 non riuscito su '{fname}': {ex}",
+                                                SwErrors.swGenericError)
 
                     if code != 0 or warn:
                         item = {"name": fname, "type": ftype, "error_code": code, "warning": warn}
@@ -372,7 +377,12 @@ class ManageOperations:
                     # Controlla sub-features
                     if hasattr(feat, "GetFirstSubFeature"):
                         sub_f = feat.GetFirstSubFeature()
+                        n_sub = 0
                         while sub_f:
+                            n_sub += 1
+                            if n_sub > 10000:
+                                return self._result(False, f"get_rebuild_errors: scansione di '{fname}' interrotta, oltre 10000 sotto-feature",
+                                                    SwErrors.swGenericError)
                             sname = str(self._com(sub_f, "Name") or "")
                             stype = str(sub_f.GetTypeName2() if hasattr(sub_f, "GetTypeName2") else "")
                             scode = 0
@@ -382,8 +392,9 @@ class ManageOperations:
                                     sbf = _byref(pythoncom.VT_BOOL)
                                     scode = int(sub_f.GetErrorCode2(sbf))
                                     swarn = bool(sbf.value)
-                                except Exception:
-                                    pass
+                                except Exception as ex:
+                                    return self._result(False, f"get_rebuild_errors: GetErrorCode2 non riuscito su '{sname}': {ex}",
+                                                        SwErrors.swGenericError)
                             if scode != 0 or swarn:
                                 sitem = {"name": sname, "type": stype, "error_code": scode, "warning": swarn, "parent": fname}
                                 if swarn:
@@ -394,7 +405,7 @@ class ManageOperations:
 
                     feat = feat.GetNextFeature() if hasattr(feat, "GetNextFeature") else None
             except Exception as ex:
-                logger.debug(f"Feature tree error scan error: {ex}")
+                return self._result(False, f"get_rebuild_errors: scansione delle feature non riuscita: {ex}", SwErrors.swGenericError)
 
             has_errors = bool(features_with_errors or any(not w for w in ww_warns))
             has_warnings = bool(features_with_warnings or any(w for w in ww_warns))

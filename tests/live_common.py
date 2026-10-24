@@ -13,10 +13,12 @@ from pathlib import Path
 
 os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECTED_TOOLS tool, execute_python incluso
 
-EXPECTED_TOOLS = 555    # numero di tool con execute_python attivo (554 senza execute_python)
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from solidworks_mcp.not_implemented import NOT_IMPLEMENTED  # noqa: E402
+
+# tool esposti con execute_python attivo: 556 registrati meno quelli nascosti perche' non implementati (revisione 2026-10-23)
+EXPECTED_TOOLS = 556 - len(NOT_IMPLEMENTED)
 OUT = ROOT / "test_output"
 OUT.mkdir(exist_ok=True)
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -100,6 +102,8 @@ class Client:
                 data = json.loads(text.split("Details: ", 1)[1])
             except Exception:
                 data = {}
+        if os.environ.get("SW_TEST_TRACE"):              # diagnosi: ogni risposta dei tool nel log
+            print(f"    <- {tool_name}: {text[:260]}")
         if tool_name == "connect_solidworks" and ok:
             LANG["ui"] = str(data.get("ui_language") or "italian").lower()
             print(f"Lingua di SolidWorks: {LANG['ui']}" + ("" if italian() else " (nomi italiani dei test tradotti in inglese)"))

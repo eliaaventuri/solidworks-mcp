@@ -494,15 +494,38 @@ async def c3_esplosione_libera(c):
     record("passo radiale riporta distanza 30 mm e angolo 30 gradi", len(radial) == 1 and abs(radial[0]["distance_mm"] - 30) < 1e-6 and abs(radial[0]["angle_deg"] - 30) < 1e-6, f"{radial}")
     # traslazione + rotazione: traslazione ok, rotazione NON memorizzata da SolidWorks (limite dichiarato)
     pp = poses.get("cx_pin-1", {}).get("position_mm", [9e9] * 3)
-    record("perno: traslato di 20 mm in -X", close(pp, [P0["cx_pin-1"][0] - 20, P0["cx_pin-1"][1], P0["cx_pin-1"][2]]), f"{pp}")
+    # la rotazione attorno a una retta parallela a X non cambia la X dell'origine
+    record("perno: traslato di 20 mm in -X", abs(pp[0] - (P0["cx_pin-1"][0] - 20)) < TOL, f"{pp}")
     tr = [s for s in sts if s["components"] == ["cx_pin-1"]]
-    record("traslazione con rotazione: l'API riporta rotation_applied=false (SolidWorks 2026 ignora ExplAng)", len(tr) == 1 and tr[0].get("rotation_applied") is False and "rotation_note" in tr[0], f"{tr}")
+    rp = poses.get("cx_pin-1", {}).get("rotation_deg", [9, 9, 9])
+    record("traslazione con rotazione: rotation_applied=true e perno ruotato di 45 gradi attorno a X",
+           len(tr) == 1 and tr[0].get("rotation_applied") is True and abs(rp[0] - 45) < 1e-3 and abs(rp[1]) < 1e-3 and abs(rp[2]) < 1e-3,
+           f"{rp}; {tr}"[:200])
     d2 = await need(c, "list_exploded_views", "stesse pose da list_exploded_views")
     record("list_exploded_views: stesse pose esplose", d2.get("exploded") and close(d2.get("poses", {}).get("cx_screw-1", {}).get("position_mm", [9e9] * 3), s1))
     # posizioni reali (compresso) invariate
     ok, _, dsh = await c.call("show_exploded", exploded=False)
     pc = await A.pos("cx_screw-1")
     record("assieme compresso: la vite 1 torna dov'era", close(pc, P0["cx_screw-1"]), f"{pc}")
+    await c.call("close_document", discard=True)
+
+
+async def c3b_add_step_due_componenti(c):
+    print("\n== C3b. add_explode_step con due componenti in un solo passo")
+    A = Asm(c)
+    await build_exp(c, "esplosione passo a 2 componenti")
+    P0 = {n: x["position_mm"] for n, x in (await A.comps()).items()}
+    await need(c, "add_explode_step", "2 componenti in un solo passo, 45 mm lungo X", components=["cx_bush-1", "cx_screw-1"], direction="x", distance=45)
+    # posizioni rilette in posa esplosa con list_exploded_views (come in C3)
+    dv = await need(c, "list_exploded_views", "posa esplosa dopo add_explode_step a 2 componenti")
+    poses = dv.get("poses", {})
+    p1 = poses.get("cx_bush-1", {}).get("position_mm", [9e9] * 3)
+    p2 = poses.get("cx_screw-1", {}).get("position_mm", [9e9] * 3)
+    d1 = math.dist(p1, P0["cx_bush-1"])
+    d2 = math.dist(p2, P0["cx_screw-1"])
+    record("add_explode_step con 2 componenti: entrambi spostati di 45 mm", abs(d1 - 45) < 0.5 and abs(d2 - 45) < 0.5, f"d1={d1:.2f} d2={d2:.2f}")
+    # ripristino: assieme compresso e documento scartato (come C3); il passo successivo ricrea l'assieme
+    await c.call("show_exploded", exploded=False)
     await c.call("close_document", discard=True)
 
 
@@ -852,11 +875,32 @@ def tool_checks(tl):
            and "mode" in by["auto_explode"].inputSchema["properties"] and {"radial_axis", "angle", "diverge"} <= set(by["add_explode_step"].inputSchema["properties"]), "")
 
 
+async def c3r_rotazione_nei_passi(c):
+    print("\n== C3R. Rotazione nei passi di traslazione: asse x, y, z")
+    A = Asm(c)
+    await build_exp(c, "rotazione nei passi C3R")
+    orig = await A.comps()
+    combos = (("cx_screw-1", "x", 0), ("cx_screw-2", "y", 1), ("cx_screw-3", "z", 2))
+    steps = [{"components": [n], "direction": "-" + ax, "distance": 20, "rotate_angle": 45, "rotate_axis": ax} for n, ax, _ in combos]
+    d = await need(c, "create_exploded_view", "3 passi con rotazione di 45 gradi attorno a x, y, z", steps=steps)
+    poses = d.get("poses", {})
+    for n, ax, k in combos:
+        p = poses.get(n, {})
+        r = p.get("rotation_deg", [9, 9, 9])
+        exp_r = [45 if i == k else 0 for i in range(3)]
+        record(f"{n}: ruotata di 45 gradi attorno a {ax} (solo quell'asse)", all(abs(r[i] - exp_r[i]) < 1e-3 for i in range(3)), f"{r}")
+        # la rotazione attorno a una retta parallela all'asse di traslazione non cambia quella coordinata dell'origine
+        q, q0 = p.get("position_mm", [9e9] * 3)[k], orig[n]["position_mm"][k]
+        record(f"{n}: spostata di 20 mm lungo -{ax}", abs(q - (q0 - 20)) < TOL, f"{q0} -> {q}")
+    record("tutti i passi riportano rotation_applied=true", all(s.get("rotation_applied") is True for s in d.get("steps", [])), "")
+    await c.call("close_document", discard=True)
+
+
 async def scenario(c, tl):
     only = {a.upper() for a in sys.argv[1:]}
     tool_checks(tl)
     await build_parts(c)
-    steps = [("C1", c1_sotto_assiemi), ("C2", c2_specchiatura), ("C3", c3_esplosione_libera), ("C4", c4_esplosione_automatica),
+    steps = [("C1", c1_sotto_assiemi), ("C2", c2_specchiatura), ("C3", c3_esplosione_libera), ("C3B", c3b_add_step_due_componenti), ("C3R", c3r_rotazione_nei_passi), ("C4", c4_esplosione_automatica),
              ("C5", c5_accoppiamenti_avanzati), ("C7", c7_movimento_parziale)]
     for tag, fn in steps:
         if only and tag not in only and not (tag == "C4" and "C6" in only):

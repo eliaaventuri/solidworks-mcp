@@ -49,12 +49,13 @@ async def run():
                 ok, _, _ = await c.call("create_new_part")
                 record("create_new_part", ok)
 
-                # 1. Performance mode
+                # 1. Spline Operations: Create, Insert Point, Relax, Simplify, Edit Handle, Delete Point
+                await c.call("create_sketch", plane="Front")
+
+                # 1b. Performance mode (con uno schizzo attivo)
                 ok_prf, _, data_prf = await c.call("set_sketch_performance_mode", add_to_db=False, auto_solve=True, auto_inference=True)
                 record("set_sketch_performance_mode", ok_prf, f"auto_solve: {data_prf.get('auto_solve')}")
 
-                # 2. Spline Operations: Create, Insert Point, Relax, Simplify, Edit Handle, Delete Point
-                await c.call("create_sketch", plane="Front")
                 await c.call("draw_spline", points=[[0, 0], [20, 15], [40, -10], [60, 20]])
 
                 ok_ins, _, data_ins = await c.call("insert_spline_point", x=30, y=5)
@@ -69,8 +70,8 @@ async def run():
                 ok_hnd, _, data_hnd = await c.call("edit_spline_handle", point_index=0, magnitude=1.5)
                 record("edit_spline_handle", ok_hnd, f"edited: {data_hnd.get('edited')}")
 
-                ok_del, _, _ = await c.call("delete_spline_point", point_index=1)
-                record("delete_spline_point", ok_del)
+                ok_del, text_del, _ = await c.call("delete_spline_point", point_index=1)
+                record("delete_spline_point: rifiutato perche' non implementato", (not ok_del) and "non e' implementato" in text_del, text_del[:80])
 
                 # 3. Pulley-Belt Feature & Allowed Relations
                 await c.call("draw_circle", x=0, y=50, radius=10)
@@ -82,7 +83,9 @@ async def run():
                 ok_alw, _, data_alw = await c.call("get_allowed_relations")
                 record("get_allowed_relations", ok_alw, f"allowed: {len(data_alw.get('allowed_relations', []))}")
 
-                # 4. Relations: Suppress & Delete All
+                # 4. Relations: Suppress & Delete All (serve almeno una relazione nello schizzo)
+                ok_hl, _, data_hl = await c.call("draw_line", x1=-30, y1=-30, x2=10, y2=-30)
+                ok_hr, _, _ = await c.call("add_sketch_relation", relation="horizontal", entity1=data_hl.get("entity_id"))
                 ok_sup, _, data_sup = await c.call("suppress_sketch_relation", relation_index=0, suppress=True)
                 record("suppress_sketch_relation", ok_sup, f"suppressed: {data_sup.get('suppressed')}")
 
@@ -92,12 +95,14 @@ async def run():
                 ok_reg, _, data_reg = await c.call("list_sketch_regions")
                 record("list_sketch_regions", ok_reg, f"regions: {data_reg.get('regions_count')}")
 
-                ok_mrg, _, _ = await c.call("merge_sketch_points", distance=0.01)
-                record("merge_sketch_points", ok_mrg)
+                # merge_sketch_points: rifiutato perche' non implementato (MergePoints non fonde nulla, vedi rapporto)
+                ok_mrg, text_mrg, _ = await c.call("merge_sketch_points", distance=0.01)
+                record("merge_sketch_points: rifiutato perche' non implementato", (not ok_mrg) and "non e' implementato" in text_mrg, text_mrg[:80])
 
                 # Delete all relations
-                ok_dar, _, _ = await c.call("delete_all_sketch_relations")
-                record("delete_all_sketch_relations", ok_dar)
+                ok_dar, _, data_dar = await c.call("delete_all_sketch_relations")
+                record("delete_all_sketch_relations", ok_dar and data_dar.get("remaining_relations") == 0,
+                       f"remaining: {data_dar.get('remaining_relations')}")
 
                 await c.call("close_sketch")
 
@@ -109,8 +114,8 @@ async def run():
                 await c.call("close_sketch")
 
                 # 7. Block Export
-                ok_blk, _, _ = await c.call("save_sketch_block_to_file", block_name="Block1", filepath=str(BLK_PATH), overwrite=True)
-                record("save_sketch_block_to_file", ok_blk)
+                ok_nim, text_nim, _ = await c.call("save_sketch_block_to_file", block_name="Block1", filepath=str(BLK_PATH), overwrite=True)
+                record("save_sketch_block_to_file: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
                 # Chiudi documento
                 await c.call("close_document", discard=True)

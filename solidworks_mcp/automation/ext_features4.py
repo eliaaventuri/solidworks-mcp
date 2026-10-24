@@ -8,6 +8,9 @@ import math
 import logging
 from typing import Dict
 
+import pythoncom
+from win32com.client import VARIANT
+
 from ..constants import SwErrors
 from .modeling_base import null_variant
 
@@ -48,6 +51,15 @@ class Features4Operations:
             pass
         return False
 
+    def _creata(self, doc, n0: int, res) -> bool:
+        """Prova di creazione: il risultato della chiamata non e' None/False e le feature sono aumentate."""
+        if res is None or res is False:
+            return False
+        try:
+            return len(self._features(doc)) > n0
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------ 1. Estrusioni, Rivoluzioni e Tagli Solidi
     def extrude_from_surface(self, depth: float, sketch: str = None, start_surface_name: str = None,
                              offset_distance: float = 0.0, direction: list = None, draft_angle: float = 0.0,
@@ -61,41 +73,27 @@ class Features4Operations:
             _ = self._mmu(offset_distance, unit)
             fm = doc.FeatureManager
             doc.ClearSelection2(True)
-            if sketch:
-                doc.Extension.SelectByID2(str(sketch), "SKETCH", 0, 0, 0, True, 0, null_variant(), 0)
+            if sketch and not doc.Extension.SelectByID2(str(sketch), "SKETCH", 0, 0, 0, True, 0, null_variant(), 0):
+                return self._result(False, f"extrude_from_surface: schizzo '{sketch}' non selezionato", SwErrors.swSelectionError)
             if start_surface_name:
                 doc.Extension.SelectByID2(str(start_surface_name), "SURFACEBODY", 0, 0, 0, True, 0, null_variant(), 0)
-            try:
-                fm.FeatureExtrusion3(True, False, False, 0, 0, dm, 0, False, False, False, False, 0, 0, False, False, False, False, True, True, True, 0, 0, False)
-            except Exception:
-                pass
+            n0 = len(self._features(doc))
+            res = fm.FeatureExtrusion3(True, False, False, 0, 0, dm, 0, False, False, False, False, 0, 0, False, False, False, False, True, True, True, 0, 0, False)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "extrude_from_surface: estrusione non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Estrusione da superficie (profondita' {depth} mm, offset {offset_distance} mm) creata.",
-                SwErrors.swSuccess, {"depth": depth, "offset": offset_distance, "start_surface": start_surface_name, "draft": draft_angle}
+                True, f"Estrusione di profondita' {depth} mm creata.",
+                SwErrors.swSuccess, {"depth": depth, "start_surface": start_surface_name,
+                                     "ignored_params": ["offset_distance", "start_surface_name", "direction", "draft_angle"]}
             )
         except Exception as e:
             return self._result(False, f"extrude_from_surface: {e}", SwErrors.swGenericError)
 
     def intersect_solid_features(self, body_names: list, cap_planar_openings: bool = True, unit: str = None) -> Dict:
-        """Interseca corpi solidi o superfici multiple per generare volumi composti chiusi."""
+        """Interseca corpi solidi o superfici multiple per generare volumi composti chiusi (PreIntersect2 + PostIntersect)."""
         try:
-            doc, err = self._part()
-            if err:
-                return err
-            fm = doc.FeatureManager
-            doc.ClearSelection2(True)
-            for b in body_names or []:
-                doc.Extension.SelectByID2(str(b), "SOLIDBODY", 0, 0, 0, True, 0, null_variant(), 0)
-            try:
-                fm.InsertIntersectFeature(bool(cap_planar_openings))
-            except Exception:
-                pass
-            self._model_rebuild(doc)
-            return self._result(
-                True, f"Intersezione solida eseguita su {len(body_names or [])} corpi.",
-                SwErrors.swSuccess, {"bodies": body_names, "cap_planar_openings": cap_planar_openings}
-            )
+            return self.intersect_bodies(bodies=body_names, cap_planar=bool(cap_planar_openings), unit=unit)
         except Exception as e:
             return self._result(False, f"intersect_solid_features: {e}", SwErrors.swGenericError)
 
@@ -108,14 +106,17 @@ class Features4Operations:
                 return err
             fm = doc.FeatureManager
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(tool_body_name), "SOLIDBODY", 0, 0, 0, True, 1, null_variant(), 0)
-            doc.Extension.SelectByID2(str(path_sketch), "SKETCH", 0, 0, 0, True, 4, null_variant(), 0)
+            if not doc.Extension.SelectByID2(str(tool_body_name), "SOLIDBODY", 0, 0, 0, True, 1, null_variant(), 0):
+                return self._result(False, f"solid_sweep: corpo utensile '{tool_body_name}' non trovato", SwErrors.swSelectionError)
+            if not doc.Extension.SelectByID2(str(path_sketch), "SKETCH", 0, 0, 0, True, 4, null_variant(), 0):
+                return self._result(False, f"solid_sweep: traiettoria '{path_sketch}' non trovata", SwErrors.swSelectionError)
             for g in guide_sketches or []:
-                doc.Extension.SelectByID2(str(g), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0)
-            try:
-                fm.InsertSweep(True, False, 0, 0, 0)
-            except Exception:
-                pass
+                if not doc.Extension.SelectByID2(str(g), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0):
+                    return self._result(False, f"solid_sweep: guida '{g}' non trovata", SwErrors.swSelectionError)
+            n0 = len(self._features(doc))
+            res = fm.InsertSweep(True, False, 0, 0, 0)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "solid_sweep: sweep non creato da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Sweep solido con corpo utensile '{tool_body_name}' completato lungo '{path_sketch}'.",
@@ -126,26 +127,12 @@ class Features4Operations:
 
     def variable_section_sweep(self, profile_sketch: str, path_sketch: str, guide_sketches: list = None,
                                scale_factor: float = 1.0, twist_angle: float = 0.0, unit: str = None) -> Dict:
-        """Crea uno sweep con sezione variabile controllata da parametri o guide multiple."""
+        """Crea uno sweep con sezione variabile controllata da guide multiple (scala non ancora supportata)."""
         try:
-            doc, err = self._part()
-            if err:
-                return err
-            fm = doc.FeatureManager
-            doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(profile_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
-            doc.Extension.SelectByID2(str(path_sketch), "SKETCH", 0, 0, 0, True, 4, null_variant(), 0)
-            for g in guide_sketches or []:
-                doc.Extension.SelectByID2(str(g), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0)
-            try:
-                fm.InsertSweep(True, False, 0, 0, 0)
-            except Exception:
-                pass
-            self._model_rebuild(doc)
-            return self._result(
-                True, f"Sweep a sezione variabile ({profile_sketch} lungo {path_sketch}, scala {scale_factor}) creato.",
-                SwErrors.swSuccess, {"profile": profile_sketch, "path": path_sketch, "scale": scale_factor, "twist": twist_angle}
-            )
+            if abs(float(scale_factor) - 1.0) > 1e-9:
+                return self._result(False, f"variable_section_sweep: scale_factor {scale_factor} non supportato (usare 1.0 e guide_sketches per la sezione variabile)", SwErrors.swInvalidInput)
+            return self.sweep(profile_sketch=profile_sketch, path_sketch=path_sketch, guide_sketches=guide_sketches,
+                              twist_angle=twist_angle, unit=unit)
         except Exception as e:
             return self._result(False, f"variable_section_sweep: {e}", SwErrors.swGenericError)
 
@@ -158,16 +145,18 @@ class Features4Operations:
                 return err
             rm = self._mmu(radius, unit)
             doc.ClearSelection2(True)
-            self._safe_select(doc, "vertex", vertex_point, unit=unit, mark=1)
-            try:
-                fm = doc.FeatureManager
-                fm.FeatureFillet3(1, rm, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-            except Exception:
-                pass
+            if not self._safe_select(doc, "vertex", vertex_point, unit=unit, mark=1):
+                return self._result(False, f"setback_fillet: vertice {vertex_point} non trovato", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.FeatureFillet3(1, rm, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "setback_fillet: raccordo non creato da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Raccordo con arretramento vertice (r={radius} mm) creato.",
-                SwErrors.swSuccess, {"vertex": vertex_point, "radius": radius, "setback": setback_distances or []}
+                True, f"Raccordo a raggio costante (r={radius} mm) creato sul vertice.",
+                SwErrors.swSuccess, {"vertex": vertex_point, "radius": radius,
+                                     "ignored_params": ["setback_distances"]}
             )
         except Exception as e:
             return self._result(False, f"setback_fillet: {e}", SwErrors.swGenericError)
@@ -180,16 +169,18 @@ class Features4Operations:
                 return err
             rm = self._mmu(radius, unit)
             doc.ClearSelection2(True)
-            self._safe_select_many(doc, "edge", edge_points, unit=unit, mark=1)
-            try:
-                fm = doc.FeatureManager
-                fm.FeatureFillet3(1, rm, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
-            except Exception:
-                pass
+            if not self._safe_select_many(doc, "edge", edge_points, unit=unit, mark=1):
+                return self._result(False, "curvature_continuous_fillet: spigoli non trovati", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.FeatureFillet3(1, rm, 0, 0, 0, 0, 0, None, None, None, None, None, None, None)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "curvature_continuous_fillet: raccordo non creato da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Raccordo a continuita' di curvatura G2 (r={radius} mm, rho={rho_conic}) applicato.",
-                SwErrors.swSuccess, {"radius": radius, "rho": rho_conic, "edges_count": len(edge_points or [])}
+                True, f"Raccordo a raggio costante (r={radius} mm) creato su {len(edge_points or [])} spigoli.",
+                SwErrors.swSuccess, {"radius": radius, "edges_count": len(edge_points or []),
+                                     "ignored_params": ["rho_conic", "continuita_G2"]}
             )
         except Exception as e:
             return self._result(False, f"curvature_continuous_fillet: {e}", SwErrors.swGenericError)
@@ -203,17 +194,17 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._safe_select(doc, "face", face_point, unit=unit, mark=0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertStudWizard()
-            except Exception:
-                pass
+            if not self._safe_select(doc, "face", face_point, unit=unit, mark=0):
+                return self._result(False, f"stud_wizard: faccia {face_point} non trovata", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertStudWizard()
+            if not self._creata(doc, n0, res):
+                return self._result(False, "stud_wizard: prigioniero non creato da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
-            th_len = thread_length if thread_length is not None else stud_length
             return self._result(
-                True, f"Prigioniero filettato (Stud Wizard) diametro {shaft_diameter} mm, lunghezza {stud_length} mm ({standard} {size or ''}) creato.",
-                SwErrors.swSuccess, {"shaft_diameter": shaft_diameter, "stud_length": stud_length, "thread_length": th_len, "standard": standard, "size": size}
+                True, "Stud Wizard eseguito sulla faccia con i valori predefiniti di SolidWorks: diametro, lunghezza, filettatura e norma richiesti non applicati.",
+                SwErrors.swSuccess, {"ignored_params":["shaft_diameter", "stud_length", "thread_length", "standard", "size"]}
             )
         except Exception as e:
             return self._result(False, f"stud_wizard: {e}", SwErrors.swGenericError)
@@ -283,18 +274,22 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(mirror_plane), "PLANE", 0, 0, 0, True, 0, null_variant(), 0)
+            ok_p, msg_p = self._select_edge_or_axis(doc, mirror_plane, unit, mark=2, append=False)
+            if not ok_p:
+                return self._result(False, f"mirror_body_merge: piano '{mirror_plane}' non trovato ({msg_p})", SwErrors.swSelectionError)
             for b in body_names or []:
-                doc.Extension.SelectByID2(str(b), "SOLIDBODY", 0, 0, 0, True, 2, null_variant(), 0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertMirrorFeature2(True, False, False, False, 0)
-            except Exception:
-                pass
+                hit = [o for o in self._bodies(doc) if str(self._com(o, "Name")) == str(b)]
+                if not hit or not hit[0].Select2(True, self._sd(doc, 256)):
+                    return self._result(False, f"mirror_body_merge: corpo '{b}' non trovato", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertMirrorFeature2(True, False, bool(merge_bodies), False, 0)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "mirror_body_merge: specchiatura non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Specchiatura corpi con fusione automatica ({len(body_names or [])} corpi su '{mirror_plane}').",
-                SwErrors.swSuccess, {"bodies": body_names, "plane": mirror_plane, "merged": merge_bodies}
+                True, f"Specchiatura corpi creata ({len(body_names or [])} corpi su '{mirror_plane}').",
+                SwErrors.swSuccess, {"bodies": body_names, "plane": mirror_plane, "merge_bodies": bool(merge_bodies)}
             )
         except Exception as e:
             return self._result(False, f"mirror_body_merge: {e}", SwErrors.swGenericError)
@@ -324,13 +319,14 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._safe_select_many(doc, "face", target_face_points, unit=unit, mark=1)
-            doc.Extension.SelectByID2(str(surface_name), "SURFACEBODY", 0, 0, 0, True, 2, null_variant(), 0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertReplaceFaceFeature(None)
-            except Exception:
-                pass
+            if not self._safe_select_many(doc, "face", target_face_points, unit=unit, mark=1):
+                return self._result(False, "body_replace_face: facce da sostituire non trovate", SwErrors.swSelectionError)
+            if not doc.Extension.SelectByID2(str(surface_name), "SURFACEBODY", 0, 0, 0, True, 2, null_variant(), 0):
+                return self._result(False, f"body_replace_face: superficie '{surface_name}' non trovata", SwErrors.swSelectionError)
+            n0 = len(self._features(doc))
+            doc.InsertFeatureReplaceFace()
+            if len(self._features(doc)) <= n0:
+                return self._result(False, "body_replace_face: sostituzione non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Sostituzione facce completata con superficie target '{surface_name}'.",
@@ -396,12 +392,13 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._safe_select(doc, "face", face_point, unit=unit, mark=0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertCrossBreak(self._mmu(depth, unit), math.radians(float(break_angle)))
-            except Exception:
-                pass
+            if not self._safe_select(doc, "face", face_point, unit=unit, mark=0):
+                return self._result(False, f"cross_break: faccia {face_point} non trovata", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertCrossBreak(self._mmu(depth, unit), math.radians(float(break_angle)))
+            if not self._creata(doc, n0, res):
+                return self._result(False, "cross_break: crociera non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Crociera di piega (Cross Break) inserita (profondita' {depth} mm, angolo {break_angle}°).",
@@ -420,16 +417,19 @@ class Features4Operations:
             tm = self._mmu(thickness, unit)
             rm = self._mmu(bend_radius, unit)
             doc.ClearSelection2(True)
-            self._safe_select(doc, "face", fixed_face_point, unit=unit, mark=1)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertConvertToSheetMetal2(tm, False, False, rm, 0, 0, 0, 0, 0, False)
-            except Exception:
-                pass
+            if not self._safe_select(doc, "face", fixed_face_point, unit=unit, mark=1):
+                return self._result(False, f"convert_to_sheet_metal: faccia fissa {fixed_face_point} non trovata", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            v0 = self._volume_m3(doc)
+            res = fm.InsertConvertToSheetMetal2(tm, False, False, rm, 0, 0, 0, 0, 0, False)
+            if not (bool(res) or len(self._features(doc)) > n0) or abs(self._volume_m3(doc) - v0) < 1e-12:
+                return self._result(False, "convert_to_sheet_metal: conversione non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Corpo solido convertito in lamiera piegata (spessore {thickness} mm, raggio {bend_radius} mm).",
-                SwErrors.swSuccess, {"thickness": thickness, "bend_radius": bend_radius}
+                SwErrors.swSuccess, {"thickness": thickness, "bend_radius": bend_radius,
+                                     "ignored_params": ["rip_edges"]}
             )
         except Exception as e:
             return self._result(False, f"convert_to_sheet_metal: {e}", SwErrors.swGenericError)
@@ -441,16 +441,18 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(boundary_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertVent()
-            except Exception:
-                pass
+            if not doc.Extension.SelectByID2(str(boundary_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                return self._result(False, f"vent_feature: schizzo '{boundary_sketch}' non trovato", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertVent()
+            if not self._creata(doc, n0, res):
+                return self._result(False, "vent_feature: griglia non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Griglia di aerazione (Vent) generata da '{boundary_sketch}' (costole {rib_width} mm).",
-                SwErrors.swSuccess, {"boundary": boundary_sketch, "rib_width": rib_width, "spar_width": spar_width}
+                True, f"Griglia di aerazione (Vent) creata da '{boundary_sketch}' con i valori predefiniti di SolidWorks.",
+                SwErrors.swSuccess, {"boundary": boundary_sketch,
+                                     "ignored_params": ["rib_width", "spar_width", "rib_depth"]}
             )
         except Exception as e:
             return self._result(False, f"vent_feature: {e}", SwErrors.swGenericError)
@@ -462,13 +464,15 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(profile1_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
-            doc.Extension.SelectByID2(str(profile2_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertLoftedBend(self._mmu(thickness, unit), 0, bend_count, 0)
-            except Exception:
-                pass
+            if not doc.Extension.SelectByID2(str(profile1_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                return self._result(False, f"loft_bend: profilo '{profile1_sketch}' non trovato", SwErrors.swSelectionError)
+            if not doc.Extension.SelectByID2(str(profile2_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                return self._result(False, f"loft_bend: profilo '{profile2_sketch}' non trovato", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertLoftedBend(self._mmu(thickness, unit), 0, bend_count, 0)
+            if not self._creata(doc, n0, res):
+                return self._result(False, "loft_bend: transizione non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Transizione loftata in lamiera ({profile1_sketch} -> {profile2_sketch}, {bend_count} pieghe) creata.",
@@ -501,13 +505,15 @@ class Features4Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._safe_select(doc, "face", face_from_point, unit=unit, mark=1)
-            self._safe_select(doc, "face", face_to_point, unit=unit, mark=2)
-            try:
-                fm = doc.FeatureManager
-                fm.InsertCosmeticWeldBead2(self._mmu(bead_size, unit), 0, 0, 0, None)
-            except Exception:
-                pass
+            if not self._safe_select(doc, "face", face_from_point, unit=unit, mark=1):
+                return self._result(False, f"cosmetic_weld_bead: faccia di partenza {face_from_point} non trovata", SwErrors.swSelectionError)
+            if not self._safe_select(doc, "face", face_to_point, unit=unit, mark=2):
+                return self._result(False, f"cosmetic_weld_bead: faccia di arrivo {face_to_point} non trovata", SwErrors.swSelectionError)
+            fm = doc.FeatureManager
+            n0 = len(self._features(doc))
+            res = fm.InsertCosmeticWeldBead(self._mmu(bead_size, unit))
+            if not self._creata(doc, n0, res):
+                return self._result(False, "cosmetic_weld_bead: cordolo non creato da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
                 True, f"Cordolo di saldatura cosmetico (dimensione {bead_size} mm) inserito.",
@@ -524,13 +530,17 @@ class Features4Operations:
                 return err
             if force_rebuild:
                 self._model_rebuild(doc)
-            try:
-                doc.UpdateCutList()
-            except Exception:
-                pass
+            folders = [f for n, t, f in self._features(doc) if t == "CutListFolder"]
+            if not folders:
+                return self._result(False, "update_cut_list: nessuna distinta di taglio nel modello (crea prima weldment_cut_list)", SwErrors.swSelectionError)
+            bf = self._com(folders[0], "GetSpecificFeature2")
+            self._wld_raw(bf, "UpdateCutList")
+            members = list(self._wld_raw(bf, "GetBodies") or [])
+            if not members:
+                return self._result(False, "update_cut_list: la distinta di taglio non elenca nessun membro dopo l'aggiornamento", SwErrors.swFeatureError)
             return self._result(
-                True, "Distinta di taglio profilati saldati aggiornata con successo.",
-                SwErrors.swSuccess, {"updated": True}
+                True, f"Distinta di taglio profilati saldati aggiornata ({len(members)} membri).",
+                SwErrors.swSuccess, {"updated": True, "members": len(members)}
             )
         except Exception as e:
             return self._result(False, f"update_cut_list: {e}", SwErrors.swGenericError)
@@ -541,17 +551,19 @@ class Features4Operations:
             doc, err = self._part()
             if err:
                 return err
-            doc.ClearSelection2(True)
-            for m in member_names or []:
-                doc.Extension.SelectByID2(str(m), "SOLIDBODY", 0, 0, 0, True, 0, null_variant(), 0)
-            try:
-                doc.FeatureManager.InsertSubWeldFolder()
-            except Exception:
-                pass
+            wanted = list(member_names or [])
+            members = [b for b in self._bodies(doc) if str(self._com(b, "Name")) in wanted]
+            if len(members) != len(wanted) or not members:
+                names = [str(self._com(b, "Name")) for b in self._bodies(doc)]
+                return self._result(False, f"subweldment_folder: componente/i {wanted} non trovati fra i corpi {names}", SwErrors.swSelectionError)
+            n0 = len(self._features(doc))
+            res = self._wld_raw(doc.FeatureManager, "InsertSubWeldFolder2", VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, tuple(members)))
+            if not self._creata(doc, n0, res):
+                return self._result(False, "subweldment_folder: cartella non creata da SolidWorks (nessuna feature nuova)", SwErrors.swFeatureError)
             self._model_rebuild(doc)
             return self._result(
-                True, f"Cartella sotto-saldatura '{folder_name}' creata con {len(member_names or [])} componenti.",
-                SwErrors.swSuccess, {"folder_name": folder_name, "members": member_names or []}
+                True, f"Cartella sotto-saldatura creata con {len(member_names or [])} componenti.",
+                SwErrors.swSuccess, {"members": wanted, "ignored_params": ["folder_name"]}
             )
         except Exception as e:
             return self._result(False, f"subweldment_folder: {e}", SwErrors.swGenericError)

@@ -28,6 +28,7 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from . import __version__
 from .automation import SolidWorksAutomation
 from .constants import SwErrors
+from .not_implemented import not_implemented_reason
 from .config import get_config
 from .utils import get_solidworks_info, set_default_unit
 from .drawing_tools import DRAWING_TOOLS, DRAWING_DISPATCH
@@ -1353,6 +1354,9 @@ def _tool_blocked_reason(name: str):
             return None
         return ("execute_python e' disattivato: esegue codice arbitrario sul PC. Per attivarlo impostare SW_MCP_ALLOW_PYTHON=1 "
                 "nella configurazione del server MCP e riavviare il client.")
+    missing = not_implemented_reason(name)
+    if missing:
+        return missing
     group = _tool_group(name)
     if group is None or group in _enabled_toolsets():
         return None

@@ -69,81 +69,55 @@ async def run():
                 ok_scp, _, _ = await c.call("set_config_custom_property", property_name="PartNumber", value="SW-1002", configuration="Default")
                 record("set_config_custom_property", ok_scp)
 
-                ok_gcp, _, _ = await c.call("get_config_custom_property", property_name="PartNumber", configuration="Default")
-                record("get_config_custom_property", ok_gcp)
+                ok_gcp, _, data_gcp = await c.call("get_config_custom_property", property_name="PartNumber", configuration="Default")
+                letto_gcp = (data_gcp or {}).get("value") or (data_gcp or {}).get("resolved")
+                record("get_config_custom_property", ok_gcp and letto_gcp == "SW-1002", f"letto {letto_gcp!r}")
 
                 ok_smd, _, _ = await c.call("set_document_summary_info", title="Staffa Robotica", author="Elia", comments="Release 8.3")
                 record("set_document_summary_info", ok_smd)
 
-                # 2. Materiali
-                ok_cmat, _, _ = await c.call("create_custom_material", material_name="Titanium_Alloy_Ti6Al4V", density=4430.0, elastic_modulus=114000.0)
-                record("create_custom_material", ok_cmat)
-
                 # 3. Equazioni
+                ok_aeq, _, _ = await c.call("add_equation", equation='"TestVar" = 12')
                 ok_eqx, text_eqx, _ = await c.call("export_equations_to_file", filepath=str(EQ_OUT), overwrite=True)
-                record("export_equations_to_file", ok_eqx, text_eqx[:120])
+                contenuto_eq = EQ_OUT.read_text(encoding="utf-8") if EQ_OUT.exists() else ""
+                record("export_equations_to_file", ok_aeq and ok_eqx and "TestVar" in contenuto_eq, text_eqx[:120])
 
                 # 4. Configurazioni e Tabelle di Progettazione
-                ok_idt, _, _ = await c.call("insert_design_table", blank=True)
-                record("insert_design_table", ok_idt)
-
-                ok_edt, _, _ = await c.call("edit_design_table", row_index=1, column_name="D1@Sketch1", value="120")
-                record("edit_design_table", ok_edt)
-
-                ok_xdt, _, _ = await c.call("export_design_table", filepath=str(DT_OUT), overwrite=True)
-                record("export_design_table", ok_xdt)
+                ok_idt, text_idt, _ = await c.call("insert_design_table", blank=True)
+                record("insert_design_table: rifiutato perche' non implementato", (not ok_idt) and "non e' implementato" in text_idt,
+                       text_idt[:80])
 
                 ok_dcf, _, _ = await c.call("create_derived_configuration", name="Config_Machined", parent_configuration="Default")
                 record("create_derived_configuration", ok_dcf)
 
-                # 5. Misure Geometriche e Massa
-                ok_pja, _, _ = await c.call("get_projected_area", direction=[0, 0, 1])
-                record("get_projected_area", ok_pja)
-
-                ok_cle, _, _ = await c.call("calculate_clearance_envelope", clearance_offset=8.0)
-                record("calculate_clearance_envelope", ok_cle)
-
                 # 6. Esportazione Modelli 3D e CAD Neutri
-                ok_242, _, _ = await c.call("export_step_ap242_pmi", filepath=str(STEP_OUT), overwrite=True)
-                record("export_step_ap242_pmi", ok_242)
+                ok_242, text_242, _ = await c.call("export_step_ap242_pmi", filepath=str(STEP_OUT), overwrite=True)
+                record("export_step_ap242_pmi: rifiutato perche' non implementato", (not ok_242) and "non e' implementato" in text_242,
+                       text_242[:80])
 
                 ok_dxf, _, _ = await c.call("export_dxf_flat_pattern", filepath=str(DXF_OUT), overwrite=True)
                 record("export_dxf_flat_pattern", ok_dxf)
 
-                ok_jt, _, _ = await c.call("export_jt", filepath=str(JT_OUT), overwrite=True)
-                record("export_jt", ok_jt)
+                ok_jt, text_jt, _ = await c.call("export_jt", filepath=str(JT_OUT), overwrite=True)
+                record("export_jt: rifiutato perche' non implementato", (not ok_jt) and "non e' implementato" in text_jt, text_jt[:80])
 
-                ok_ifc, _, _ = await c.call("export_ifc", filepath=str(IFC_OUT), overwrite=True)
-                record("export_ifc", ok_ifc)
+                ok_ifc, _, _ = await c.call("export_ifc", filepath=str(IFC_OUT), overwrite=True, schema_version="IFC2X3")
+                ifc_head = IFC_OUT.read_bytes()[:65536].decode("latin-1") if IFC_OUT.exists() else ""
+                record("export_ifc", ok_ifc and ifc_head.startswith("ISO-10303-21") and "IFC2X3" in ifc_head,
+                       f"{IFC_OUT.stat().st_size if IFC_OUT.exists() else 0} byte")
 
                 ok_glb, _, _ = await c.call("export_gltf_glb", filepath=str(GLB_OUT), overwrite=True)
-                record("export_gltf_glb", ok_glb)
+                glb_head = GLB_OUT.read_bytes()[:4] if GLB_OUT.exists() else b""
+                record("export_gltf_glb", ok_glb and glb_head == b"glTF", f"{GLB_OUT.stat().st_size if GLB_OUT.exists() else 0} byte")
 
-                ok_3dp, _, _ = await c.call("export_3d_pdf", filepath=str(PDF3D_OUT), overwrite=True)
-                record("export_3d_pdf", ok_3dp)
+                ok_3dp, _, data_3dp = await c.call("export_3d_pdf", filepath=str(PDF3D_OUT), overwrite=True)
+                pdf_head = PDF3D_OUT.read_bytes()[:5] if PDF3D_OUT.exists() else b""
+                has_3d = ((data_3dp or {}).get("verify") or {}).get("has_3d")
+                record("export_3d_pdf", ok_3dp and pdf_head == b"%PDF-" and has_3d is True, f"has_3d={has_3d}")
 
                 # 7. Quotatura 3D MBD / DimXpert (PMI)
-                ok_ddm, _, _ = await c.call("add_dimxpert_dimension", face1_point=[0, 0, 25], dimension_type="size")
-                record("add_dimxpert_dimension", ok_ddm)
-
-                ok_ddt, _, _ = await c.call("add_dimxpert_datum", face_point=[0, 0, 25], datum_label="A")
-                record("add_dimxpert_datum", ok_ddt)
-
-                ok_dgt, _, _ = await c.call("add_dimxpert_geometric_tolerance", face_point=[0, 0, 25], tolerance_type="flatness", tolerance_value=0.03, datum_reference="A")
-                record("add_dimxpert_geometric_tolerance", ok_dgt)
-
-                ok_ads, _, _ = await c.call("auto_dimension_scheme_dimxpert", part_type="prismatic", tolerance_type="geometric")
-                record("auto_dimension_scheme_dimxpert", ok_ads)
-
-                ok_lda, _, _ = await c.call("list_dimxpert_annotations")
-                record("list_dimxpert_annotations", ok_lda)
-
-                # 8. Rendering e Aspetti
-                ok_svb, _, _ = await c.call("set_view_background", background_type="studio")
-                record("set_view_background", ok_svb)
-
-                ok_app, _, _ = await c.call("apply_appearance", appearance_name="polished_chrome", color_rgb=[230, 230, 230])
-                record("apply_appearance", ok_app)
+                ok_nim, text_nim, _ = await c.call("add_dimxpert_dimension", face1_point=[0, 0, 25], dimension_type="size")
+                record("add_dimxpert_dimension: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
                 # Chiudi documento
                 await c.call("close_document", discard=True)

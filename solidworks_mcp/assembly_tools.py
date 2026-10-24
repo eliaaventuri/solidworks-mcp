@@ -143,8 +143,8 @@ _TOOLS = {
         "Create an exploded view from steps [{components:['perno-1'], direction:'x'|'-y'|[1,1,0]|entity, distance:40, reverse}] (free "
         "direction = any vector, split into X/Y/Z steps; entity direction = edge/axis/cylindrical face, e.g. {\"edge\":[x,y,z]}) or "
         "RADIAL steps [{components:[..], radial_axis:{\"face\":[x,y,z],\"component\":\"staffa-1\"}, distance:30, angle:30, "
-        "diverge:false}] (move away from the axis, rotate by `angle` degrees). Rotation in translation steps (rotate_angle) is not "
-        "stored by SolidWorks (rotation_applied=false). Returns the exploded poses; keep_exploded=false collapses afterwards. "
+        "diverge:false}] (move away from the axis, rotate by `angle` degrees). Translation steps along x|y|z can also rotate the component "
+        "(rotate_angle + rotate_axis x|y|z, about a line through its bounding-box center; rotation_applied is read back). Returns the exploded poses; keep_exploded=false collapses afterwards. "
         "Example: {\"steps\":[{\"components\":[\"perno-1\"],\"direction\":\"z\",\"distance\":40}]}",
         {"steps": (A, "List of explode step objects (see tool description)"), "unit": _UNIT,
          "keep_exploded": (B, "true = keep exploded (default true)")}, ["steps"]),
@@ -154,7 +154,7 @@ _TOOLS = {
         {"components": _COMPS,
          "direction": (None, "x|y|z|-x|-y|-z, free vector [vx,vy,vz] or entity (edge/axis/cylindrical face)"),
          "distance": (N, "Explode distance in mm (default 30)"), "reverse": (B, "true = reverse direction"),
-         "rotate_angle": (N, "Rotation in degrees (not stored by SolidWorks in translation steps)"),
+         "rotate_angle": (N, "Rotation in degrees during a translation step (about rotate_axis, through the component's box center)"),
          "rotate_axis": (S, "Rotation axis (x|y|z) for rotate_angle"),
          "radial_axis": (None, "Cylindrical face/axis of the RADIAL step"),
          "angle": (N, "Rotation of the radial step, in degrees"),

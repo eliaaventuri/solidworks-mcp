@@ -9,9 +9,12 @@ C3 - tipi di passo
     nativo con IExplodeStep.SetExplodeDirection (qualsiasi orientamento; il verso e' quello dell'entita');
   * RADIALE: "radial_axis": entita' (faccia cilindrica/asse) -> IConfiguration.AddRadialExplodeStep(distanza, angolo, divergente):
     i componenti si allontanano dall'asse in direzione radiale e ruotano di `angle` (verificato);
-  * rotazione nei passi di traslazione: AddExplodeStep2(.., ExplAng, RotAxisIndex, ..) NON memorizza l'angolo in SolidWorks 2026
-    (RotationAngle resta 0 con qualunque combinazione); il passo restituisce `rotation_applied` = False e il motivo. La rotazione
-    funziona nei passi radiali (`angle`). Neanche scrivere IExplodeStep.RotationAngle dopo la creazione funziona (resta 0, 2026-10-17).
+  * rotazione nei passi di traslazione: AddExplodeStep2(.., ExplAng, RotAxisIndex, .., spaziatura automatica, ..) memorizza
+    l'angolo SOLO con la spaziatura automatica a False (con True RotationAngle resta 0: era la causa del "non funziona" del
+    2026-10-17). RotAxisIndex: 0 = Z, 1 = X, 2 = Y dell'assieme, per ogni direzione di traslazione; il componente ruota attorno
+    a una retta per il centro del suo box (misurato 2026-10-24: 45,0 gradi sull'asse chiesto). Con una direzione da entita'
+    la spaziatura resta True (con False la direzione esce perpendicolare): li' la rotazione puo' non essere memorizzata e il
+    passo lo dichiara (`rotation_applied` riletto da IExplodeStep.RotationAngle).
     Rotazione SENZA spostamento: un passo radiale con distanza 0 e `angle` dopo la traslazione ruota il componente di `angle` attorno
     alla direzione radiale (dall'asse scelto al componente), misurato 45,0000 gradi con distanza radiale invariata; l'asse quindi non
     e' libero, e un componente coassiale all'asse radiale da' errore (codice 1, direzione radiale indefinita).
@@ -183,7 +186,8 @@ class AssemblyExplodeMixin:
             return None, e
         kind, data = kind
         rot = math.radians(float(rotate_angle or 0.0))
-        rot_idx = (_DIRS.get(str(rotate_axis or "x").lower()) or (0, False))[0] if rotate_angle else -1
+        # RotAxisIndex di AddExplodeStep2 conta gli assi dell'assieme come 0 = Z, 1 = X, 2 = Y (misurato, uguale per ogni direzione)
+        rot_idx = ((_DIRS.get(str(rotate_axis or "x").lower()) or (0, False))[0] + 1) % 3 if rotate_angle else -1
         if kind == "axis":
             plan = [(data[0], data[1] != bool(reverse), dist, None)]
         elif kind == "vector":
@@ -198,7 +202,9 @@ class AssemblyExplodeMixin:
             plan = [(0, bool(reverse), dist, obj)]
         for (idx, rev, d, obj) in plan:
             self._as_select_comps(doc, comps, 1)
-            st, code = new_step(lambda er: cfg.AddExplodeStep2(d, idx, rev, rot, rot_idx, False, False, True, er))
+            # 8o argomento (spaziatura automatica): True sposta il 2o componente di un passo ~4 volte la distanza e annulla la
+            # rotazione; con un'entita' come direzione serve True, altrimenti SetExplodeDirection da' una direzione perpendicolare
+            st, code = new_step(lambda er: cfg.AddExplodeStep2(d, idx, rev, rot, rot_idx, False, False, obj is not None, er))
             if st is None:
                 return None, f"AddExplodeStep2 fallito (codice {code}: 3 = nessun componente selezionato)"
             if obj is not None:
@@ -213,7 +219,7 @@ class AssemblyExplodeMixin:
                 row["rotation_requested_deg"] = float(rotate_angle)
                 row["rotation_applied"] = abs(got - rot) < 1e-9
                 if not row["rotation_applied"]:
-                    row["rotation_note"] = ("SolidWorks non memorizza la rotazione nei passi di traslazione (RotationAngle=0): "
+                    row["rotation_note"] = ("SolidWorks non ha memorizzato la rotazione in questo passo (RotationAngle=0, succede con la direzione da entita'): "
                                             "aggiungi un passo radiale con distanza 0 e `angle` (ruota attorno alla direzione "
                                             "radiale dall'asse scelto al componente)")
             made.append(row)

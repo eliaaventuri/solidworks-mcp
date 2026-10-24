@@ -5,6 +5,7 @@ e personalizzazione grafica (mixin Data2Operations). Schemi in tools_ext/data2.p
 """
 
 import os
+import re
 import logging
 from typing import Dict
 
@@ -44,20 +45,17 @@ class Data2Operations:
             doc, err = self._doc()
             if err:
                 return err
-            cfg_name = str(configuration) if configuration else self._get_active_config_name(doc)
+            cfg_name = str(configuration) if configuration else self._dx_cfg_name(doc)
             cpm = doc.Extension.CustomPropertyManager(cfg_name)
-            val = ""
-            res = ""
-            try:
-                res_val = cpm.Get5(str(property_name), False, val, res, False)
-                if isinstance(res_val, tuple) and len(res_val) >= 3:
-                    val = res_val[1]
-                    res = res_val[2]
-            except Exception:
-                pass
+            presenti = [str(n) for n in (cpm.GetNames or ())]
+            if str(property_name) not in presenti:
+                return self._result(False, f"get_config_custom_property: '{property_name}' non esiste sulla configurazione "
+                                           f"'{cfg_name}' (presenti: {presenti})", SwErrors.swGenericError)
+            letto = self._dx_read_prop(cpm, str(property_name))
             return self._result(
-                True, f"Proprieta' '{property_name}' [Conf: {cfg_name}]: {res or val}",
-                SwErrors.swSuccess, {"property_name": property_name, "configuration": cfg_name, "value": val, "resolved": res}
+                True, f"Proprieta' '{property_name}' [Conf: {cfg_name}]: {letto['resolved'] or letto['value']}",
+                SwErrors.swSuccess, {"property_name": property_name, "configuration": cfg_name, "value": letto["value"],
+                                     "resolved": letto["resolved"]}
             )
         except Exception as e:
             return self._result(False, f"get_config_custom_property: {e}", SwErrors.swGenericError)
@@ -69,19 +67,29 @@ class Data2Operations:
             doc, err = self._doc()
             if err:
                 return err
-            cfg_name = str(configuration) if configuration else self._get_active_config_name(doc)
+            cfg_name = str(configuration) if configuration else self._dx_cfg_name(doc)
             cpm = doc.Extension.CustomPropertyManager(cfg_name)
+            errori = []
             try:
                 cpm.Add3(str(property_name), 30, str(value), 1)
-            except Exception:
-                pass
+            except Exception as e:
+                errori.append(f"Add3: {e}")
             try:
                 cpm.Set2(str(property_name), str(value))
-            except Exception:
-                pass
+            except Exception as e:
+                errori.append(f"Set2: {e}")
+            letto = self._dx_read_prop(cpm, str(property_name))
+            if str(value) not in (str(letto["value"]), str(letto["resolved"])):
+                return self._result(
+                    False, f"set_config_custom_property: '{property_name}' non impostata su configurazione '{cfg_name}' "
+                           f"(riletto '{letto['value']}'). {' | '.join(errori)}",
+                    SwErrors.swGenericError, {"property_name": property_name, "configuration": cfg_name, "read_back": letto,
+                                              "ignored_params": ["property_type"]}
+                )
             return self._result(
-                True, f"Proprieta' '{property_name}' impostata a '{value}' su configurazione '{cfg_name}'.",
-                SwErrors.swSuccess, {"property_name": property_name, "configuration": cfg_name, "value": value}
+                True, f"Proprieta' '{property_name}' impostata a '{value}' su configurazione '{cfg_name}' (verificata rileggendola).",
+                SwErrors.swSuccess, {"property_name": property_name, "configuration": cfg_name, "value": value,
+                                     "ignored_params": ["property_type"]}
             )
         except Exception as e:
             return self._result(False, f"set_config_custom_property: {e}", SwErrors.swGenericError)
@@ -94,15 +102,29 @@ class Data2Operations:
             if err:
                 return err
             fields = {0: title, 1: subject, 2: author, 3: keywords, 4: comments}
+            verificati, non_verificati = [], []
             for idx, text in fields.items():
                 if text is not None:
                     try:
                         doc.SummaryInfo(idx, str(text))
+                    except Exception as e:
+                        return self._result(False, f"set_document_summary_info: scrittura del campo {idx} non riuscita: {e}",
+                                            SwErrors.swGenericError)
+                    try:
+                        letto = doc.SummaryInfo(idx)
                     except Exception:
-                        pass
+                        letto = None
+                    if letto is None:
+                        non_verificati.append(idx)
+                    elif str(letto) != str(text):
+                        return self._result(False, f"set_document_summary_info: campo {idx} riletto '{letto}' invece di '{text}'",
+                                            SwErrors.swGenericError)
+                    else:
+                        verificati.append(idx)
             return self._result(
                 True, "Metadati di riepilogo del documento aggiornati.",
-                SwErrors.swSuccess, {"title": title, "subject": subject, "author": author, "keywords": keywords, "comments": comments}
+                SwErrors.swSuccess, {"title": title, "subject": subject, "author": author, "keywords": keywords, "comments": comments,
+                                     "verified_fields": verificati, "unverified_fields": non_verificati}
             )
         except Exception as e:
             return self._result(False, f"set_document_summary_info: {e}", SwErrors.swGenericError)
@@ -137,23 +159,24 @@ class Data2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            em = getattr(doc, "GetEquationMgr", None)
-            if callable(em):
-                try:
-                    em = em()
-                except Exception:
-                    pass
+            try:
+                em = self._com(doc, "GetEquationMgr")
+            except Exception as e:
+                return self._result(False, f"export_equations_to_file: gestore equazioni non disponibile: {e}", SwErrors.swGenericError)
+            if em is None:
+                return self._result(False, "export_equations_to_file: gestore equazioni non disponibile", SwErrors.swGenericError)
             lines = []
-            if em:
-                try:
-                    cnt = int(em.GetCount() if callable(getattr(em, "GetCount", None)) else em.GetCount)
-                    for i in range(cnt):
-                        eq = str(em.Equation(i))
-                        lines.append(eq)
-                except Exception:
-                    pass
+            try:
+                cnt = int(self._com(em, "GetCount"))
+                for i in range(cnt):
+                    eq = str(em.Equation(i))
+                    lines.append(eq)
+            except Exception as e:
+                return self._result(False, f"export_equations_to_file: lettura delle equazioni non riuscita: {e}", SwErrors.swGenericError)
             with open(path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) if lines else "# Nessuna equazione definita\n")
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_equations_to_file: file '{path}' assente o vuoto dopo la scrittura", SwErrors.swExportError)
             return self._result(
                 True, f"Esportate {len(lines)} equazioni nel file '{path}'.",
                 SwErrors.swSuccess, {"filepath": path, "count": len(lines)}
@@ -168,13 +191,15 @@ class Data2Operations:
             doc, err = self._part_or_assembly()
             if err:
                 return err
+            if excel_file and not os.path.isfile(excel_file):
+                return self._result(False, f"insert_design_table: file Excel '{excel_file}' non trovato", SwErrors.swFileNotFoundError)
             try:
-                if excel_file and os.path.isfile(excel_file):
+                if excel_file:
                     doc.InsertDesignTable(str(excel_file))
                 else:
                     doc.InsertDesignTable2(bool(blank))
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"insert_design_table: inserimento della tabella non riuscito: {e}", SwErrors.swGenericError)
             return self._result(
                 True, "Tabella di progettazione (Design Table) inserita nel modello.",
                 SwErrors.swSuccess, {"excel_file": excel_file, "blank": blank}
@@ -230,8 +255,12 @@ class Data2Operations:
             cm = doc.ConfigurationManager
             try:
                 cm.AddConfiguration2(str(name), "", str(description or ""), 0, str(parent_configuration), "", False)
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"create_derived_configuration: creazione di '{name}' non riuscita: {e}", SwErrors.swGenericError)
+            presenti = self._dx_cfg_names(doc)
+            if str(name) not in presenti:
+                return self._result(False, f"create_derived_configuration: '{name}' non compare tra le configurazioni {presenti}",
+                                    SwErrors.swGenericError)
             return self._result(
                 True, f"Configurazione derivata '{name}' creata da genitore '{parent_configuration}'.",
                 SwErrors.swSuccess, {"name": name, "parent": parent_configuration, "description": description}
@@ -289,13 +318,30 @@ class Data2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            app = self._sw_app
+            prev_ap = app.GetUserPreferenceIntegerValue(75)
             try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
+                app.SetUserPreferenceIntegerValue(75, 242)
+                ok, errori, avvisi = self._save_as(doc, path)
+            except Exception as e:
+                return self._result(False, f"export_step_ap242_pmi: esportazione non riuscita: {e}", SwErrors.swExportError)
+            finally:
+                app.SetUserPreferenceIntegerValue(75, prev_ap)
+            if not ok:
+                return self._result(False, f"export_step_ap242_pmi: SaveAs non riuscito (errori {errori}, avvisi {avvisi})",
+                                    SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_step_ap242_pmi: file '{path}' assente o vuoto dopo l'esportazione", SwErrors.swExportError)
+            info = (self.inspect_export_file(path) or {}).get("data") or {}
+            ap = info.get("application_protocol")
+            if ap != "AP242":
+                return self._result(False, f"export_step_ap242_pmi: il file scritto e' {ap} (schema {info.get('schema')}), non AP242: "
+                                           "SolidWorks 2026 non scrive AP242 via API", SwErrors.swExportError,
+                                    {"filepath": path, "application_protocol": ap, "schema": info.get("schema")})
             return self._result(
-                True, f"Modello esportato in STEP AP242 PMI in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "include_pmi": include_pmi}
+                True, f"Modello esportato in STEP AP242 in '{path}'.",
+                SwErrors.swSuccess, {"filepath": path, "include_pmi": include_pmi, "ignored_params": ["include_pmi"],
+                                     "application_protocol": ap}
             )
         except Exception as e:
             return self._result(False, f"export_step_ap242_pmi: {e}", SwErrors.swGenericError)
@@ -312,11 +358,13 @@ class Data2Operations:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
                 doc.ExportFlatPatternView(path, 1)
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"export_dxf_flat_pattern: esportazione non riuscita: {e}", SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_dxf_flat_pattern: file '{path}' assente o vuoto dopo l'esportazione", SwErrors.swExportError)
             return self._result(
                 True, f"Lamiera spianata esportata in DXF 1:1 in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "bend_lines": include_bend_lines}
+                SwErrors.swSuccess, {"filepath": path, "bend_lines": include_bend_lines, "ignored_params": ["include_bend_lines"]}
             )
         except Exception as e:
             return self._result(False, f"export_dxf_flat_pattern: {e}", SwErrors.swGenericError)
@@ -332,17 +380,23 @@ class Data2Operations:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
+                ok, errori, avvisi = self._save_as(doc, path)
+            except Exception as e:
+                return self._result(False, f"export_jt: esportazione non riuscita: {e}", SwErrors.swExportError)
+            if not ok:
+                return self._result(False, f"export_jt: SaveAs non riuscito (errori {errori}, avvisi {avvisi}): SolidWorks 2026 "
+                                           f"non scrive JT via API, nessun file '{path}'", SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_jt: file '{path}' assente o vuoto dopo l'esportazione", SwErrors.swExportError)
             return self._result(
                 True, f"Modello esportato in formato JT in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "tessellation_level": tessellation_level}
+                SwErrors.swSuccess, {"filepath": path, "tessellation_level": tessellation_level,
+                                     "ignored_params": ["tessellation_level"]}
             )
         except Exception as e:
             return self._result(False, f"export_jt: {e}", SwErrors.swGenericError)
 
-    def export_ifc(self, filepath: str, schema_version: str = "IFC4", overwrite: bool = False) -> Dict:
+    def export_ifc(self, filepath: str, schema_version: str = "IFC2X3", overwrite: bool = False) -> Dict:
         """Esporta la geometria 3D nel formato standard aperto BIM/AEC IFC."""
         try:
             doc, err = self._part_or_assembly()
@@ -353,12 +407,25 @@ class Data2Operations:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
+                ok, errori, avvisi = self._save_as(doc, path)
+            except Exception as e:
+                return self._result(False, f"export_ifc: esportazione non riuscita: {e}", SwErrors.swExportError)
+            if not ok:
+                return self._result(False, f"export_ifc: SaveAs non riuscito (errori {errori}, avvisi {avvisi})", SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_ifc: file '{path}' assente o vuoto dopo l'esportazione", SwErrors.swExportError)
+            with open(path, "rb") as f:
+                testa = f.read(65536).decode("latin-1")
+            schemi = re.findall(r"FILE_SCHEMA\s*\(\(\s*'([^']+)'", testa)
+            if not testa.startswith("ISO-10303-21") or not schemi:
+                return self._result(False, f"export_ifc: '{path}' non e' un IFC (intestazione STEP/FILE_SCHEMA mancante)", SwErrors.swExportError)
+            if str(schema_version).upper() not in [s.upper() for s in schemi]:
+                return self._result(False, f"export_ifc: richiesto {schema_version} ma il file scritto e' {schemi[0]}: SolidWorks 2026 "
+                                           f"non scrive {schema_version} via API (usa schema_version=IFC2X3)", SwErrors.swExportError,
+                                    {"filepath": path, "schema_written": schemi[0]})
             return self._result(
-                True, f"Geometria esportata in formato BIM IFC ({schema_version}) in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "schema": schema_version}
+                True, f"Geometria esportata in formato BIM IFC ({schemi[0]}) in '{path}'.",
+                SwErrors.swSuccess, {"filepath": path, "schema": schemi[0], "ignored_params": []}
             )
         except Exception as e:
             return self._result(False, f"export_ifc: {e}", SwErrors.swGenericError)
@@ -373,13 +440,24 @@ class Data2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not binary:
+                return self._result(False, "export_gltf_glb: solo GLB (binary=true): con binary=false SolidWorks 2026 non scrive il "
+                                           ".gltf (SaveAs riuscito ma nessun file)", SwErrors.swInvalidInput)
             try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
+                ok, errori, avvisi = self._save_as(doc, path)
+            except Exception as e:
+                return self._result(False, f"export_gltf_glb: esportazione non riuscita: {e}", SwErrors.swExportError)
+            if not ok:
+                return self._result(False, f"export_gltf_glb: SaveAs non riuscito (errori {errori}, avvisi {avvisi})", SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_gltf_glb: file '{path}' assente o vuoto dopo l'esportazione", SwErrors.swExportError)
+            with open(path, "rb") as f:
+                magia = f.read(4)
+            if magia != b"glTF":
+                return self._result(False, f"export_gltf_glb: '{path}' non inizia con 'glTF' (trovato {magia!r})", SwErrors.swExportError)
             return self._result(
-                True, f"Modello esportato in formato glTF/GLB in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "binary": binary}
+                True, f"Modello esportato in formato GLB in '{path}'.",
+                SwErrors.swSuccess, {"filepath": path, "binary": binary, "ignored_params": []}
             )
         except Exception as e:
             return self._result(False, f"export_gltf_glb: {e}", SwErrors.swGenericError)
@@ -394,14 +472,7 @@ class Data2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
-            return self._result(
-                True, f"PDF 3D interattivo generato in '{path}'.",
-                SwErrors.swSuccess, {"filepath": path, "quality_dpi": quality_dpi}
-            )
+            return self.export_model(filepath=path, format="pdf")
         except Exception as e:
             return self._result(False, f"export_3d_pdf: {e}", SwErrors.swGenericError)
 

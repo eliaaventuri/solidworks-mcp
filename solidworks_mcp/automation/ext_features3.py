@@ -14,16 +14,24 @@ from .modeling_base import null_variant
 logger = logging.getLogger(__name__)
 
 
+def _con_ignorati(res: Dict, nomi: list) -> Dict:
+    """Aggiunge a `data` la lista dei parametri dello schema non applicati."""
+    if nomi and isinstance(res, dict) and isinstance(res.get("data"), dict):
+        res["data"]["ignored_params"] = nomi
+    return res
+
+
 class Features3Operations:
     """Mixin per feature avanzate 3D, feature sottili, tagli dedicati e manipolazione albero."""
 
     def rib_feature(self, thickness: float, sketch: str = None, reverse_thickness: bool = False,
                     draft_angle: float = 0.0, draft_outward: bool = False, unit: str = None) -> Dict:
         """Crea una nervatura di rinforzo a partire da uno schizzo."""
-        return self.rib(
-            thickness=thickness, sketch=sketch, reverse_thickness=reverse_thickness,
-            draft_angle=draft_angle, draft_outward=draft_outward, unit=unit
+        res = self.rib(
+            thickness=thickness, sketch=sketch, flip_material=bool(reverse_thickness),
+            draft_angle=draft_angle, unit=unit
         )
+        return _con_ignorati(res, ["draft_outward"] if draft_outward else [])
 
     def boundary_boss(self, direction1_curves: list, direction2_curves: list = None, unit: str = None) -> Dict:
         """Crea un'estrusione solida di delimitazione (Boundary Boss)."""
@@ -35,17 +43,17 @@ class Features3Operations:
             # swFeatureNameID_e.swFmBoundaryBoss = 111 (or CreateBoundaryBossFeatureData)
             doc.ClearSelection2(True)
             for c in direction1_curves or []:
-                doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
+                if not doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                    return self._result(False, f"boundary_boss: curva '{c}' non trovata", SwErrors.swSelectionError)
             for c in direction2_curves or []:
-                doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0)
-            feat = None
-            try:
-                feat = fm.InsertBoundaryBossFeature(None, None)
-            except Exception:
-                pass
+                if not doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0):
+                    return self._result(False, f"boundary_boss: curva '{c}' non trovata", SwErrors.swSelectionError)
+            feat = fm.InsertBoundaryBossFeature(None, None)
+            if feat is None:
+                return self._result(False, "boundary_boss: SolidWorks non ha creato la feature", SwErrors.swFeatureError)
             return self._result(
                 True, "Feature di delimitazione (Boundary Boss) creata.",
-                SwErrors.swSuccess, {"created": feat is not None, "dir1_curves": direction1_curves}
+                SwErrors.swSuccess, {"created": True, "dir1_curves": direction1_curves}
             )
         except Exception as e:
             logger.error(f"boundary_boss: {e}\n{traceback.format_exc()}")
@@ -60,17 +68,17 @@ class Features3Operations:
             fm = doc.FeatureManager
             doc.ClearSelection2(True)
             for c in direction1_curves or []:
-                doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
+                if not doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                    return self._result(False, f"boundary_cut: curva '{c}' non trovata", SwErrors.swSelectionError)
             for c in direction2_curves or []:
-                doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0)
-            feat = None
-            try:
-                feat = fm.InsertBoundaryCutFeature(None, None)
-            except Exception:
-                pass
+                if not doc.Extension.SelectByID2(str(c), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0):
+                    return self._result(False, f"boundary_cut: curva '{c}' non trovata", SwErrors.swSelectionError)
+            feat = fm.InsertBoundaryCutFeature(None, None)
+            if feat is None:
+                return self._result(False, "boundary_cut: SolidWorks non ha creato la feature", SwErrors.swFeatureError)
             return self._result(
                 True, "Taglio con delimitazione (Boundary Cut) eseguito.",
-                SwErrors.swSuccess, {"created": feat is not None, "dir1_curves": direction1_curves}
+                SwErrors.swSuccess, {"created": True, "dir1_curves": direction1_curves}
             )
         except Exception as e:
             logger.error(f"boundary_cut: {e}\n{traceback.format_exc()}")
@@ -93,20 +101,23 @@ class Features3Operations:
                 return err
             doc.ClearSelection2(True)
             # Select tool body Mark 1
-            self._select_point(doc, tool_body_point, mark=1, unit=unit)
+            ok, info = self._select_point(doc, "face", tool_body_point, unit=unit, mark=1)
+            if not ok:
+                return self._result(False, f"solid_sweep_cut: corpo utensile non selezionato: {info.get('error', '')}",
+                                    SwErrors.swSelectionError)
             # Select path sketch Mark 4
-            doc.Extension.SelectByID2(str(path_sketch), "SKETCH", 0, 0, 0, True, 4, null_variant(), 0)
+            if not doc.Extension.SelectByID2(str(path_sketch), "SKETCH", 0, 0, 0, True, 4, null_variant(), 0):
+                return self._result(False, f"solid_sweep_cut: percorso '{path_sketch}' non trovato", SwErrors.swSelectionError)
             for g in guide_sketches or []:
-                doc.Extension.SelectByID2(str(g), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0)
+                if not doc.Extension.SelectByID2(str(g), "SKETCH", 0, 0, 0, True, 2, null_variant(), 0):
+                    return self._result(False, f"solid_sweep_cut: guida '{g}' non trovata", SwErrors.swSelectionError)
             fm = doc.FeatureManager
-            feat = None
-            try:
-                feat = fm.InsertSweepRefProfile2(True, False, 0, False, False, 0, 0, 0, True, 0, 0, 0)
-            except Exception:
-                pass
+            feat = fm.InsertSweepRefProfile2(True, False, 0, False, False, 0, 0, 0, True, 0, 0, 0)
+            if feat is None:
+                return self._result(False, "solid_sweep_cut: SolidWorks non ha creato il taglio", SwErrors.swFeatureError)
             return self._result(
                 True, f"Taglio con sweep solido lungo {path_sketch} eseguito.",
-                SwErrors.swSuccess, {"created": feat is not None, "path_sketch": path_sketch}
+                SwErrors.swSuccess, {"created": True, "path_sketch": path_sketch}
             )
         except Exception as e:
             logger.error(f"solid_sweep_cut: {e}\n{traceback.format_exc()}")
@@ -140,19 +151,23 @@ class Features3Operations:
                      axis=None, thin_type: str = "one_direction", cut: bool = False, unit: str = None) -> Dict:
         """Crea una rivoluzione solida a parete sottile."""
         if cut:
-            return self.revolve_cut(sketch=sketch, angle=angle, axis=axis, unit=unit)
-        else:
-            return self.revolve_boss(sketch=sketch, angle=angle, axis=axis, unit=unit)
+            res = self.revolve_cut(sketch=sketch, angle=angle, axis=axis, unit=unit)
+            return _con_ignorati(res, ["thickness", "thin_type"])
+        res = self.revolve_boss(sketch=sketch, angle=angle, axis=axis, thin_thickness=thickness, unit=unit)
+        return _con_ignorati(res, ["thin_type"])
 
     def hole_wizard_standard(self, face_point: list = None, hole_type: str = "counterbore",
                              standard: str = "ISO", size: str = "M8", depth: float = 20.0,
                              positions: list = None, unit: str = None) -> Dict:
         """Genera fori normalizzati tramite Creazione Guidata Fori (Hole Wizard)."""
         ht_map = {"counterbore": "counterbore", "countersink": "countersink", "tap": "tapped", "simple": "simple"}
-        t = ht_map.get(str(hole_type).lower(), "counterbore")
+        t = ht_map.get(str(hole_type).lower())
+        if t is None:
+            return self._result(False, f"hole_wizard_standard: tipo di foro sconosciuto: {hole_type} "
+                                       f"(counterbore|countersink|tap|simple)", SwErrors.swInvalidInput)
         return self.create_hole(
-            face_point=face_point, hole_type=t, standard=standard, size=size,
-            depth=depth, positions=positions, unit=unit
+            kind=t, size=size, face_point=face_point, positions=positions,
+            depth=depth, standard=standard, unit=unit
         )
 
     def advanced_hole(self, face_point: list, stages: list, unit: str = None) -> Dict:
@@ -168,7 +183,7 @@ class Features3Operations:
 
     def mirror_body(self, body_point: list, mirror_plane: str, unit: str = None) -> Dict:
         """Specchia un intero corpo solido o di superficie in una parte multicorpo."""
-        return self.mirror_feature(mirror_plane=mirror_plane, bodies=[body_point], unit=unit)
+        return self.mirror_feature(plane=mirror_plane, bodies=[body_point], unit=unit)
 
     def pattern_body(self, body_point: list, direction1, count1: int = 2, spacing1: float = 10.0,
                      pattern_type: str = "linear", count2: int = 1, spacing2: float = 0.0,
@@ -176,16 +191,17 @@ class Features3Operations:
         """Ripete un intero corpo solido o di superficie linearmente o circolarmente."""
         pt = str(pattern_type).lower().strip()
         if pt == "circular":
-            return self.circular_pattern(
-                axis=direction1, count=count1, angle=spacing1,
-                bodies=[body_point], unit=unit
-            )
-        else:
-            return self.linear_pattern(
-                direction1=direction1, spacing1=spacing1, count1=count1,
-                direction2=direction2, spacing2=spacing2, count2=count2,
-                bodies=[body_point], unit=unit
-            )
+            return self._result(
+                False, "pattern_body: pattern circolare non supportato: lo schema non ha un angolo "
+                       "(spacing1 e' una distanza in mm, non un angolo)", SwErrors.swInvalidInput)
+        if pt != "linear":
+            return self._result(False, f"pattern_body: tipo di pattern sconosciuto: {pattern_type} (linear|circular)",
+                                SwErrors.swInvalidInput)
+        return self.linear_pattern(
+            direction1=direction1, spacing1=spacing1, count1=count1,
+            direction2=direction2, spacing2=spacing2, count2=count2,
+            bodies=[body_point], unit=unit
+        )
 
     def variable_pattern(self, feature_name: str, table_entries: list) -> Dict:
         """Crea una ripetizione variabile basata su tabella di quote."""
@@ -205,10 +221,13 @@ class Features3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._select_point(doc, face_point, mark=1, unit=unit)
+            ok, info = self._select_point(doc, "face", face_point, unit=unit, mark=1)
+            if not ok:
+                return self._result(False, f"freeform_feature: faccia non selezionata: {info.get('error', '')}",
+                                    SwErrors.swSelectionError)
             return self._result(
-                True, f"Freeform feature applicata su faccia a {face_point}.",
-                SwErrors.swSuccess, {"face_point": face_point, "control_curves": control_curves_count}
+                False, "freeform_feature: creazione della feature non implementata, nessuna feature inserita.",
+                SwErrors.swNotImplemented, {"face_point": face_point, "control_curves": control_curves_count}
             )
         except Exception as e:
             logger.error(f"freeform_feature: {e}\n{traceback.format_exc()}")
@@ -243,12 +262,20 @@ class Features3Operations:
             if err:
                 return err
             if placement_plane:
-                doc.Extension.SelectByID2(str(placement_plane), "PLANE", 0, 0, 0, False, 0, null_variant(), 0)
+                if not doc.Extension.SelectByID2(str(placement_plane), "PLANE", 0, 0, 0, False, 0, null_variant(), 0):
+                    return self._result(False, f"insert_library_feature: piano '{placement_plane}' non trovato",
+                                        SwErrors.swSelectionError)
+            prima = len(self._names(doc))
             doc.InsertLibraryFeature(str(feature_file))
-            return self._result(
+            dopo = len(self._names(doc))
+            if dopo <= prima:
+                return self._result(False, f"insert_library_feature: '{feature_file}' non inserita "
+                                           f"(feature prima {prima}, dopo {dopo})", SwErrors.swFeatureError)
+            return _con_ignorati(self._result(
                 True, f"Funzione di libreria '{feature_file}' inserita.",
-                SwErrors.swSuccess, {"feature_file": feature_file, "plane": placement_plane}
-            )
+                SwErrors.swSuccess, {"feature_file": feature_file, "plane": placement_plane,
+                                     "features_before": prima, "features_after": dopo}
+            ), ["references"] if references else [])
         except Exception as e:
             logger.error(f"insert_library_feature: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
@@ -260,10 +287,13 @@ class Features3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._select_point(doc, face_point, mark=1, unit=unit)
+            ok, info = self._select_point(doc, "face", face_point, unit=unit, mark=1)
+            if not ok:
+                return self._result(False, f"heal_edges: faccia non selezionata: {info.get('error', '')}",
+                                    SwErrors.swSelectionError)
             return self._result(
-                True, f"Spigoli della faccia a {face_point} sanati (tolleranza {tolerance} mm).",
-                SwErrors.swSuccess, {"face_point": face_point, "tolerance": tolerance}
+                False, "heal_edges: cura degli spigoli non implementata, nessuna modifica eseguita.",
+                SwErrors.swNotImplemented, {"face_point": face_point, "tolerance": tolerance}
             )
         except Exception as e:
             logger.error(f"heal_edges: {e}\n{traceback.format_exc()}")
@@ -277,14 +307,18 @@ class Features3Operations:
             if err:
                 return err
             out = output_filepath or "defeatured_model.sldprt"
-            try:
-                doc.Extension.SaveDeFeaturedFile(out)
-            except Exception:
-                pass
-            return self._result(
-                True, f"Modello semplificato (Defeature) preparato in {out}.",
-                SwErrors.swSuccess, {"output_filepath": out, "remove_internal": remove_internal_bodies}
-            )
+            prima = os.path.getmtime(out) if os.path.isfile(out) else None
+            doc.Extension.SaveDeFeaturedFile(out)
+            if not (os.path.isfile(out) and os.path.getsize(out) > 0
+                    and (prima is None or os.path.getmtime(out) != prima)):
+                return self._result(False, f"defeature_model: file non scritto da SolidWorks: {out}",
+                                    SwErrors.swExportError)
+            ignorati = (["keep_features"] if keep_features else []) + \
+                       (["remove_internal_bodies"] if remove_internal_bodies else [])
+            return _con_ignorati(self._result(
+                True, f"Modello semplificato (Defeature) salvato in {out}.",
+                SwErrors.swSuccess, {"output_filepath": out}
+            ), ignorati)
         except Exception as e:
             logger.error(f"defeature_model: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
@@ -299,12 +333,22 @@ class Features3Operations:
             pos = str(position).lower().strip()
             name = str(target_feature or "").strip()
             if pos == "start":
-                fm.EditRollback(1, "")
+                ok = fm.EditRollback(1, "")
             elif pos == "end":
-                fm.EditRollback(2, "")
-            elif name:
-                doc.Extension.SelectByID2(name, "BODYFEATURE", 0, 0, 0, False, 0, null_variant(), 0)
-                fm.EditRollback(0, name)
+                ok = fm.EditRollback(2, "")
+            elif pos == "before":
+                if not name:
+                    return self._result(False, "set_rollback_bar: serve target_feature per position 'before'",
+                                        SwErrors.swInvalidInput)
+                if not doc.Extension.SelectByID2(name, "BODYFEATURE", 0, 0, 0, False, 0, null_variant(), 0):
+                    return self._result(False, f"set_rollback_bar: feature '{name}' non trovata", SwErrors.swSelectionError)
+                ok = fm.EditRollback(0, name)
+            else:
+                return self._result(False, f"set_rollback_bar: position '{position}' non gestito "
+                                           f"(start|end|before)", SwErrors.swInvalidInput)
+            if not ok:
+                return self._result(False, f"set_rollback_bar: SolidWorks non ha spostato la barra ({position})",
+                                    SwErrors.swFeatureError)
             return self._result(
                 True, f"Barra di rollback posizionata ({position} {target_feature or ''}).",
                 SwErrors.swSuccess, {"target_feature": target_feature, "position": position}

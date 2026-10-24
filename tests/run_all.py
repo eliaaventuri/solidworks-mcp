@@ -27,7 +27,12 @@ OUT = ROOT / "test_output"
 
 # ordine della regressione: prima il test senza SolidWorks, poi dai tool base alle aree che li usano
 ORDER = ["offline", "modeling", "modeling_extra", "assembly", "assembly_extra", "drawings", "drawing_quality", "data", "data_extra", "simulation",
-         "simulation_extra", "timeout"]
+         "simulation_extra", "timeout",
+         # lotti dal 19/10 in poi (prima non erano nella regressione completa)
+         "ext_moka1", "ext_moka2", "ext_sketch2", "ext_curves", "ext_ext1", "ext_bodies2", "ext_features2", "ext_analysis",
+         "ext_manage", "ext_sheetmetal", "ext_weldments", "ext_mold", "ext_surfaces1", "ext_added_tools", "sketch4", "sketch5",
+         "assembly3", "drawings2", "features4", "data2", "simulation2", "audit_collision"]
+TEST_TIMEOUT_S = 2400
 PASS_RE = re.compile(r"(\d+)/(\d+) PASS")
 
 
@@ -86,8 +91,17 @@ def run_one(name, log_dir):
     t0 = time.time()
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     log = log_dir / f"run_{name}.log"            # scritto mentre il test gira: si puo' seguire con  Get-Content -Wait
+    timed_out = False
     with open(log, "w", encoding="utf-8", errors="replace") as f:
-        proc = subprocess.run([python_exe(), "-u", str(path)], cwd=str(ROOT), env=env, stdout=f, stderr=subprocess.STDOUT)
+        try:                                     # tetto per test: un tool bloccato non deve appendere tutta la regressione
+            proc = subprocess.run([python_exe(), "-u", str(path)], cwd=str(ROOT), env=env, stdout=f, stderr=subprocess.STDOUT,
+                                  timeout=TEST_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+    if timed_out:
+        return {"name": name, "status": "FAIL", "seconds": round(time.time() - t0), "summary": None,
+                "fails": [f"interrotto dopo {TEST_TIMEOUT_S} s (l'istanza dedicata di SolidWorks potrebbe essere rimasta aperta)"],
+                "code": None}
     text = log.read_text(encoding="utf-8", errors="replace")
     summary = parse_summary(text)
     ok = proc.returncode == 0 and summary is not None and summary[0] == summary[1]

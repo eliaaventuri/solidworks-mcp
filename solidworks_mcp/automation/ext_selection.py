@@ -137,6 +137,7 @@ class SelectionOperations:
             )
             entities = self._body_entities(doc, kind)
             matches = []
+            errors = 0
 
             for idx, e in enumerate(entities):
                 try:
@@ -210,10 +211,14 @@ class SelectionOperations:
                             "point": pt,
                         })
                 except Exception:
+                    errors += 1
                     continue
 
+            if entities and errors == len(entities):
+                return self._result(False, f"query_topology_by_criteria: tutte le {len(entities)} entita' di tipo '{kind}' sono in errore",
+                                    SwErrors.swUnknownError, {"entity_type": kind, "errors": errors})
             return self._result(True, f"Trovate {len(matches)} entita' di tipo '{kind}' corrispondenti ai criteri",
-                                SwErrors.swSuccess, {"count": len(matches), "entity_type": kind, "entities": matches})
+                                SwErrors.swSuccess, {"count": len(matches), "entity_type": kind, "entities": matches, "errors": errors})
         except Exception as e:
             logger.error(f"query_topology_by_criteria error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore query_topology_by_criteria: {e}", SwErrors.swUnknownError)
@@ -225,8 +230,13 @@ class SelectionOperations:
             if err:
                 return err
             doc.ClearSelection2(True)
+            sm = self._com(doc, "SelectionManager")
+            left = int(sm.GetSelectedObjectCount2(-1))
+            if left != 0:
+                return self._result(False, f"Buffer di selezione non svuotato: {left} entita' ancora selezionate",
+                                    SwErrors.swSelectionError, {"selection_count": left})
             return self._result(True, "Buffer di selezione svuotato con successo", SwErrors.swSuccess,
-                                {"selection_count": 0})
+                                {"selection_count": left})
         except Exception as e:
             logger.error(f"clear_selection error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore clear_selection: {e}", SwErrors.swUnknownError)
@@ -394,15 +404,15 @@ class SelectionOperations:
                 max_x = max(p[0] for p in pts_view)
                 min_y = min(p[1] for p in pts_view)
                 max_y = max(p[1] for p in pts_view)
-                span_x = (max_x - min_x) or 1.0
-                span_y = (max_y - min_y) or 1.0
+                span = max((max_x - min_x), (max_y - min_y)) or 1.0
+                cx = (min_x + max_x) / 2.0
+                cy = (min_y + max_y) / 2.0
+                # Unica scala in pixel per x e y, centrata; 70% del lato minore = margine 15% per lato
+                scale_px = 0.70 * min(w, h) / span
 
                 for idx, (xv, yv, _zv, item) in enumerate(pts_view, start=1):
-                    norm_x = (xv - min_x) / span_x
-                    norm_y = (yv - min_y) / span_y
-                    # Margine 15% interno per centratura zoom to fit
-                    px = int(w * (0.15 + 0.70 * norm_x))
-                    py = int(h * (0.85 - 0.70 * norm_y))
+                    px = int(w / 2 + scale_px * (xv - cx))
+                    py = int(h / 2 - scale_px * (yv - cy))
                     px = max(10, min(w - 10, px))
                     py = max(10, min(h - 10, py))
 

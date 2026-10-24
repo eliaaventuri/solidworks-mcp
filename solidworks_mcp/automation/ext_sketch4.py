@@ -98,7 +98,8 @@ class Sketch4Operations:
             if entities:
                 for i, ent in enumerate(entities):
                     if isinstance(ent, str):
-                        doc.Extension.SelectByID2(ent, "FACE", 0, 0, 0, i > 0, 0, None, 0)
+                        if not bool(doc.Extension.SelectByID2(ent, "FACE", 0, 0, 0, i > 0, 0, None, 0)):
+                            return self._result(False, f"insert_intersection_curve: '{ent}' non trovata/non selezionabile.", SwErrors.swSelectionError)
             else:
                 # Seleziona i corpi solidi per intersecare con il piano attivo
                 bodies = ()
@@ -106,11 +107,15 @@ class Sketch4Operations:
                     bodies = doc.GetBodies2(0, False) or ()
                 except Exception:
                     pass
+                if not bodies:
+                    return self._result(False, "insert_intersection_curve: nessun corpo da intersecare.", SwErrors.swSelectionError)
                 for i, b in enumerate(bodies):
                     try:
-                        b.Select4(i > 0, None)
-                    except Exception:
-                        pass
+                        sel_ok = bool(b.Select2(i > 0, self._s4_sd(doc, 0)))
+                    except Exception as ex:
+                        return self._result(False, f"insert_intersection_curve: selezione corpo non riuscita: {ex}", SwErrors.swSelectionError)
+                    if not sel_ok:
+                        return self._result(False, "insert_intersection_curve: selezione corpo non riuscita.", SwErrors.swSelectionError)
 
             ok = False
             try:
@@ -119,15 +124,19 @@ class Sketch4Operations:
                 try:
                     ok = bool(doc.InsertIntersectionCurve())
                 except Exception as ex:
-                    logger.warning(f"InsertIntersectionCurve call failed: {ex}")
+                    return self._result(False, f"insert_intersection_curve: operazione non riuscita: {ex}", SwErrors.swSketchError)
 
             after_segs = self._s4_segs(doc)
             added = max(0, len(after_segs) - before_count)
             seg_ids = [self._safe_seg_id(s) for s in after_segs[before_count:]]
 
+            created = ok or added > 0
+            if not created:
+                return self._result(False, "insert_intersection_curve: nessuna curva di intersezione creata.", SwErrors.swSketchError)
+
             msg = f"Curva di intersezione generata ({added} segmenti creati nello schizzo)."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "created": ok or added > 0,
+                "created": created,
                 "added_segments_count": added,
                 "segments": seg_ids
             })
@@ -146,18 +155,22 @@ class Sketch4Operations:
             sm = doc.SketchManager
 
             if body:
-                doc.Extension.SelectByID2(body, "SOLIDBODY", 0, 0, 0, False, 0, None, 0)
+                if not bool(doc.Extension.SelectByID2(body, "SOLIDBODY", 0, 0, 0, False, 0, None, 0)):
+                    return self._result(False, f"insert_silhouette_entities: '{body}' non trovato/non selezionabile.", SwErrors.swSelectionError)
             else:
                 bodies = ()
                 try:
                     bodies = doc.GetBodies2(0, False) or ()
                 except Exception:
                     pass
-                if bodies:
-                    try:
-                        bodies[0].Select4(False, None)
-                    except Exception:
-                        pass
+                if not bodies:
+                    return self._result(False, "insert_silhouette_entities: nessun corpo da proiettare.", SwErrors.swSelectionError)
+                try:
+                    sel_ok = bool(bodies[0].Select2(False, self._s4_sd(doc, 0)))
+                except Exception as ex:
+                    return self._result(False, f"insert_silhouette_entities: selezione corpo non riuscita: {ex}", SwErrors.swSelectionError)
+                if not sel_ok:
+                    return self._result(False, "insert_silhouette_entities: selezione corpo non riuscita.", SwErrors.swSelectionError)
 
             ok = False
             try:
@@ -166,15 +179,19 @@ class Sketch4Operations:
                 try:
                     ok = bool(sm.InsertSilhouetteEntities2(0, False, 0.0, False, bool(exclude_internal_loops)))
                 except Exception as ex:
-                    logger.warning(f"InsertSilhouetteEntities fallback error: {ex}")
+                    return self._result(False, f"insert_silhouette_entities: operazione non riuscita: {ex}", SwErrors.swSketchError)
 
             after_segs = self._s4_segs(doc)
             added = max(0, len(after_segs) - before_count)
             seg_ids = [self._safe_seg_id(s) for s in after_segs[before_count:]]
 
+            created = ok or added > 0
+            if not created:
+                return self._result(False, "insert_silhouette_entities: nessuna silhouette generata.", SwErrors.swSketchError)
+
             msg = f"Silhouette proiettata nello schizzo ({added} segmenti generati)."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "created": ok or added > 0,
+                "created": created,
                 "added_segments_count": added,
                 "segments": seg_ids,
                 "exclude_internal_loops": bool(exclude_internal_loops)
@@ -194,17 +211,18 @@ class Sketch4Operations:
             sm = doc.SketchManager
             dist_m = self._mmu(distance, unit)
 
-            ok = False
             try:
                 ok = bool(sm.InsertOffsetOnSurface(dist_m, bool(reverse), bool(geodesic), False))
             except Exception as ex:
-                logger.warning(f"InsertOffsetOnSurface error: {ex}")
+                return self._result(False, f"sketch_offset_on_surface: offset su superficie non riuscito: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "sketch_offset_on_surface: SolidWorks non ha applicato l'offset.", SwErrors.swSketchError)
 
             u = unit or "mm"
             dist_disp = distance if unit else round(dist_m * 1000.0, 4)
             msg = f"Offset su superficie ({dist_disp} {u}, {'geodetico' if geodesic else 'euclideo'}) applicato."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "offset_applied": ok,
+                "offset_applied": True,
                 "distance": dist_disp,
                 "geodesic": bool(geodesic),
                 "reverse": bool(reverse)
@@ -227,36 +245,37 @@ class Sketch4Operations:
             segs = self._s4_segs(doc)
             sd = self._s4_sd(doc, 0)
             doc.ClearSelection2(True)
+            sel_n = 0
             if entities:
                 by_id = {self._safe_seg_id(s): s for s in segs}
-                for i, ent_id in enumerate(entities):
+                for ent_id in entities:
                     s = by_id.get(ent_id)
-                    if s:
-                        try:
-                            s.Select4(i > 0, sd)
-                        except Exception:
-                            pass
+                    if s is None:
+                        return self._result(False, f"make_sketch_chain: '{ent_id}' non trovato", SwErrors.swSelectionError)
+                    if not bool(s.Select4(sel_n > 0, sd)):
+                        return self._result(False, f"make_sketch_chain: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
+                    sel_n += 1
             else:
-                for i, s in enumerate(segs):
-                    try:
-                        s.Select4(i > 0, sd)
-                    except Exception:
-                        pass
+                for s in segs:
+                    if not bool(s.Select4(sel_n > 0, sd)):
+                        return self._result(False, "make_sketch_chain: selezione di un segmento non riuscita.", SwErrors.swSelectionError)
+                    sel_n += 1
+            if sel_n == 0:
+                return self._result(False, "make_sketch_chain: nessun segmento da concatenare.", SwErrors.swSelectionError)
 
-            ok = False
+            paths_before = sum(1 for s in segs if int(self._com(s, "GetSketchPathCount") or 0) > 0)
             try:
-                res = sm.CreateSketchPath()
-                ok = res is not None
-            except Exception:
-                try:
-                    ok = bool(sm.MakeSketchChain())
-                except Exception as ex:
-                    logger.warning(f"CreateSketchPath error: {ex}")
+                ok = bool(self._com(sm, "MakeSketchChain"))
+            except Exception as ex:
+                return self._result(False, f"make_sketch_chain: creazione percorso non riuscita: {ex}", SwErrors.swSketchError)
+            paths_after = sum(1 for s in self._s4_segs(doc) if int(self._com(s, "GetSketchPathCount") or 0) > 0)
+            if paths_after <= paths_before:
+                return self._result(False, f"make_sketch_chain: SolidWorks non ha creato il percorso (MakeSketchChain={ok}, segmenti in percorso prima {paths_before} dopo {paths_after}).", SwErrors.swSketchError)
 
             msg = "Percorso continuo (SketchPath / Chain) creato con successo."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "chain_created": ok,
-                "segment_count": len(entities) if entities else len(segs)
+                "chain_created": True,
+                "segment_count": paths_after
             })
         except Exception as e:
             logger.error(f"make_sketch_chain: {e} - {traceback.format_exc()}")
@@ -276,55 +295,64 @@ class Sketch4Operations:
             if entity:
                 by_id = {self._safe_seg_id(s): s for s in segs}
                 target = by_id.get(entity)
+                if target is None:
+                    return self._result(False, f"segment_sketch_entity: '{entity}' non trovato", SwErrors.swSelectionError)
             elif segs:
                 target = segs[-1]
-
-            sd = self._s4_sd(doc, 0)
-            if target is not None:
-                try:
-                    target.Select4(False, sd)
-                except Exception:
-                    pass
+            if target is None:
+                return self._result(False, "segment_sketch_entity: nessuna entità nello schizzo da suddividere.", SwErrors.swSelectionError)
 
             n = max(2, int(count or 4))
+            if n > 1000:
+                return self._result(False, "segment_sketch_entity: count massimo 1000.", SwErrors.swInvalidInput)
+
+            sd = self._s4_sd(doc, 0)
+            try:
+                target.Select4(False, sd)
+            except Exception:
+                pass
+
             created_pts = []
             pt_start = None
             pt_end = None
-            if target is not None:
-                try:
-                    sp = target.GetStartPoint2()
-                    ep = target.GetEndPoint2()
-                    if sp and ep:
-                        pt_start = (float(sp.X), float(sp.Y), float(sp.Z))
-                        pt_end = (float(ep.X), float(ep.Y), float(ep.Z))
-                except Exception:
-                    pass
+            read_err = "punti vuoti"
+            try:
+                sp = self._com(target, "GetStartPoint2")
+                ep = self._com(target, "GetEndPoint2")
+                read_err = f"sp={type(sp).__name__} ep={type(ep).__name__}"
+                if sp is not None and ep is not None:
+                    pt_start = (float(sp.X), float(sp.Y), float(sp.Z))
+                    pt_end = (float(ep.X), float(ep.Y), float(ep.Z))
+            except Exception as ex:
+                read_err = str(ex)
+            if not (pt_start and pt_end):
+                return self._result(False, f"segment_sketch_entity: estremi dell'entità non leggibili ({read_err}).", SwErrors.swSketchError)
 
-            if pt_start and pt_end:
-                x1, y1, z1 = pt_start
-                x2, y2, z2 = pt_end
-                steps = n if not is_segments else n - 1
-                for k in range(1, steps + 1):
-                    t = k / float(n)
-                    xi = x1 + t * (x2 - x1)
-                    yi = y1 + t * (y2 - y1)
-                    zi = z1 + t * (z2 - z1)
-                    if is_segments:
-                        try:
-                            sm.SplitOpenSegment(xi, yi, zi)
-                            created_pts.append([xi, yi, zi])
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            pt = sm.CreatePoint(xi, yi, zi)
-                            if pt is not None:
-                                created_pts.append([xi, yi, zi])
-                        except Exception:
-                            pass
+            x1, y1, z1 = pt_start
+            x2, y2, z2 = pt_end
+            steps = n if not is_segments else n - 1
+            for k in range(1, steps + 1):
+                t = k / float(n)
+                xi = x1 + t * (x2 - x1)
+                yi = y1 + t * (y2 - y1)
+                zi = z1 + t * (z2 - z1)
+                if is_segments:
+                    try:
+                        sm.SplitOpenSegment(xi, yi, zi)
+                    except Exception as ex:
+                        return self._result(False, f"segment_sketch_entity: divisione non riuscita al punto {k}: {ex}", SwErrors.swSketchError)
+                    created_pts.append([xi, yi, zi])
+                else:
+                    try:
+                        pt = sm.CreatePoint(xi, yi, zi)
+                    except Exception as ex:
+                        return self._result(False, f"segment_sketch_entity: creazione punto {k} non riuscita: {ex}", SwErrors.swSketchError)
+                    if pt is None:
+                        return self._result(False, f"segment_sketch_entity: SolidWorks non ha creato il punto {k}.", SwErrors.swSketchError)
+                    created_pts.append([xi, yi, zi])
 
             mode_str = "segmenti" if is_segments else "punti equidistanti"
-            msg = f"Suddivisione entità completata: {len(created_pts) or n} {mode_str} generati."
+            msg = f"Suddivisione entità completata: {len(created_pts)} {mode_str} generati."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "segmented": True,
                 "count": n,
@@ -353,15 +381,16 @@ class Sketch4Operations:
             w_m = self._mmu(width or 10.0, unit)
 
             before_count = len(self._s4_segs(doc))
-            res = None
             try:
                 res = sm.CreateSketchSlot(2, 0, w_m, x1_m, y1_m, 0, x2_m, y2_m, 0, x3_m, y3_m, 0, 0, False)
             except Exception as ex:
-                logger.warning(f"CreateSketchSlot 3point error: {ex}")
+                return self._result(False, f"draw_3point_arc_slot: asola non creata: {ex}", SwErrors.swSketchError)
 
             after_segs = self._s4_segs(doc)
             added = len(after_segs) - before_count
-            created = (res is not None or added > 0)
+            created = (bool(res) or added > 0)
+            if not created:
+                return self._result(False, "draw_3point_arc_slot: SolidWorks non ha creato l'asola.", SwErrors.swSketchError)
 
             u = unit or "mm"
             msg = f"Asola ad arco 3 punti creata (larghezza {width} {u})."
@@ -393,15 +422,18 @@ class Sketch4Operations:
             if curve_entity:
                 by_id = {self._safe_seg_id(s): s for s in segs}
                 target = by_id.get(curve_entity)
+                if target is None:
+                    return self._result(False, f"draw_sketch_text_along_curve: curva '{curve_entity}' non trovata", SwErrors.swSelectionError)
             elif segs:
                 target = segs[-1]
 
-            sd = self._s4_sd(doc, 0)
             if target is not None:
                 try:
-                    target.Select4(False, sd)
-                except Exception:
-                    pass
+                    sel_ok = bool(target.Select4(False, self._s4_sd(doc, 0)))
+                except Exception as ex:
+                    return self._result(False, f"draw_sketch_text_along_curve: selezione curva non riuscita: {ex}", SwErrors.swSelectionError)
+                if not sel_ok:
+                    return self._result(False, "draw_sketch_text_along_curve: selezione curva non riuscita.", SwErrors.swSelectionError)
 
             res = None
             flip = 1 if mirror_vertical else 0
@@ -412,15 +444,19 @@ class Sketch4Operations:
                 logger.warning(f"InsertSketchText error: {ex}")
                 try:
                     res = sm.CreateText(0, 0, 0, str(text))
-                except Exception:
-                    pass
+                except Exception as ex2:
+                    return self._result(False, f"draw_sketch_text_along_curve: inserimento testo non riuscito: {ex2}", SwErrors.swSketchError)
+            if res is None:
+                return self._result(False, "draw_sketch_text_along_curve: SolidWorks non ha inserito il testo.", SwErrors.swSketchError)
 
-            msg = f"Testo di schizzo '{text}' posizionato lungo la curva."
+            msg = f"Testo di schizzo '{text}' inserito nell'origine (0, 0, 0); non vincolato alla curva."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "created": res is not None,
+                "created": True,
                 "text": text,
                 "curve_entity": curve_entity,
-                "height": height
+                "height": height,
+                "placed_along_curve": False,
+                "ignored_params": ["height"]
             })
         except Exception as e:
             logger.error(f"draw_sketch_text_along_curve: {e} - {traceback.format_exc()}")
@@ -464,7 +500,9 @@ class Sketch4Operations:
                 try:
                     spline = sm.CreateSpline2(var_arr, False)
                 except Exception as ex:
-                    logger.warning(f"CreateSpline 3D error: {ex}")
+                    return self._result(False, f"draw_equation_curve_3d: creazione spline 3D non riuscita: {ex}", SwErrors.swSketchError)
+            if spline is None:
+                return self._result(False, "draw_equation_curve_3d: SolidWorks non ha creato la spline 3D.", SwErrors.swSketchError)
 
             p_start = [round(v, 4) for v in pts[0]]
             p_end = [round(v, 4) for v in pts[-1]]
@@ -476,7 +514,7 @@ class Sketch4Operations:
                 "end_parameter": end,
                 "start_point_m": p_start,
                 "end_point_m": p_end,
-                "spline_created": spline is not None
+                "spline_created": True
             })
         except Exception as e:
             logger.error(f"draw_equation_curve_3d: {e} - {traceback.format_exc()}")
@@ -506,23 +544,28 @@ class Sketch4Operations:
             if entities:
                 for ent_id in entities:
                     s = by_id.get(ent_id)
-                    if s:
-                        s.Select4(selected_count > 0, self._s4_sd(doc, 0))
-                        selected_count += 1
+                    if s is None:
+                        return self._result(False, f"stretch_sketch_entities: '{ent_id}' non trovata", SwErrors.swSelectionError)
+                    if not bool(s.Select4(selected_count > 0, self._s4_sd(doc, 0))):
+                        return self._result(False, f"stretch_sketch_entities: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
+                    selected_count += 1
+            if selected_count == 0:
+                return self._result(False, "stretch_sketch_entities: nessuna entità selezionata da stirare.", SwErrors.swSelectionError)
 
-            ok = False
             try:
                 ok = bool(sm.StretchEntities(bx_m, by_m, 0, bx_m + dx_m, by_m + dy_m, 0))
             except Exception as ex:
-                logger.warning(f"StretchEntities error: {ex}")
+                return self._result(False, f"stretch_sketch_entities: stiramento non riuscito: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, "stretch_sketch_entities: SolidWorks non ha stirato le entità.", SwErrors.swSketchError)
 
             u = unit or "mm"
             msg = f"Stiramento entità applicato (dx={dx}, dy={dy} {u})."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "stretched": ok,
+                "stretched": True,
                 "dx": dx,
                 "dy": dy,
-                "entities_count": selected_count or len(segs)
+                "entities_count": selected_count
             })
         except Exception as e:
             logger.error(f"stretch_sketch_entities: {e} - {traceback.format_exc()}")
@@ -539,17 +582,24 @@ class Sketch4Operations:
             if not source_points or not target_points or len(source_points) != len(target_points):
                 return self._result(False, "source_points e target_points devono contenere lo stesso numero di punti.", SwErrors.swInvalidInput)
 
+            num_pts = len(source_points)
+            if num_pts not in (1, 2):
+                return self._result(False, f"align_sketch_entities: allineamento con {num_pts} punti non supportato (1 o 2).", SwErrors.swInvalidInput)
+
             sm = doc.SketchManager
             segs = self._s4_segs(doc)
             by_id = {self._safe_seg_id(s): s for s in segs}
 
             if entities:
-                for i, ent_id in enumerate(entities):
+                sel_n = 0
+                for ent_id in entities:
                     s = by_id.get(ent_id)
-                    if s:
-                        s.Select4(i > 0, self._s4_sd(doc, 0))
+                    if s is None:
+                        return self._result(False, f"align_sketch_entities: '{ent_id}' non trovata", SwErrors.swSelectionError)
+                    if not bool(s.Select4(sel_n > 0, self._s4_sd(doc, 0))):
+                        return self._result(False, f"align_sketch_entities: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
+                    sel_n += 1
 
-            num_pts = len(source_points)
             ok = False
             mode = f"{num_pts}_point"
 
@@ -568,14 +618,14 @@ class Sketch4Operations:
                                                      p2s[0], p2s[1], p2s[2] if len(p2s) > 2 else 0,
                                                      p1t[0], p1t[1], p1t[2] if len(p1t) > 2 else 0,
                                                      p2t[0], p2t[1], p2t[2] if len(p2t) > 2 else 0))
-                else:
-                    ok = True
             except Exception as ex:
-                logger.warning(f"AlignEntities error: {ex}")
+                return self._result(False, f"align_sketch_entities: allineamento non riuscito: {ex}", SwErrors.swSketchError)
+            if not ok:
+                return self._result(False, f"align_sketch_entities: SolidWorks non ha allineato le entità ({mode}).", SwErrors.swSketchError)
 
             msg = f"Allineamento entità eseguito in modalità {mode} ({num_pts} punti)."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "aligned": ok,
+                "aligned": True,
                 "mode": mode,
                 "points_count": num_pts
             })
@@ -599,6 +649,8 @@ class Sketch4Operations:
             if entity:
                 by_id = {self._safe_seg_id(s): s for s in segs}
                 target = by_id.get(entity)
+                if target is None:
+                    return self._result(False, f"show_sketch_curvature: '{entity}' non trovata", SwErrors.swSelectionError)
             else:
                 for s in segs:
                     if self._s4_seg_type(s) == 3:  # swSketchSpline
@@ -606,22 +658,25 @@ class Sketch4Operations:
                         break
                 if target is None and segs:
                     target = segs[0]
+            if target is None:
+                return self._result(False, "show_sketch_curvature: nessuna entità nello schizzo.", SwErrors.swSelectionError)
 
-            ok = False
-            if target is not None:
-                try:
-                    target.ShowCurvature = bool(visible)
-                    target.CurvatureScale = float(scale or 10.0)
-                    target.CurvatureDensity = int(density or 20)
-                    ok = True
-                except Exception as ex:
-                    logger.warning(f"ShowCurvature error: {ex}")
+            sm = doc.SketchManager
+            try:
+                sm.CurvatureScale = float(scale or 10.0)
+                sm.CurvatureDensity = int(density or 20)
+                target.ShowCurvatureCombs = bool(visible)
+            except Exception as ex:
+                return self._result(False, f"show_sketch_curvature: impostazione pettini non riuscita: {ex}", SwErrors.swSketchError)
+            shown = bool(target.ShowCurvatureCombs)
+            if shown != bool(visible):
+                return self._result(False, "show_sketch_curvature: SolidWorks non ha cambiato la visualizzazione dei pettini.", SwErrors.swSketchError)
 
             state_str = "attivati" if visible else "disattivati"
             msg = f"Pettini di curvatura {state_str} (scala {scale}, densità {density})."
             return self._result(True, msg, SwErrors.swSuccess, {
-                "curvature_displayed": ok,
-                "visible": bool(visible),
+                "curvature_displayed": True,
+                "visible": shown,
                 "scale": float(scale or 10.0),
                 "density": int(density or 20)
             })
@@ -737,7 +792,7 @@ class Sketch4Operations:
 
             path = os.path.abspath(filepath)
             if not os.path.exists(path):
-                return self._result(False, f"File immagine non trovato: {path}", SwErrors.swFileNotFound)
+                return self._result(False, f"File immagine non trovato: {path}", SwErrors.swFileNotFoundError)
 
             sm = doc.SketchManager
             x_m = self._mmu(x, unit)
@@ -750,7 +805,9 @@ class Sketch4Operations:
                 try:
                     pic = sm.InsertSketchPicture(path)
                 except Exception as ex:
-                    logger.warning(f"InsertSketchPicture error: {ex}")
+                    return self._result(False, f"insert_sketch_picture: inserimento immagine non riuscito: {ex}", SwErrors.swSketchError)
+            if pic is None:
+                return self._result(False, "insert_sketch_picture: SolidWorks non ha inserito l'immagine.", SwErrors.swSketchError)
 
             if pic is not None:
                 try:
@@ -766,10 +823,11 @@ class Sketch4Operations:
             msg = f"Immagine di schizzo inserita: {os.path.basename(path)} in ({x}, {y} {u})."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "filepath": path,
-                "picture_loaded": pic is not None,
+                "picture_loaded": True,
                 "x": x,
                 "y": y,
-                "angle_deg": float(angle or 0.0)
+                "angle_deg": float(angle or 0.0),
+                "ignored_params": ["transparency"]
             })
         except Exception as e:
             logger.error(f"insert_sketch_picture: {e} - {traceback.format_exc()}")
@@ -785,7 +843,7 @@ class Sketch4Operations:
 
             path = os.path.abspath(filepath)
             if not os.path.exists(path):
-                return self._result(False, f"File blocco non trovato: {path}", SwErrors.swFileNotFound)
+                return self._result(False, f"File blocco non trovato: {path}", SwErrors.swFileNotFoundError)
 
             sm = doc.SketchManager
             x_m = self._mmu(x, unit)
@@ -805,12 +863,14 @@ class Sketch4Operations:
                 sc = float(scale or 1.0)
                 block_inst = sm.MakeSketchBlockFromFile(pt, path, False, sc, ang_rad)
             except Exception as ex:
-                logger.warning(f"MakeSketchBlockFromFile error: {ex}")
+                return self._result(False, f"insert_sketch_block_from_file: inserimento blocco non riuscito: {ex}", SwErrors.swSketchError)
+            if block_inst is None:
+                return self._result(False, "insert_sketch_block_from_file: SolidWorks non ha inserito il blocco.", SwErrors.swSketchError)
 
             msg = f"Blocco di schizzo inserito da {os.path.basename(path)} (scala {scale}, angolo {angle}°)."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "filepath": path,
-                "block_created": block_inst is not None,
+                "block_created": True,
                 "insertion_point": [x, y],
                 "scale": float(scale or 1.0),
                 "angle_deg": float(angle or 0.0)

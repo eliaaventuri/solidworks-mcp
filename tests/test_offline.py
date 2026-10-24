@@ -81,6 +81,8 @@ if not STUBBED:
 
 RESULTS = []
 EXPECTED_TOOLS = 555                       # 556 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+from solidworks_mcp.not_implemented import NOT_IMPLEMENTED
+EXPOSED_TOOLS = EXPECTED_TOOLS - len(NOT_IMPLEMENTED)   # i tool non implementati (revisione 2026-10-23) restano nascosti
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -98,10 +100,24 @@ def test_registry():
         _test_registry_full(EXPECTED_TOOLS + 1)
     finally:
         os.environ.pop("SW_MCP_ALLOW_PYTHON", None)
+    exposed = {t.name for t in asyncio.run(srv.list_tools())}
+    shown = sorted(n for n in NOT_IMPLEMENTED if n in exposed)
+    record(f"{len(NOT_IMPLEMENTED)} tool non implementati nascosti da list_tools", not shown, str(shown))
+    real = srv.sw_automation
+    fake = _FakeAutomation()
+    srv.sw_automation = fake
+    try:
+        text = asyncio.run(srv.call_tool("add_weld_symbol", {}))[0].text
+    finally:
+        srv.sw_automation = real
+    record("tool non implementato chiamato lo stesso: errore esplicito, metodo non eseguito",
+           text.startswith("[ERROR]") and "non e' implementato" in text and not fake.calls, text[:90])
 
 
 def _test_registry_full(expected):
-    tools = asyncio.run(srv.list_tools())
+    # registro completo, compresi i tool nascosti perche' non implementati: schema e smistamento vanno controllati lo stesso
+    tools = srv.decorate_tools([t for t in srv._raw_all_tools()
+                                if srv._tool_blocked_reason(t.name) is None or t.name in NOT_IMPLEMENTED])
     names = [t.name for t in tools]
     dups = sorted({n for n in names if names.count(n) > 1})
     record(f"{expected} tool esposti, nessun duplicato", len(names) == expected and not dups,
@@ -951,14 +967,14 @@ def test_toolsets(tmp):
             return out[0].text, list(fake.calls)
 
         names = _names()
-        record("execute_python nascosto di default", "execute_python" not in names and len(names) == EXPECTED_TOOLS)
+        record("execute_python nascosto di default", "execute_python" not in names and len(names) == EXPOSED_TOOLS)
         text, calls = call("execute_python", {"code": "print(1)"})
         record("execute_python rifiutato di default, nessun codice eseguito",
                text.startswith("[ERROR]") and "SW_MCP_ALLOW_PYTHON" in text and not calls, text[:80])
 
         os.environ["SW_MCP_ALLOW_PYTHON"] = "1"
         try:
-            record("SW_MCP_ALLOW_PYTHON=1 riattiva execute_python", "execute_python" in _names() and len(_names()) == EXPECTED_TOOLS + 1)
+            record("SW_MCP_ALLOW_PYTHON=1 riattiva execute_python", "execute_python" in _names() and len(_names()) == EXPOSED_TOOLS + 1)
         finally:
             os.environ.pop("SW_MCP_ALLOW_PYTHON", None)
 
@@ -1018,6 +1034,7 @@ def test_worker_timeout():
             return {"success": True, "message": "tardi", "error_code": 0, "error_name": "swSuccess", "data": {}}
         fake.draw_line = slow_draw_line
         fake._sw_app = object()                          # gia' collegato: nessun tempo di avvio aggiunto al limite
+        fake.is_dedicated_mode = lambda: False           # niente taskkill vero su un PID finto (lento e pericoloso)
         srv.config.tool_timeout = 0.5
         t0 = time.time()
         text = call("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1})
@@ -1667,17 +1684,18 @@ def test_sketch4_tools():
         def __init__(self, name, seg_type=0):
             self._name = name
             self._type = seg_type
-            self.ShowCurvature = False
-            self.CurvatureScale = 1.0
-            self.CurvatureDensity = 10
+            self.ShowCurvatureCombs = False
             self.ShowInflectionPoints = False
             self.ShowMinimumRadius = False
+        chained = False
         def GetName(self):
             return self._name
         def GetType(self):
             return self._type
         def Select4(self, append, data):
             return True
+        def GetSketchPathCount(self):
+            return 1 if _MockSeg.chained else 0
         def GetStartPoint2(self):
             return _MockPt(0.0, 0.0, 0.0)
         def GetEndPoint2(self):
@@ -1693,9 +1711,8 @@ def test_sketch4_tools():
         def InsertOffsetOnSurface(self, dist, rev, geod, mc):
             return True
         def MakeSketchChain(self):
+            _MockSeg.chained = True
             return True
-        def CreateSketchPath(self):
-            return self
         def CreateSegmentPoints(self, count, is_seg):
             return True
         def SplitOpenSegment(self, x, y, z):
@@ -1721,6 +1738,10 @@ def test_sketch4_tools():
         def MakeSketchBlockFromFile(self, *args):
             return self
 
+    class _MockBody:
+        def Select2(self, append, data):
+            return True
+
     class _MockDoc:
         def __init__(self):
             self.SketchManager = _MockSketchMgr()
@@ -1728,7 +1749,7 @@ def test_sketch4_tools():
         def SelectByID2(self, *args):
             return True
         def GetBodies2(self, *args):
-            return ()
+            return (_MockBody(),)
         def ClearSelection2(self, *args):
             return True
 
@@ -1761,6 +1782,36 @@ def test_sketch4_tools():
     record("sketch4: draw_equation_curve_3d valuta formule parametriche e crea punti 3D",
            ok_eq3d["success"] and ok_eq3d["data"]["samples_count"] == 20 and len(ok_eq3d["data"]["start_point_m"]) == 3)
 
+    # Controlli negativi: SolidWorks non crea nessuna curva/silhouette -> success=False
+    class _FailSketchMgr4(_MockSketchMgr):
+        def InsertIntersectionCurve(self):
+            return False
+        def InsertSilhouetteEntities(self, t, b, le, a, uts, eil):
+            return False
+
+    class _FailDoc4(_MockDoc):
+        def __init__(self):
+            super().__init__()
+            self.SketchManager = _FailSketchMgr4()
+
+    fail_doc4 = _FailDoc4()
+    sw._s2_active_or_open = lambda sketch=None: (fail_doc4, fail_doc4.SketchManager, None)
+    neg_int4 = sw.insert_intersection_curve()
+    neg_sil4 = sw.insert_silhouette_entities()
+    record("sketch4: controllo negativo, SolidWorks non genera curve ne' silhouette -> success=False",
+           (not neg_int4["success"]) and (not neg_sil4["success"]))
+
+    # Controllo negativo: nessun corpo nel modello -> insert_silhouette_entities rifiuta
+    class _NoBodyDoc4(_MockDoc):
+        def GetBodies2(self, *args):
+            return ()
+
+    nobody_doc4 = _NoBodyDoc4()
+    sw._s2_active_or_open = lambda sketch=None: (nobody_doc4, nobody_doc4.SketchManager, None)
+    neg_nobody4 = sw.insert_silhouette_entities()
+    record("sketch4: controllo negativo, senza corpi insert_silhouette_entities -> success=False",
+           (not neg_nobody4["success"]))
+
 
 def test_sketch5_tools():
     sw = SolidWorksAutomation()
@@ -1790,17 +1841,16 @@ def test_sketch5_tools():
     record("sketch5: tutti i 15 tool gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
 
     # Mock per esecuzione con schizzo e spline attiva
+    class _MockOleStub:
+        def GetIDsOfNames(self, name): return 1
+        def Invoke(self, did, lcid, flags, res, *args): self.last_args = args
+
     class _MockSplineHandle:
         def __init__(self):
             self.TangentDriving = True
             self.CurvatureControlled = False
             self.Curvature = 0.0
-        def set_TangentDriving(self, v): self.TangentDriving = v
-        def set_TangentMagnitude(self, d, v): pass
-        def set_TangentRadialDirection(self, v): pass
-        def set_TangentPolarDirection(self, v): pass
-        def set_CurvatureControlled(self, v): self.CurvatureControlled = v
-        def set_Curvature(self, v): self.Curvature = v
+            self._oleobj_ = _MockOleStub()
 
     class _MockSplineSeg:
         def __init__(self, name="Spline1"):
@@ -1813,6 +1863,14 @@ def test_sketch5_tools():
         def DeletePoint(self, pt): return True
         def GetPoints2(self): return [self]
         def GetSplineHandles(self): return [_MockSplineHandle()]
+        def Select4(self, append, data): return True
+
+    class _MockArcSeg:
+        def __init__(self, name="Arc1"):
+            self._name = name
+            self.GetType = 2 # swSketchARC (puleggia)
+        def GetName(self): return self._name
+        def Select4(self, append, data): return True
 
     class _MockRelation:
         def __init__(self):
@@ -1820,9 +1878,13 @@ def test_sketch5_tools():
         def set_Suppressed(self, v): self.Suppressed = v
 
     class _MockRelationMgr:
-        def GetRelations(self, f): return [_MockRelation()]
+        def __init__(self):
+            self._rels = [_MockRelation()]
+        def GetRelations(self, f): return list(self._rels)
         def GetAllowedRelations(self, ents): return [4, 5, 6] # Horiz, Vert, Tangent
-        def DeleteAllRelations(self): return True
+        def DeleteAllRelations(self):
+            self._rels = []   # stato: dopo la cancellazione la rilettura e' vuota
+            return True
 
     class _MockSketch5Mgr:
         def __init__(self):
@@ -1838,7 +1900,11 @@ def test_sketch5_tools():
         def GetSketchRegions(self): return [self]
         def GetSketchContours(self): return [self]
         def GetEdgesCount(self): return 4
-        def MergePoints(self, d): return True
+        _npts = 5
+        def GetSketchPointsCount2(self): return self._npts
+        def MergePoints(self, d):
+            self._npts -= 1
+            return True
 
     class _MockDoc5:
         def __init__(self):
@@ -1863,7 +1929,9 @@ def test_sketch5_tools():
     ok_del = sw.delete_spline_point(1, "Spline1")
     ok_hnd = sw.edit_spline_handle(0, magnitude=2.0, spline_entity="Spline1")
     ok_rep = sw.replace_sketch_entity("Line1", "Line2")
+    sw._s5_segs = lambda doc: [_MockArcSeg("Arc1")]     # la cinghia vuole pulegge (archi/cerchi)
     ok_blt = sw.create_sketch_belt(thickness=3.0)
+    sw._s5_segs = lambda doc: [mock_sp]
     ok_sup = sw.suppress_sketch_relation(0, True)
     ok_alw = sw.get_allowed_relations()
     ok_dar = sw.delete_all_sketch_relations()
@@ -1884,6 +1952,39 @@ def test_sketch5_tools():
            ok_sup["success"] and len(ok_alw["data"]["allowed_relations"]) == 3 and ok_dar["success"])
     record("sketch5: regioni, rotazione 3D, merge points, export blocco e modalita' performance validi",
            ok_reg["success"] and ok_r3d["data"]["copy"] and ok_mrg["success"] and ok_blk["success"] and ok_prf["data"]["add_to_db"])
+
+    # Controlli negativi: SolidWorks rifiuta sostituzione, cinghia, cancellazione relazioni, file gia' esistente
+    class _FailReplaceMgr5(_MockSketch5Mgr):
+        def SketchReplace2(self, c, cnt): return False
+
+    class _StuckRelationMgr5(_MockRelationMgr):
+        def DeleteAllRelations(self): return True          # dice ok ma le relazioni restano
+
+    class _StuckSketchMgr5(_MockSketch5Mgr):
+        def __init__(self):
+            super().__init__()
+            self.RelationManager = _StuckRelationMgr5()
+
+    neg_doc5 = _MockDoc5()
+    neg_doc5.SketchManager = _FailReplaceMgr5()
+    sw._s2_active_or_open = lambda sketch=None: (neg_doc5, neg_doc5.SketchManager, None)
+    neg_rep5 = sw.replace_sketch_entity("Line1", "Line2")
+    neg_blt5 = sw.create_sketch_belt(thickness=3.0)     # segmenti = solo spline: nessuna puleggia
+    record("sketch5: controllo negativo, replace rifiutata e belt senza pulegge -> success=False",
+           (not neg_rep5["success"]) and (not neg_blt5["success"]))
+
+    stuck_doc5 = _MockDoc5()
+    stuck_doc5.SketchManager = _StuckSketchMgr5()
+    sw._s2_active_or_open = lambda sketch=None: (stuck_doc5, stuck_doc5.SketchManager, None)
+    neg_dar5 = sw.delete_all_sketch_relations()
+    record("sketch5: controllo negativo, relazioni ancora presenti dopo delete_all -> success=False",
+           (not neg_dar5["success"]))
+
+    blk_busy = str(Path(tempfile.gettempdir()) / "block_busy.sldblk")
+    Path(blk_busy).write_bytes(b"x")
+    neg_blk5 = sw.save_sketch_block_to_file("Block1", blk_busy)     # esiste e overwrite=False
+    record("sketch5: controllo negativo, export blocco su file esistente senza overwrite -> success=False",
+           (not neg_blk5["success"]))
 
 
 
@@ -1916,26 +2017,20 @@ def test_assembly3_tools(tmp):
     r19 = sw.add_linear_coupler_mate("Face1", "Face2", 1.0)
     r20 = sw.add_universal_joint_mate("Shaft1", "Shaft2")
     r21 = sw.dissolve_component_pattern("Pattern1")
-    r22 = sw.edit_explode_step(0, distance=50.0)
     r23 = sw.set_subassembly_flexible("Sub1", True)
-    r24 = sw.promote_subassembly_component("Sub1/Comp1")
-    r25 = sw.demote_subassembly_component("Comp1", "Sub1")
     r26 = sw.isolate_components(["Comp1"])
     r27 = sw.exit_isolate()
     r28 = sw.auto_repair_mates()
-    r29 = sw.check_mate_redundancy()
     r30 = sw.create_speedpak("Spd1")
     r31 = sw.set_envelope_component("Comp1", True)
     r32 = sw.insert_cavity_feature(["Tool1"], 1.5)
     r33 = sw.insert_join_feature(["Comp1", "Comp2"])
-    r34 = sw.create_smart_component("Comp1")
 
     all_failed = all(not r["success"] for r in (
         r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
-        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
-        r31, r32, r33, r34
+        r17, r18, r19, r20, r21, r23, r26, r27, r28, r30, r31, r32, r33
     ))
-    record("assembly3: tutti i 34 tool gestiscono assenza doc assieme con errore pulito", all_failed)
+    record("assembly3: tutti i 29 tool gestiscono assenza doc assieme con errore pulito", all_failed)
 
     # 2. Mock documento assieme attivo per verificare la logica di successo
     class _MockComp:
@@ -1946,30 +2041,48 @@ def test_assembly3_tools(tmp):
             self.Envelope = False
             self.ExcludeFromBOM = False
 
+        def SaveVirtualComponent(self, p):
+            with open(p, "wb") as fh:
+                fh.write(b"SLDPRT-mock")
+            return True
+
     class _MockDoc:
         def __init__(self):
             self.Title = "Assy1.SLDASM"
             self.GetType = 2
+            self.SelectionManager = types.SimpleNamespace(GetSelectedObject6=lambda *a: object())
             self.Extension = types.SimpleNamespace(
                 SelectByID2=lambda *a, **k: True
             )
         def ClearSelection2(self, *a): pass
         def EditRebuild3(self): pass
-        def MakeIndependent(self): return True
+        def MakeIndependent(self, p):
+            with open(p, "wb") as fh:
+                fh.write(b"SLDPRT-mock")
+            return True
         def MakeIndependent2(self, *a): return True
         def ReorderComponents(self, *a): return True
         def SelectComponentsBySize(self, pct): return 3
         def SetComponentTransparent(self, *a): pass
-        def InsertNewVirtualPart(self, *a): return _MockComp("[Part1^Assy1]")
-        def InsertNewVirtualAssembly(self, *a): return _MockComp("[SubAssy1^Assy1]")
+        def InsertNewVirtualPart(self, ent, out):
+            out.value = _MockComp("[Part1^Assy1]")
+            return 1
+        def InsertNewVirtualAssembly(self, out):
+            out.value = _MockComp("[SubAssy1^Assy1]")
+            return 1
         def EditPart2(self, *a): return True
         def EditAssembly(self): pass
-        def SaveVirtualComponent(self, *a): return True
-        def AddMate5(self, *a): return True
+        def SaveVirtualComponent(self, p):
+            with open(p, "wb") as fh:          # SolidWorks scrive il .sldprt esterno
+                fh.write(b"SLDPRT-mock")
+            return True
+        def AddMate5(self, *a):
+            a[-1].value = 1                    # codice by-ref: 1 = nessun errore (ADD_MATE_ERRORS)
+            return True
         def DissolveComponentPattern(self): return True
         def Isolate(self): pass
         def ExitIsolate(self): pass
-        def AutoMateRepair(self): pass
+        def AutoMateRepair(self, *a): return 1
         def CreateSpeedPak(self, *a): return True
         def InsertCavity4(self, *a): return True
         def InsertJoin2(self, *a): return True
@@ -1978,13 +2091,14 @@ def test_assembly3_tools(tmp):
     sw._asm = lambda: (mock_doc, None)
     sw.get_active_doc = lambda: (mock_doc, None)
     sw._as_comp = lambda doc, name, *a: (_MockComp(name), None)
-    sw._as_select_comps = lambda doc, comps: None
+    sw._as_select_comps = lambda doc, comps: True
     sw._as_select_entity = lambda doc, spec, u, mark, append: ({"name": str(spec)}, None)
     sw._as_mate_features = lambda doc: []
+    sw._std_ref_feature = lambda doc, name: types.SimpleNamespace(Select2=lambda *a: True)
     sw._get_doc_title = lambda doc: "Assy1.SLDASM"
     sw.add_mate = lambda mate_type, **kw: sw._result(True, f"Mate {mate_type} creato", SwErrors.swSuccess, kw)
 
-    ok_ind = sw.make_component_independent("Comp1")
+    ok_ind = sw.make_component_independent("Comp1", os.path.join(tmp, "indip.sldprt"))
     ok_ord = sw.reorder_components(["Comp2"], "Comp1", position="before")
     ok_siz = sw.select_components_by_size(10.0)
     ok_trn = sw.set_component_transparency("Comp1", True)
@@ -2013,24 +2127,39 @@ def test_assembly3_tools(tmp):
            ok_hinge["success"] and ok_screw["success"] and ok_coupl["success"] and ok_ujoint["success"])
 
     ok_dis = sw.dissolve_component_pattern("Pattern1")
-    ok_exp = sw.edit_explode_step(1, distance=75.0)
     ok_flx = sw.set_subassembly_flexible("Sub1", True)
-    ok_pro = sw.promote_subassembly_component("Sub1/C1")
-    ok_dem = sw.demote_subassembly_component("C1", "Sub1")
     ok_iso = sw.isolate_components(["C1", "C2"])
     ok_xis = sw.exit_isolate()
     ok_rep = sw.auto_repair_mates()
-    ok_chk = sw.check_mate_redundancy()
     ok_spd = sw.create_speedpak("SpeedPak1")
     ok_env = sw.set_envelope_component("C1", True)
     ok_cav = sw.insert_cavity_feature(["Tool1"], 2.0)
     ok_joi = sw.insert_join_feature(["C1", "C2"])
-    ok_smt = sw.create_smart_component("C1")
-    record("assembly3: pattern, esploso, flessibilita', isolamento, speedpak, busta, cavita', join, smart comp",
-           ok_dis["success"] and ok_exp["data"]["distance"] == 75.0 and ok_flx["data"]["flexible"] and
-           ok_pro["success"] and ok_dem["success"] and ok_iso["success"] and ok_xis["success"] and
-           ok_rep["success"] and ok_chk["success"] and ok_spd["success"] and ok_env["data"]["is_envelope"] and
-           ok_cav["success"] and ok_joi["success"] and ok_smt["success"])
+    record("assembly3: pattern, flessibilita', isolamento, riparazione mates, speedpak, busta, cavita', join",
+           ok_dis["success"] and ok_flx["data"]["flexible"] and ok_iso["success"] and ok_xis["success"] and
+           ok_rep["success"] and ok_spd["success"] and ok_env["data"]["is_envelope"] and
+           ok_cav["success"] and ok_joi["success"])
+
+    # Controlli negativi: AddMate5 non crea nulla, salvataggio rifiutato, selezione fallita -> success=False
+    class _NoMateDoc(_MockDoc):
+        def AddMate5(self, *a):
+            a[-1].value = 0                    # codice by-ref non letto: nessun accoppiamento
+            return None
+        def SaveVirtualComponent(self, *a):
+            return False
+    nomate_doc = _NoMateDoc()
+    sw._asm = lambda: (nomate_doc, None)
+    neg_rack = sw.add_rack_pinion_mate("Rack", "Pinion", 50.0)
+    neg_cam = sw.add_cam_mate(["C1"], "Foll")
+    class _NoSaveComp(_MockComp):
+        def SaveVirtualComponent(self, *a):
+            return False
+    sw._as_comp = lambda doc, name, *a: (_NoSaveComp(name), None)
+    neg_svc = sw.save_virtual_component_external("Comp1", os.path.join(tmp, "neg_virtual.sldprt"))
+    sw._as_select_comps = lambda doc, comps: False
+    neg_ind = sw.make_component_independent("Comp1")
+    record("assembly3: controllo negativo, AddMate5 senza accoppiamento / salvataggio rifiutato / selezione fallita -> success=False",
+           (not neg_rack["success"]) and (not neg_cam["success"]) and (not neg_svc["success"]) and (not neg_ind["success"]))
 
 
 
@@ -2045,66 +2174,97 @@ def test_drawings2_tools(tmp):
     r1 = sw.edit_sheet_format()
     r2 = sw.exit_sheet_format()
     r3 = sw.reload_sheet_format()
-    r4 = sw.add_relative_view()
-    r5 = sw.add_predefined_view()
-    r6 = sw.add_aligned_section_view(0, 0, 50, 50, 100, 50)
-    r7 = sw.add_half_section_view(50, 50)
     r8 = sw.add_flat_pattern_drawing_view()
-    r9 = sw.add_unfolded_view()
-    r10 = sw.add_alternate_position_view()
     r11 = sw.show_exploded_drawing_view()
     r12 = sw.rotate_drawing_view("View1", 45.0)
     r13 = sw.align_drawing_views("View1", "View2")
-    r14 = sw.add_ordinate_dimension([0, 0], [[10, 0], [20, 0]])
-    r15 = sw.add_chamfer_dimension([15, 15])
-    r16 = sw.hide_show_dimension("D1@View1", True)
-    r17 = sw.add_weld_symbol([50, 50])
-    r18 = sw.add_edge_chamfer_symbol([30, 30])
     r19 = sw.add_revision_table()
-    r20 = sw.add_weldment_cut_list_table()
     r21 = sw.add_general_table()
     r22 = sw.add_centerlines()
     r23 = sw.create_drawing_layer("Annotations")
-    r24 = sw.set_entity_layer("Annotations")
     r25 = sw.insert_drawing_block()
     r26 = sw.export_pdf_layers(os.path.join(tmp, "out.pdf"))
 
     all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
-        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26
+        r1, r2, r3, r8, r11, r12, r13, r19, r21, r22, r23, r25, r26
     ))
-    record("drawings2: tutti i 26 tool gestiscono assenza doc disegno con errore pulito", all_failed)
+    record("drawings2: tutti i 13 tool gestiscono assenza doc disegno con errore pulito", all_failed)
 
     # 2. Mock documento disegno attivo per verificare esecuzione positiva
+    class _MockView:                                    # vista del foglio (Position in m, Angle in rad, come SolidWorks)
+        def __init__(self, name, pos):
+            self.name, self.Position, self.Angle = name, pos, 0.0
+            self._exp, self._marks = False, 0
+        def GetName2(self): return self.name
+        def IsExploded(self): return self._exp
+        def ShowExploded(self, flag):
+            self._exp = bool(flag)
+            return True
+        def AutoInsertCenterMarks(self, *a):
+            self._marks = 1
+            return True
+        def GetFirstCenterMark2(self):
+            return _MockMark() if self._marks else None
+        def GetFirstCenterLine(self): return None
+
+    class _MockMark:
+        def GetNext(self): return None
+
+    class _MockRevTable:
+        def __init__(self): self.rows = {}
+        def AddRevision(self, rev):
+            self.rows[len(self.rows) + 1] = rev
+            return len(self.rows)
+        def GetRevisionForId(self, i): return self.rows.get(i, "")
+
+    class _MockLayerMgr:
+        def __init__(self): self.layers = {}
+        def AddLayer(self, name, desc, color, style, width):
+            self.layers[name] = color
+            return 1
+        def GetLayer(self, name):
+            return types.SimpleNamespace(Color=self.layers[name]) if name in self.layers else None
+
     class _MockDrawingDoc:
         def __init__(self):
             self.Title = "Drawing1.SLDDRW"
             self.GetType = 3
-            self.ActiveDrawingView = types.SimpleNamespace(ShowExploded=False)
+            self.views = {"View1": _MockView("View1", (0.1, 0.2, 0.0)), "View2": _MockView("View2", (0.3, 0.4, 0.0))}
+            self.ActiveDrawingView = types.SimpleNamespace(ShowExploded=False, Name="View1")
             self.Extension = types.SimpleNamespace(
-                SelectByID2=lambda *a, **k: True
+                SelectByID2=lambda *a, **k: True,
+                SaveAs=self._save_as_mock,
             )
+            self._sheet = types.SimpleNamespace(SetTemplateName=lambda *a: True, ReloadTemplate=lambda *a: True,
+                                                InsertRevisionTable2=lambda *a: _MockRevTable())
+            self._lm = _MockLayerMgr()
+        def _save_as_mock(self, p, *a):
+            with open(p, "wb") as fh:          # SolidWorks scrive il PDF esportato
+                fh.write(b"%PDF-mock")
+            return True
         def ClearSelection2(self, *a): pass
         def EditTemplate(self): pass
         def EditSheet(self): pass
-        def GetCurrentSheet(self):
-            return types.SimpleNamespace(SetTemplateName=lambda *a: True, ReloadTemplate=lambda *a: True)
+        def GetCurrentSheet(self): return self._sheet
         def CreateFlatPatternViewFromModelView3(self, *a): return True
-        def DrawingViewRotate(self, *a): return True
-        def AlignHorz(self): return True
-        def AlignVert(self): return True
-        def InsertRevisionTable2(self, *a): return True
+        def DrawingViewRotate(self, rad):
+            self.views["View1"].Angle = rad
+            return True
+        def AlignHorz(self):
+            self.views["View1"].Position = (self.views["View2"].Position[0], self.views["View1"].Position[1], 0.0)
+        def AlignVert(self):
+            self.views["View1"].Position = (self.views["View1"].Position[0], self.views["View2"].Position[1], 0.0)
         def InsertTableAnnotation2(self, *a): return True
-        def InsertCenterLine2(self): return True
-        def GetLayerManager(self):
-            return types.SimpleNamespace(AddLayer=lambda *a: True)
+        def GetLayerManager(self): return self._lm
         def InsertBlock(self, *a): return True
-        def SaveAs3(self, *a): return True
 
     mock_doc = _MockDrawingDoc()
     sw._drawing = lambda: (mock_doc, None)
     sw.get_active_doc = lambda: (mock_doc, None)
     sw._get_doc_title = lambda doc: "Drawing1.SLDDRW"
+    sw._find_view = lambda doc, name: ((mock_doc.views[name], None) if name in mock_doc.views
+                                       else (None, {"success": False, "message": f"vista '{name}' non trovata"}))
+    sw._sheet_views = lambda doc: list(mock_doc.views.values())
 
     ok_ef = sw.edit_sheet_format()
     ok_xf = sw.exit_sheet_format()
@@ -2112,50 +2272,47 @@ def test_drawings2_tools(tmp):
     record("drawings2: formati foglio (edit, exit, reload)",
            ok_ef["success"] and ok_xf["success"] and ok_rf["success"])
 
-    ok_rv = sw.add_relative_view(x=120, y=120)
-    ok_pv = sw.add_predefined_view(x=100, y=100, orientation="top")
-    ok_as = sw.add_aligned_section_view(0, 0, 50, 50, 100, 50, view_x=220, view_y=160)
-    ok_hs = sw.add_half_section_view(50, 50, direction="left")
-    record("drawings2: viste relative, predefinite, allineate e semi-sezioni",
-           ok_rv["success"] and ok_pv["success"] and ok_as["success"] and ok_hs["success"])
-
-    ok_fp = sw.add_flat_pattern_drawing_view(x=150, y=150)
-    ok_uv = sw.add_unfolded_view(x=140, y=140)
-    ok_ap = sw.add_alternate_position_view("View1", "Pos2")
+    ok_fp = sw.add_flat_pattern_drawing_view(model_path="Lamiera.SLDPRT", x=150, y=150)
     ok_ex = sw.show_exploded_drawing_view("View1", True)
-    record("drawings2: viste speciali lamiera (flat, unfolded), posizioni alternative ed esploso",
-           ok_fp["success"] and ok_uv["success"] and ok_ap["success"] and ok_ex["success"])
+    record("drawings2: vista di lamiera spianata (flat pattern) ed esploso",
+           ok_fp["success"] and ok_ex["success"])
 
     ok_rot = sw.rotate_drawing_view("View1", 90.0)
     ok_alg = sw.align_drawing_views("View1", "View2", "vertical")
     record("drawings2: rotazione e allineamento viste",
            ok_rot["success"] and ok_alg["success"])
 
-    ok_ord = sw.add_ordinate_dimension([0, 0], [[10, 0], [25, 0]], direction="horizontal")
-    ok_chm = sw.add_chamfer_dimension([20, 20])
-    ok_hsd = sw.hide_show_dimension("D1@View1", False)
-    record("drawings2: quotatura progressiva/ordinate, smussi e visibilita' quote",
-           ok_ord["success"] and ok_chm["success"] and ok_hsd["success"] and not ok_hsd["data"]["visible"])
-
-    ok_wld = sw.add_weld_symbol([50, 50], weld_type="fillet", size=6.0)
-    ok_edg = sw.add_edge_chamfer_symbol([30, 30], symbol_type="undercut")
-    record("drawings2: simboli di saldatura e sbavatura/spigolo ISO 13715",
-           ok_wld["success"] and ok_edg["success"])
-
     ok_rev = sw.add_revision_table(revision="B", description="Eco release")
-    ok_wct = sw.add_weldment_cut_list_table()
     ok_tbl = sw.add_general_table(rows=4, columns=3, title="Tabella Componenti")
-    record("drawings2: tabelle revisioni, distinta di taglio e generiche",
-           ok_rev["success"] and ok_wct["success"] and ok_tbl["success"])
+    record("drawings2: tabelle revisioni e generiche",
+           ok_rev["success"] and ok_tbl["success"])
 
     ok_cln = sw.add_centerlines()
     ok_lyr = sw.create_drawing_layer("Annotations", color_rgb=[255, 0, 0])
-    ok_sly = sw.set_entity_layer("Annotations", "Note1")
-    ok_blk = sw.insert_drawing_block(block_name="Stamp", x=200, y=50)
+    blk_file = os.path.join(tmp, "stamp.slddrt")         # il blocco deve esistere su disco
+    Path(blk_file).write_bytes(b"BLOCK-mock")
+    ok_blk = sw.insert_drawing_block(block_path=blk_file, block_name="Stamp", x=200, y=50)
     pdf_target = os.path.join(tmp, "drawing_layers.pdf")
     ok_pdf = sw.export_pdf_layers(pdf_target, overwrite=True)
     record("drawings2: assi, livelli CAD (layer), blocchi ed export PDF multilivello",
-           ok_cln["success"] and ok_lyr["success"] and ok_sly["success"] and ok_blk["success"] and ok_pdf["success"])
+           ok_cln["success"] and ok_lyr["success"] and ok_blk["success"] and ok_pdf["success"])
+
+    # Controlli negativi: SolidWorks rifiuta vista lamiera, livello, PDF; vista esplosa inesistente; blocco mancante
+    class _FailDrawingDoc(_MockDrawingDoc):
+        def CreateFlatPatternViewFromModelView3(self, *a): return None
+        def GetLayerManager(self):
+            return types.SimpleNamespace(AddLayer=lambda *a: 0, GetLayer=lambda *a: None)
+        def _save_as_mock(self, *a): return False     # nessun file scritto
+    fail_dd = _FailDrawingDoc()
+    sw._drawing = lambda: (fail_dd, None)
+    neg_fp = sw.add_flat_pattern_drawing_view(model_path="Lamiera.SLDPRT", x=150, y=150)
+    neg_lyr = sw.create_drawing_layer("Annotations")
+    neg_pdf = sw.export_pdf_layers(os.path.join(tmp, "neg_layers.pdf"))
+    neg_exp = sw.show_exploded_drawing_view("VistaInesistente", True)
+    neg_blk = sw.insert_drawing_block(block_path=os.path.join(tmp, "non_esiste.slddrt"))
+    record("drawings2: controllo negativo, vista lamiera/livello/PDF rifiutati, vista o blocco inesistenti -> success=False",
+           (not neg_fp["success"]) and (not neg_lyr["success"]) and (not neg_pdf["success"])
+           and (not neg_exp["success"]) and (not neg_blk["success"]))
 
 
 
@@ -2173,9 +2330,7 @@ def test_features4_tools(tmp):
     r5 = sw.setback_fillet([0, 0, 0])
     r6 = sw.curvature_continuous_fillet([[0, 0, 0]])
     r7 = sw.stud_wizard([0, 0, 0], 8.0, 30.0)
-    r8 = sw.thread_lead_in([0, 0, 0], 1.5)
     r9 = sw.create_reference_curve_from_equation("t", "t", "t")
-    r10 = sw.chain_pattern("Chain1", 10)
     r11 = sw.mirror_body_merge(["Body1"], "Top")
     r12 = sw.core_cavity_split([100, 100, 50])
     r13 = sw.body_replace_face([[0, 0, 0]], "Surf1")
@@ -2201,46 +2356,73 @@ def test_features4_tools(tmp):
     r33 = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1])
 
     all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
+        r1, r2, r3, r4, r5, r6, r7, r9, r11, r12, r13, r14, r15, r16,
         r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
         r31, r32, r33
     ))
-    record("features4: tutti i 33 tool gestiscono assenza doc parte con errore pulito", all_failed)
+    record("features4: tutti i 31 tool gestiscono assenza doc parte con errore pulito", all_failed)
 
     # 2. Mock documento parte attivo per verificare esecuzione positiva
     class _MockPartDoc:
         def __init__(self):
             self.Title = "Part1.SLDPRT"
             self.GetType = 1
+            self.nfeat = 0                     # conteggio delle feature create da SolidWorks
+            # ogni creazione di feature riuscita aumenta il conteggio (letto da _features)
             self.FeatureManager = types.SimpleNamespace(
-                FeatureExtrusion3=lambda *a, **k: True,
-                InsertIntersectFeature=lambda *a, **k: True,
-                InsertSweep=lambda *a, **k: True,
-                FeatureFillet3=lambda *a, **k: True,
-                AdvancedHole2=lambda *a, **k: True,
-                InsertCurveFileBegin=lambda *a, **k: True,
-                InsertMirrorFeature2=lambda *a, **k: True,
-                InsertReplaceFaceFeature=lambda *a, **k: True,
-                InsertCrossBreak=lambda *a, **k: True,
-                InsertConvertToSheetMetal2=lambda *a, **k: True,
-                InsertVent=lambda *a, **k: True,
-                InsertLoftedBend=lambda *a, **k: True,
-                InsertCosmeticWeldBead2=lambda *a, **k: True,
-                InsertSubWeldFolder=lambda *a, **k: True,
+                FeatureExtrusion3=self._add,
+                InsertIntersectFeature=self._add,
+                InsertSweep=self._add,
+                FeatureFillet3=self._add,
+                AdvancedHole2=self._add,
+                InsertCurveFileBegin=self._add,
+                InsertMirrorFeature2=self._add,
+                InsertReplaceFaceFeature=self._add,
+                InsertCrossBreak=self._add,
+                InsertConvertToSheetMetal2=self._add,
+                InsertVent=self._add,
+                InsertLoftedBend=self._add,
+                InsertCosmeticWeldBead=self._add,
+                InsertSubWeldFolder2=self._add,
+                InsertStudWizard=self._add,
             )
             self.Extension = types.SimpleNamespace(
                 SelectByID2=lambda *a, **k: True
             )
+            self.SelectionManager = types.SimpleNamespace(
+                CreateSelectData=lambda: types.SimpleNamespace(Mark=0))
+        def _add(self, *a, **k):
+            self.nfeat += 1
+            return True
         def ClearSelection2(self, *a): pass
         def EditRebuild3(self): pass
         def ForceRebuild3(self, *a): pass
-        def UpdateCutList(self): pass
+        def UpdateCutList(self): return True
+        def InsertFeatureReplaceFace(self): self._add()
+
+    class _MockBody:
+        def __init__(self, name):
+            self.Name = name
+        def Select2(self, *a): return True
+
+    class _MockCutListFolder:
+        def GetSpecificFeature2(self): return "bf"
 
     mock_doc = _MockPartDoc()
     sw._part = lambda: (mock_doc, None)
     sw.get_active_doc = lambda: (mock_doc, None)
-    sw._select_point = lambda *a, **k: True
-    sw._select_points = lambda *a, **k: True
+    sw._select_point = lambda *a, **k: (True, None)      # (ok, errore) come in modeling_base
+    sw._select_points = lambda *a, **k: (True, None)
+    sw._features = lambda doc: [("Feature%d" % i, "Feature", None) for i in range(doc.nfeat)] + [("Distinta", "CutListFolder", _MockCutListFolder())]
+    sw._bodies = lambda doc: [_MockBody("Body1")]
+    sw._select_edge_or_axis = lambda *a, **k: (True, "")
+    sw._volume_m3 = lambda doc: float(doc.nfeat)
+    # chiamate COM con firma nota (intersect_bodies e sweep gia' provati dal vivo in ext_bodies2 / modeling)
+    sw.intersect_bodies = lambda **k: {"success": True}
+    sw.sweep = lambda **k: {"success": True}
+
+    sw._wld_raw = lambda obj, name, *args: (obj.InsertSubWeldFolder2(*args) if name == "InsertSubWeldFolder2"
+                                             else ([_MockBody("Body1")] if name == "GetBodies" else True))
 
     ok_efs = sw.extrude_from_surface(depth=15.0, start_surface_name="Surf1")
     ok_isf = sw.intersect_solid_features(["Body1", "Body2"])
@@ -2248,7 +2430,7 @@ def test_features4_tools(tmp):
            ok_efs["success"] and ok_isf["success"])
 
     ok_ss = sw.solid_sweep("Tool1", "Path1")
-    ok_vss = sw.variable_section_sweep("Prof1", "Path1", scale_factor=1.5, twist_angle=45.0)
+    ok_vss = sw.variable_section_sweep("Prof1", "Path1", scale_factor=1.0, twist_angle=45.0)
     record("features4: sweep con utensile solido e a sezione variabile",
            ok_ss["success"] and ok_vss["success"])
 
@@ -2258,18 +2440,16 @@ def test_features4_tools(tmp):
            ok_sbf["success"] and ok_ccf["success"])
 
     ok_swz = sw.stud_wizard([10, 10, 0], shaft_diameter=8.0, stud_length=30.0, size="M8x1.25")
-    ok_tli = sw.thread_lead_in([10, 10, 0], pitch=1.5, angle_deg=45.0)
-    record("features4: prigionieri filettati stud wizard e imbocco filettatura",
-           ok_swz["success"] and ok_tli["success"])
+    record("features4: prigionieri filettati stud wizard",
+           ok_swz["success"])
 
     ok_eqc = sw.create_reference_curve_from_equation("50*cos(t)", "50*sin(t)", "10*t", t_start=0, t_end=6.28)
     record("features4: curve 3D parametriche da equazioni matematiche",
            ok_eqc["success"])
 
-    ok_cp = sw.chain_pattern("ChainSketch", instance_count=8, pitch_distance=15.0)
     ok_mbm = sw.mirror_body_merge(["Body1"], "Right", merge_bodies=True)
-    record("features4: ripetizioni a catena e specchiatura corpi con fusione",
-           ok_cp["success"] and ok_mbm["success"])
+    record("features4: specchiatura corpi con fusione",
+           ok_mbm["success"])
 
     ok_ccs = sw.core_cavity_split([120, 120, 60], parting_surface_name="PartingSurf")
     ok_brf = sw.body_replace_face([[0, 0, 0]], "TargetSurf")
@@ -2292,7 +2472,7 @@ def test_features4_tools(tmp):
 
     ok_cwb = sw.cosmetic_weld_bead([0, 0, 0], [10, 0, 0], bead_size=5.0)
     ok_ucl = sw.update_cut_list()
-    ok_swf = sw.subweldment_folder("TrussAssembly", ["Member1", "Member2"])
+    ok_swf = sw.subweldment_folder("TrussAssembly", ["Body1"])
     record("features4: saldature (cordolo cosmetico, distinta taglio, cartelle)",
            ok_cwb["success"] and ok_ucl["success"] and ok_swf["success"])
 
@@ -2310,6 +2490,24 @@ def test_features4_tools(tmp):
     ok_sda = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1], samples_count=50)
     record("features4: conversione mesh B-Rep e analisi deviazione geometrica",
            ok_mbc["success"] and ok_sda["success"])
+
+    # Controlli negativi: SolidWorks non crea alcuna feature (conteggio fermo) e distinta non aggiornata -> success=False
+    class _NoFeatDoc(_MockPartDoc):
+        def _add(self, *a, **k):
+            return None                        # la chiamata COM non crea feature
+        def UpdateCutList(self): return None
+    nofeat_doc = _NoFeatDoc()
+    sw._part = lambda: (nofeat_doc, None)
+    neg_ext4 = sw.extrude_from_surface(depth=15.0)
+    neg_swp4 = sw.solid_sweep("Tool1", "Path1")
+    neg_stud4 = sw.stud_wizard([0, 0, 0], 8.0, 30.0)
+    neg_cbr4 = sw.cross_break([0, 0, 0], 1.0)
+    sw._wld_raw = lambda obj, name, *args: None         # distinta non aggiornata: nessun membro letto
+    neg_cut4 = sw.update_cut_list()
+    del sw._wld_raw                                    # ripristina il metodo reale
+    record("features4: controllo negativo, nessuna feature creata o distinta non aggiornata -> success=False",
+           (not neg_ext4["success"]) and (not neg_swp4["success"]) and (not neg_stud4["success"])
+           and (not neg_cbr4["success"]) and (not neg_cut4["success"]))
 
 
 
@@ -2353,28 +2551,91 @@ def test_data2_tools(tmp):
     record("data2: tutti i 24 tool gestiscono assenza doc con errore pulito", all_failed)
 
     # 2. Mock documento attivo per verificare esecuzione positiva
+    class _MockCPM:
+        """Gestore proprieta' con memoria: cio' che viene scritto (Add3/Set2) si rilegge (Get5/Get6)."""
+        def __init__(self, store):
+            self.store = store
+        @property
+        def GetNames(self):
+            return list(self.store)
+        def Get5(self, name, *a):
+            v = self.store.get(name, "")
+            return (True, v, v, True)
+        def Get6(self, name, use_cached, v, r, b1, b2):
+            v.value = self.store.get(name, "")
+            r.value = v.value
+            return True
+        def GetType2(self, name):
+            return 30                          # swCustomInfoText
+        def Add3(self, name, typ, val, opt):
+            self.store[name] = val
+            return 0
+        def Set2(self, name, val):
+            self.store[name] = val
+            return 0
+
+    class _ReadOnlyCPM:
+        """Gestore che ignora le scritture: per il controllo negativo."""
+        GetNames = []
+        def Get5(self, *a): return (True, "", "", True)
+        def Get6(self, name, use_cached, v, r, b1, b2):
+            v.value = ""
+            r.value = ""
+            return True
+        def GetType2(self, name): return 30
+        def Add3(self, *a): return 0
+        def Set2(self, *a): return 0
+
     class _MockDataDoc:
         def __init__(self):
             self.Title = "Model.SLDPRT"
             self.GetType = 1
-            self.SummaryInfo = lambda *a, **k: True
+            self.summary = {}
+            self.cpm_store = {}
+            self.cfg_names = ["Default"]
+            self.GetConfigurationNames = self.cfg_names
             self.ConfigurationManager = types.SimpleNamespace(
-                AddConfiguration2=lambda *a, **k: True
+                AddConfiguration2=self._add_cfg,
+                ActiveConfiguration=types.SimpleNamespace(Name="Default"),
             )
             self.Extension = types.SimpleNamespace(
-                CustomPropertyManager=lambda cfg: types.SimpleNamespace(
-                    Get5=lambda *a: (True, "Val1", "ResolvedVal1", True),
-                    Add3=lambda *a, **k: True,
-                    Set2=lambda *a, **k: True,
-                )
+                CustomPropertyManager=lambda cfg: _MockCPM(self.cpm_store),
+                SaveAs=self._save_as_ext,
             )
+        def _add_cfg(self, name, *a, **k):
+            self.cfg_names.append(name)        # la configurazione compare nell'elenco
+            return True
+        def SummaryInfo(self, idx, text=None):
+            if text is None:
+                return self.summary.get(idx)   # lettura
+            self.summary[idx] = text           # scrittura
+            return True
         def GetEquationMgr(self):
             return types.SimpleNamespace(GetCount=1, Equation=lambda idx: '"D1@Sketch1"=100')
-        def InsertDesignTable2(self, *a): return True
         def GetDesignTable(self):
             return types.SimpleNamespace(SaveAs=lambda path: True)
-        def SaveAs3(self, *a): return True
-        def ExportFlatPatternView(self, *a): return True
+        def _save_as_ext(self, p, version, options, data, errors, warnings):
+            """Come SolidWorks 2026 Student (misurato): JT non scritto (errore 256), IFC solo IFC2X3, GLB ok, STEP AP203."""
+            ext = os.path.splitext(p)[1].lower()
+            if ext == ".jt":
+                errors.value = 256
+                return False
+            if ext == ".ifc":
+                contenuto = b"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('IFC2X3'));\nENDSEC;\nEND-ISO-10303-21;\n"
+            elif ext == ".glb":
+                contenuto = b"glTF\x02\x00\x00\x00" + b"\x00" * 16
+            elif ext in (".step", ".stp"):
+                contenuto = (b"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n"
+                             b"#1=MANIFOLD_SOLID_BREP('',#2);\nENDSEC;\nEND-ISO-10303-21;\n")
+            else:
+                contenuto = b"mock-export"
+            with open(p, "wb") as fh:          # SolidWorks scrive il file esportato
+                fh.write(contenuto)
+            return True
+        def ExportFlatPatternView(self, p, *a):
+            with open(p, "wb") as fh:
+                fh.write(b"mock-export")
+            return True
 
     mock_doc = _MockDataDoc()
     sw._doc = lambda: (mock_doc, None)
@@ -2383,11 +2644,11 @@ def test_data2_tools(tmp):
     sw._get_active_config_name = lambda doc: "Default"
     sw.get_bounding_box = lambda unit=None: {"success": True, "size_x": 100.0, "size_y": 50.0, "size_z": 20.0}
 
-    ok_gcp = sw.get_config_custom_property("PartNo")
     ok_scp = sw.set_config_custom_property("PartNo", "ABC-123")
+    ok_gcp = sw.get_config_custom_property("PartNo")
     ok_smd = sw.set_document_summary_info(title="Staffa", author="Elia")
     record("data2: proprieta' per configurazione e metadati di riepilogo",
-           ok_gcp["success"] and ok_scp["success"] and ok_smd["success"])
+           ok_gcp["success"] and ok_gcp["data"]["value"] == "ABC-123" and ok_scp["success"] and ok_smd["success"])
 
     ok_cmat = sw.create_custom_material("Titanium_Grade5", density=4430.0, elastic_modulus=114000.0)
     record("data2: materiali personalizzati con costanti meccaniche",
@@ -2399,26 +2660,38 @@ def test_data2_tools(tmp):
            ok_eqx["success"] and os.path.isfile(eq_out))
 
     ok_idt = sw.insert_design_table()
+    record("data2: insert_design_table senza il metodo InsertDesignTable e' rifiutato", not ok_idt["success"])
     ok_edt = sw.edit_design_table(1, "D1@Sketch1", "120")
     dt_out = os.path.join(tmp, "design_table_out.csv")
     ok_xdt = sw.export_design_table(dt_out, overwrite=True)
     ok_dcf = sw.create_derived_configuration("Lunga", "Default")
     record("data2: tabelle di progettazione e configurazioni derivate",
-           ok_idt["success"] and ok_edt["success"] and ok_xdt["success"] and ok_dcf["success"] and os.path.isfile(dt_out))
+           ok_edt["success"] and ok_xdt["success"] and ok_dcf["success"] and os.path.isfile(dt_out))
 
     ok_pja = sw.get_projected_area([0, 0, 1])
     ok_cle = sw.calculate_clearance_envelope(clearance_offset=10.0)
     record("data2: area proiettata e clearance envelope",
            ok_pja["success"] and ok_cle["success"] and ok_cle["data"]["offset_mm"] == 10.0)
 
+    def _mock_export_model(filepath, format=None, **k):          # export PDF 3D: stessa strada di export_model (misurata)
+        with open(filepath, "wb") as fh:
+            fh.write(b"%PDF-1.6 mock")
+        return {"success": True, "message": "mock", "data": {"verify": {"has_3d": True}}}
+    sw.export_model = _mock_export_model
+
+    sw._sw_app = types.SimpleNamespace(GetUserPreferenceIntegerValue=lambda k: 203, SetUserPreferenceIntegerValue=lambda k, v: True)
     ok_242 = sw.export_step_ap242_pmi(os.path.join(tmp, "model.step"), overwrite=True)
+    record("data2: STEP AP242 rifiutato (SolidWorks scrive AP203)", (not ok_242["success"]) and "AP242" in ok_242["message"])
     ok_dxf = sw.export_dxf_flat_pattern(os.path.join(tmp, "flat.dxf"), overwrite=True)
     ok_jt = sw.export_jt(os.path.join(tmp, "model.jt"), overwrite=True)
-    ok_ifc = sw.export_ifc(os.path.join(tmp, "model.ifc"), overwrite=True)
+    record("data2: JT rifiutato, SaveAs errore 256", (not ok_jt["success"]) and "256" in ok_jt["message"])
+    ok_ifc = sw.export_ifc(os.path.join(tmp, "model.ifc"), overwrite=True, schema_version="IFC2X3")
+    ok_ifc4 = sw.export_ifc(os.path.join(tmp, "model4.ifc"), overwrite=True, schema_version="IFC4")
+    record("data2: IFC2X3 scritto, IFC4 richiesto e rifiutato", ok_ifc["success"] and (not ok_ifc4["success"]) and "IFC2X3" in ok_ifc4["message"])
     ok_glb = sw.export_gltf_glb(os.path.join(tmp, "model.glb"), overwrite=True)
     ok_3dp = sw.export_3d_pdf(os.path.join(tmp, "model.pdf"), overwrite=True)
-    record("data2: esportazioni avanzate (AP242 PMI, DXF flat, JT, IFC, glTF, 3D PDF)",
-           ok_242["success"] and ok_dxf["success"] and ok_jt["success"] and ok_ifc["success"] and ok_glb["success"] and ok_3dp["success"])
+    record("data2: esportazioni avanzate (DXF flat, IFC2X3, glTF/GLB, 3D PDF)",
+           ok_dxf["success"] and ok_ifc["success"] and ok_glb["success"] and ok_3dp["success"])
 
     ok_ddm = sw.add_dimxpert_dimension([0, 0, 0])
     ok_ddt = sw.add_dimxpert_datum([0, 0, 0], "A")
@@ -2432,6 +2705,32 @@ def test_data2_tools(tmp):
     ok_app = sw.apply_appearance("polished_chrome", color_rgb=[220, 220, 220])
     record("data2: personalizzazione grafica vista 3D e aspetti fotorealistici",
            ok_svb["success"] and ok_app["success"])
+
+    # Controlli negativi: proprieta' non riletta, riepilogo rifiutato, configurazione non creata, export rifiutato
+    class _RefuseDataDoc(_MockDataDoc):
+        def __init__(self):
+            super().__init__()
+            self.Extension = types.SimpleNamespace(
+                CustomPropertyManager=lambda cfg: _ReadOnlyCPM()
+            )
+        def _add_cfg(self, name, *a, **k):
+            return True                        # dice ok ma non aggiunge nulla
+        def SummaryInfo(self, idx, text=None):
+            if text is not None:
+                raise RuntimeError("scrittura riepilogo rifiutata")
+            return None
+        def SaveAs3(self, *a):
+            return False                       # nessun file scritto
+
+    refuse_doc = _RefuseDataDoc()
+    sw._doc = lambda: (refuse_doc, None)
+    sw._part_or_assembly = lambda: (refuse_doc, None)
+    neg_scp = sw.set_config_custom_property("PartNo", "ABC-123")
+    neg_smd = sw.set_document_summary_info(title="Staffa")
+    neg_dcf = sw.create_derived_configuration("Lunga", "Default")
+    neg_jt = sw.export_jt(os.path.join(tmp, "neg_model.jt"))
+    record("data2: controllo negativo, proprieta' non riletta / riepilogo rifiutato / configurazione assente / export rifiutato -> success=False",
+           (not neg_scp["success"]) and (not neg_smd["success"]) and (not neg_dcf["success"]) and (not neg_jt["success"]))
 
 def test_simulation2_tools(tmp):
     sw = SolidWorksAutomation()

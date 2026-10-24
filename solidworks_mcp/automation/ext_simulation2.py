@@ -39,14 +39,14 @@ import math
 import html
 import logging
 import traceback
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from pathlib import Path
 
 import pythoncom
 from win32com.client import VARIANT
 
 from ..constants import SwErrors
-from .simulation import _va, _bi, _br, _bb, _nullv, _dbl
+from .simulation import _va, _bi, _br, _bb, _nullv
 
 logger = logging.getLogger(__name__)
 

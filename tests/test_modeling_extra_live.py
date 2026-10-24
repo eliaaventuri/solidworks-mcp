@@ -914,8 +914,8 @@ async def b8_sposta_facce(c):
 
     # rotazione attorno a un asse di riferimento (axis="Axis1")
     await mf_block(c)
-    await c.call("create_reference_axis", mode="two_planes", planes=["Top", "Right"])
-    ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", axis="Axis1", angle=3)
+    _, _, ax = await c.call("create_reference_axis", mode="two_planes", planes=["Top", "Right"])
+    ok, text, _ = await c.call("move_faces", faces=F, mode="rotate", axis=(ax or {}).get("feature") or "Axis1", angle=3)
     record("B8 rotate attorno ad asse di riferimento Axis1", ok, text[:80])
     await discard_all(c)
 

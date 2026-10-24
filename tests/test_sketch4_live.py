@@ -60,24 +60,25 @@ async def run():
                 ok_curv, _, data_curv = await c.call("show_sketch_curvature", scale=15, density=30, visible=True)
                 record("show_sketch_curvature", ok_curv, f"visible: {data_curv.get('visible')}")
 
-                ok_ana, text_ana, data_ana = await c.call("get_spline_curvature_analysis")
-                record("get_spline_curvature_analysis", ok_ana, f"min_radius: {data_ana.get('min_radius_mm')} text: {text_ana[:120]}")
-
                 # 3. Text along curve & segment entity
-                await c.call("draw_line", x1=0, y1=-20, x2=50, y2=-20)
-                ok_seg, _, data_seg = await c.call("segment_sketch_entity", count=4, is_segments=False)
-                record("segment_sketch_entity", ok_seg, f"count: {data_seg.get('count')}")
+                ok_line, _, data_line = await c.call("draw_line", x1=0, y1=-20, x2=50, y2=-20)
+                line_id = data_line.get("entity_id")
+                ok_seg, _, data_seg = await c.call("segment_sketch_entity", entity=line_id, count=4, is_segments=False)
+                record("segment_sketch_entity", ok_seg and data_seg.get("created_points_count") == 4,
+                       f"count: {data_seg.get('count')}, punti creati: {data_seg.get('created_points_count')}")
 
                 ok_txt, _, _ = await c.call("draw_sketch_text_along_curve", text="SOLIDWORKS-MCP", height=4)
                 record("draw_sketch_text_along_curve", ok_txt)
 
                 # 4. Diagnose sketch relations
-                ok_diag, _, data_diag = await c.call("diagnose_sketch_relations")
-                record("diagnose_sketch_relations", ok_diag, f"status: {data_diag.get('sketch_status')}")
+                ok_nim, text_nim, _ = await c.call("diagnose_sketch_relations")
+                record("diagnose_sketch_relations: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
                 # 5. Make sketch chain
-                ok_chn, _, data_chn = await c.call("make_sketch_chain")
-                record("make_sketch_chain", ok_chn)
+                ok_l2, _, data_l2 = await c.call("draw_line", x1=50, y1=-20, x2=50, y2=-40)
+                ok_chn, _, data_chn = await c.call("make_sketch_chain", entities=[line_id, data_l2.get("entity_id")])
+                record("make_sketch_chain", ok_l2 and ok_chn and data_chn.get("chain_created") is True and data_chn.get("segment_count") == 2,
+                       f"segment_count: {data_chn.get('segment_count')}")
 
                 # Chiudi lo schizzo ed estrudi
                 await c.call("close_sketch")
@@ -89,11 +90,11 @@ async def run():
                 # 6. Intersection curve & silhouette
                 # Apri schizzo su piano Top che taglia il cilindro a metà
                 await c.call("create_sketch", plane="Top")
-                ok_int, text_int, data_int = await c.call("insert_intersection_curve")
-                record("insert_intersection_curve", ok_int, f"added: {data_int.get('added_segments_count')}")
+                ok_int, text_int, _ = await c.call("insert_intersection_curve")
+                record("insert_intersection_curve: rifiutato perche' non implementato", (not ok_int) and "non e' implementato" in text_int, text_int[:80])
 
-                ok_sil, text_sil, data_sil = await c.call("insert_silhouette_entities")
-                record("insert_silhouette_entities", ok_sil, f"added: {data_sil.get('added_segments_count')}")
+                ok_sil, text_sil, _ = await c.call("insert_silhouette_entities")
+                record("insert_silhouette_entities: rifiutato perche' non implementato", (not ok_sil) and "non e' implementato" in text_sil, text_sil[:80])
                 await c.call("close_sketch")
 
                 # 7. 3D Parametric Equation Curve

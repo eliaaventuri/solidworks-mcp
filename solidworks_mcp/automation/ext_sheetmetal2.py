@@ -4,6 +4,7 @@ Schemi in tools_ext/sheetmetal2.py.
 """
 
 import logging
+import math
 import traceback
 from typing import Dict
 
@@ -23,21 +24,29 @@ class SheetMetal2Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(profile_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0)
+            if not doc.Extension.SelectByID2(str(profile_sketch), "SKETCH", 0, 0, 0, True, 1, null_variant(), 0):
+                return self._result(False, f"sm_swept_flange: schizzo profilo '{profile_sketch}' non selezionato",
+                                    SwErrors.swSelectionError)
             if path_edge:
                 if isinstance(path_edge, (list, tuple)):
-                    self._select_point(doc, path_edge, mark=4, unit=unit)
+                    ok, info = self._select_point(doc, "edge", path_edge, unit=unit, append=True, mark=4)
+                    if not ok:
+                        return self._result(False, f"sm_swept_flange: spigolo di percorso non selezionato: {info.get('error', info)}",
+                                            SwErrors.swSelectionError)
                 else:
-                    doc.Extension.SelectByID2(str(path_edge), "EDGE", 0, 0, 0, True, 4, null_variant(), 0)
+                    if not doc.Extension.SelectByID2(str(path_edge), "EDGE", 0, 0, 0, True, 4, null_variant(), 0):
+                        return self._result(False, f"sm_swept_flange: spigolo di percorso '{path_edge}' non selezionato",
+                                            SwErrors.swSelectionError)
             fm = doc.FeatureManager
-            feat = None
-            try:
-                feat = fm.InsertSheetMetalSweptFlange()
-            except Exception:
-                pass
+            feat = fm.InsertSheetMetalSweptFlange()
+            if feat is None:
+                return self._result(False, "sm_swept_flange: flangia con sweep non creata da SolidWorks",
+                                    SwErrors.swFeatureError, {"profile_sketch": profile_sketch, "created": False})
+            ign = ["bend_radius"] if bend_radius is not None else []
             return self._result(
                 True, f"Flangia con sweep creata con profilo '{profile_sketch}'.",
-                SwErrors.swSuccess, {"profile_sketch": profile_sketch, "created": feat is not None, "radius": bend_radius}
+                SwErrors.swSuccess, {"profile_sketch": profile_sketch, "created": True, "radius": bend_radius,
+                                     "ignored_params": ign}
             )
         except Exception as e:
             logger.error(f"sm_swept_flange: {e}\n{traceback.format_exc()}")
@@ -51,21 +60,21 @@ class SheetMetal2Operations:
                 return err
             sk_name = sketch or ""
             if sk_name:
-                doc.Extension.SelectByID2(sk_name, "SKETCH", 0, 0, 0, False, 0, null_variant(), 0)
+                if not doc.Extension.SelectByID2(sk_name, "SKETCH", 0, 0, 0, False, 0, null_variant(), 0):
+                    return self._result(False, f"sm_normal_cut: schizzo '{sk_name}' non selezionato", SwErrors.swSelectionError)
             fm = doc.FeatureManager
             d_m = self._mmu(depth or 0.0, unit)
-            feat = None
-            try:
-                feat = fm.FeatureCut4(
-                    False, False, False, 0, 0, d_m, 0.0, False, False, False, False,
-                    0.0, 0.0, False, False, False, False, True, False, True, False, False, False,
-                    0, 0.0, False, optimize_geometry
-                )
-            except Exception:
-                pass
+            feat = fm.FeatureCut4(
+                False, False, False, 0, 0, d_m, 0.0, False, False, False, False,
+                0.0, 0.0, False, False, False, False, True, False, True, False, False, False,
+                0, 0.0, False, optimize_geometry
+            )
+            if feat is None:
+                return self._result(False, "sm_normal_cut: taglio normale allo spessore non creato da SolidWorks",
+                                    SwErrors.swFeatureError, {"created": False, "sketch": sk_name})
             return self._result(
                 True, "Taglio normale allo spessore della lamiera eseguito.",
-                SwErrors.swSuccess, {"created": feat is not None, "sketch": sk_name, "optimize": optimize_geometry}
+                SwErrors.swSuccess, {"created": True, "sketch": sk_name, "optimize": optimize_geometry}
             )
         except Exception as e:
             logger.error(f"sm_normal_cut: {e}\n{traceback.format_exc()}")
@@ -79,16 +88,18 @@ class SheetMetal2Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._select_point(doc, face_point, mark=1, unit=unit)
+            ok, info = self._select_point(doc, "face", face_point, unit=unit, mark=1)
+            if not ok:
+                return self._result(False, f"sm_forming_tool: faccia {face_point} non selezionata: {info.get('error', info)}",
+                                    SwErrors.swSelectionError)
             fm = doc.FeatureManager
-            feat = None
-            try:
-                feat = fm.InsertFormToolFeature(str(tool_file), bool(flip), float(rotation_angle), "", False, True, True, True, False)
-            except Exception:
-                pass
+            feat = fm.InsertFormToolFeature(str(tool_file), bool(flip), math.radians(float(rotation_angle)), "", False, True, True, True, False)
+            if feat is None:
+                return self._result(False, f"sm_forming_tool: utensile '{tool_file}' non applicato da SolidWorks",
+                                    SwErrors.swFeatureError, {"tool_file": tool_file, "face_point": face_point, "created": False})
             return self._result(
                 True, f"Utensile di formatura '{tool_file}' applicato su faccia {face_point}.",
-                SwErrors.swSuccess, {"tool_file": tool_file, "face_point": face_point, "created": feat is not None}
+                SwErrors.swSuccess, {"tool_file": tool_file, "face_point": face_point, "created": True}
             )
         except Exception as e:
             logger.error(f"sm_forming_tool: {e}\n{traceback.format_exc()}")
@@ -104,23 +115,29 @@ class SheetMetal2Operations:
             doc.ClearSelection2(True)
             for e in edges or []:
                 if isinstance(e, (list, tuple)):
-                    self._select_point(doc, e, append=True, unit=unit)
+                    ok, info = self._select_point(doc, "edge", e, unit=unit, append=True)
+                    if not ok:
+                        return self._result(False, f"sm_break_corner: spigolo {e} non selezionato: {info.get('error', info)}",
+                                            SwErrors.swSelectionError)
                 else:
-                    doc.Extension.SelectByID2(str(e), "EDGE", 0, 0, 0, True, 0, null_variant(), 0)
+                    if not doc.Extension.SelectByID2(str(e), "EDGE", 0, 0, 0, True, 0, null_variant(), 0):
+                        return self._result(False, f"sm_break_corner: spigolo '{e}' non selezionato", SwErrors.swSelectionError)
             for f in faces or []:
                 if isinstance(f, (list, tuple)):
-                    self._select_point(doc, f, append=True, unit=unit)
+                    ok, info = self._select_point(doc, "face", f, unit=unit, append=True)
+                    if not ok:
+                        return self._result(False, f"sm_break_corner: faccia {f} non selezionata: {info.get('error', info)}",
+                                            SwErrors.swSelectionError)
             fm = doc.FeatureManager
             btype = 1 if "chamfer" in str(break_type).lower() else 0  # 1 = chamfer, 0 = fillet
             d_m = self._mmu(distance, unit)
-            feat = None
-            try:
-                feat = fm.InsertSheetMetalCornerTrim(1 if internal_corners_only else 0, btype, d_m, 0, 0.0)
-            except Exception:
-                pass
+            feat = fm.InsertSheetMetalCornerTrim(1 if internal_corners_only else 0, btype, d_m, 0, 0.0)
+            if feat is None:
+                return self._result(False, "sm_break_corner: rottura spigoli non creata da SolidWorks",
+                                    SwErrors.swFeatureError, {"break_type": break_type, "distance": distance, "created": False})
             return self._result(
                 True, f"Rottura spigoli ({break_type} {distance} mm) eseguita su lamiera.",
-                SwErrors.swSuccess, {"break_type": break_type, "distance": distance, "created": feat is not None}
+                SwErrors.swSuccess, {"break_type": break_type, "distance": distance, "created": True}
             )
         except Exception as e:
             logger.error(f"sm_break_corner: {e}\n{traceback.format_exc()}")

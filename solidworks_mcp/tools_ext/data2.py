@@ -161,7 +161,7 @@ TOOLS = {
         "Export 3D geometry to Industry Foundation Classes (IFC) BIM format for architectural workflows.",
         {
             "filepath": (S, "Destination IFC file path (.ifc)"),
-            "schema_version": (S, "IFC schema standard ('IFC2X3', 'IFC4') (default 'IFC4')"),
+            "schema_version": (S, "IFC schema: only 'IFC2X3' is written by SolidWorks 2026 (default 'IFC2X3'; 'IFC4' is refused)"),
             "overwrite": (B, "Overwrite existing file if present (default false)"),
         },
         ["filepath"],

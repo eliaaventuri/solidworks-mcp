@@ -2,6 +2,7 @@
 Live test for Lotto MODELLAZIONE 4 (33 tools) against dedicated hidden SolidWorks instance.
 """
 
+import math
 import os
 import sys
 import asyncio
@@ -20,6 +21,29 @@ RESULTS = []
 def record(name, ok, note=""):
     RESULTS.append((name, "PASS" if ok else "FAIL", note))
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}  {note}"[:180])
+
+
+async def feats(c):
+    ok, _, d = await c.call("list_features")
+    return d.get("features", []) if ok else []
+
+
+async def bodies(c):
+    ok, _, d = await c.call("list_bodies")
+    return d.get("bodies", []) if ok else []
+
+
+async def vol(c):
+    ok, _, d = await c.call("get_mass_properties")
+    return float(d.get("volume_mm3", -1.0)) if ok else -1.0
+
+
+def sketches(fs):
+    return [f["name"] for f in fs if f["type"] == "ProfileFeature"]
+
+
+def near(v, exp, tol_rel=0.001):
+    return abs(v - exp) <= tol_rel * abs(exp)
 
 
 async def run():
@@ -58,115 +82,112 @@ async def run():
                 print("\n--- Test Features 4 Tools Live ---")
 
                 # 1. Estrusioni, Rivoluzioni e Tagli Solidi
-                ok_efs, _, _ = await c.call("extrude_from_surface", depth=10.0, offset_distance=2.0)
-                record("extrude_from_surface", ok_efs)
+                ok_nim, text_nim, _ = await c.call("extrude_from_surface", depth=10.0, offset_distance=2.0)
+                record("extrude_from_surface: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
-                ok_isf, _, _ = await c.call("intersect_solid_features", body_names=["SolidBody1"])
-                record("intersect_solid_features", ok_isf)
+                # intersect: corpo B 40x20x30 dentro il corpo A 120x80x30 -> intersezione = B = 24000 mm3
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=-60, y1=-40, x2=60, y2=40, unit="mm")
+                await c.call("extrude_sketch", depth=30, unit="mm")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=-20, y1=-10, x2=20, y2=10, unit="mm")
+                await c.call("close_sketch")
+                sk = sketches(await feats(c))
+                await c.call("extrude_boss", sketch=sk[-1], depth=30, merge=False, unit="mm")
+                nb0 = len(await bodies(c))
+                ok_isf, text_isf, _ = await c.call("intersect_solid_features", body_names=[b["name"] for b in await bodies(c)])
+                v_isf, nb_isf = await vol(c), len(await bodies(c))
+                record("intersect_solid_features", ok_isf and near(v_isf, 24000.0) and nb_isf == 1,
+                       f"corpi {nb0} -> {nb_isf}, volume {v_isf:.1f} contro 24000.0 (40x20x30)")
+                await c.call("close_document", discard=True)
 
                 # 2. Loft, Sweep e Boundary Solidi
-                ok_ss, _, _ = await c.call("solid_sweep", tool_body_name="SolidBody1", path_sketch="Sketch1")
-                record("solid_sweep", ok_ss)
+                ok_nim, text_nim, _ = await c.call("solid_sweep", tool_body_name="SolidBody1", path_sketch="Sketch1")
+                record("solid_sweep: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
-                ok_vss, _, _ = await c.call("variable_section_sweep", profile_sketch="Sketch1", path_sketch="Sketch1", scale_factor=1.2)
-                record("variable_section_sweep", ok_vss)
+                # sweep a sezione (variabile con guide): profilo circolare r=5 lungo una linea di 60 mm -> pi*r^2*60
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_line", x1=0, y1=0, x2=60, y2=0)
+                await c.call("close_sketch")
+                await c.call("create_sketch", plane="Right")
+                await c.call("draw_circle", x=0, y=0, radius=5)
+                await c.call("close_sketch")
+                sk = sketches(await feats(c))
+                ok_vss, text_vss, _ = await c.call("variable_section_sweep", profile_sketch=sk[1], path_sketch=sk[0], scale_factor=1.0)
+                v_vss = await vol(c)
+                record("variable_section_sweep", ok_vss and near(v_vss, math.pi * 25 * 60),
+                       f"volume {v_vss:.2f} contro {math.pi * 25 * 60:.2f} (pi*5^2*60)")
+                ok_vss2, text_vss2, _ = await c.call("variable_section_sweep", profile_sketch=sk[1], path_sketch=sk[0], scale_factor=1.2)
+                record("variable_section_sweep: scale_factor 1.2 rifiutato", (not ok_vss2) and "non supportato" in text_vss2, text_vss2[:80])
+                await c.call("close_document", discard=True)
 
                 # 3. Raccordi, Smussi e Lavorazioni Spigoli
-                ok_sbf, _, _ = await c.call("setback_fillet", vertex_point=[60, 40, 30], radius=5.0)
-                record("setback_fillet", ok_sbf)
+                ok_nim, text_nim, _ = await c.call("setback_fillet", vertex_point=[60, 40, 30], radius=5.0)
+                record("setback_fillet: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
-                ok_ccf, _, _ = await c.call("curvature_continuous_fillet", edge_points=[[60, 0, 30]], radius=4.0, rho_conic=0.5)
-                record("curvature_continuous_fillet", ok_ccf)
-
-                # 4. Forometria Avanzata e Filettature
-                ok_swz, _, _ = await c.call("stud_wizard", face_point=[0, 0, 30], shaft_diameter=8.0, stud_length=25.0, standard="ISO", size="M8x1.25")
-                record("stud_wizard", ok_swz)
-
-                ok_tli, _, _ = await c.call("thread_lead_in", cylinder_face_point=[0, 0, 30], pitch=1.25, angle_deg=45.0)
-                record("thread_lead_in", ok_tli)
-
-                # 5. Geometria di Riferimento e Assi
-                ok_eqc, _, _ = await c.call("create_reference_curve_from_equation", x_equation="40*cos(t)", y_equation="40*sin(t)", z_equation="5*t", t_start=0.0, t_end=6.28)
-                record("create_reference_curve_from_equation", ok_eqc)
-
-                # 6. Ripetizioni e Simmetrie 3D
-                ok_cp, _, _ = await c.call("chain_pattern", chain_path_sketch="Sketch1", instance_count=6, pitch_distance=15.0)
-                record("chain_pattern", ok_cp)
-
-                ok_mbm, _, _ = await c.call("mirror_body_merge", body_names=["SolidBody1"], mirror_plane="Front", merge_bodies=True)
-                record("mirror_body_merge", ok_mbm)
+                # 6. Ripetizioni e Simmetrie 3D: corpo asimmetrico (y 10..70, z -40..20) specchiato sul piano Top (z=0)
+                #    -> unione con lo specchio (z -40..40): 30 x 60 x 80 = 144000 mm3
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=10, y1=-40, x2=70, y2=20, unit="mm")
+                await c.call("extrude_sketch", depth=30, unit="mm")
+                nbody = [b["name"] for b in await bodies(c)]
+                nf0 = len(await feats(c))
+                ok_mbm, text_mbm, _ = await c.call("mirror_body_merge", body_names=nbody, mirror_plane="Top", merge_bodies=True)
+                v_mbm, nb_mbm, nf_mbm = await vol(c), len(await bodies(c)), len(await feats(c))
+                record("mirror_body_merge", ok_mbm and near(v_mbm, 144000.0) and nb_mbm == 1 and nf_mbm > nf0,
+                       f"volume {v_mbm:.1f} contro 144000.0, corpi {nb_mbm}, feature {nf0} -> {nf_mbm}")
+                await c.call("close_document", discard=True)
 
                 # 7. Gestione Multibody (Booleane e Tagli)
-                ok_ccs, _, _ = await c.call("core_cavity_split", block_size=[150, 100, 60])
-                record("core_cavity_split", ok_ccs)
-
-                ok_brf, _, _ = await c.call("body_replace_face", target_face_points=[[0, 0, 30]], surface_name="SurfaceBody1")
-                record("body_replace_face", ok_brf)
-
-                # 8. Modellazione di Superfici (Surfaces)
-                ok_ffs, _, _ = await c.call("freeform_surface", surface_face_point=[0, 0, 30], push_distance=2.5)
-                record("freeform_surface", ok_ffs)
-
-                ok_fls, _, _ = await c.call("flatten_surface", surface_face_point=[0, 0, 30], accuracy_level=3)
-                record("flatten_surface", ok_fls)
-
-                ok_rad, _, _ = await c.call("radiate_surface", edge_points=[[60, 40, 0]], radius_distance=15.0)
-                record("radiate_surface", ok_rad)
+                ok_nim, text_nim, _ = await c.call("body_replace_face", target_face_points=[[0, 0, 30]], surface_name="SurfaceBody1")
+                record("body_replace_face: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
                 # 9. Lamiera (Sheet Metal)
                 ok_cb, _, _ = await c.call("cross_break", face_point=[0, 0, 30], depth=1.0, break_angle=2.0)
                 record("cross_break", ok_cb)
 
-                ok_csm, _, _ = await c.call("convert_to_sheet_metal", thickness=2.0, bend_radius=2.5, fixed_face_point=[0, 0, 30])
-                record("convert_to_sheet_metal", ok_csm)
+                # conversione in lamiera di un box 120x80x30 (faccia fissa z=40): prova = volume cambiato
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=-60, y1=-40, x2=60, y2=40, unit="mm")
+                await c.call("extrude_sketch", depth=30, unit="mm")
+                v_csm0 = await vol(c)
+                ok_csm, text_csm, _ = await c.call("convert_to_sheet_metal", thickness=2.0, bend_radius=2.5, fixed_face_point=[15, 0, 40])
+                v_csm1 = await vol(c)
+                # con la sola faccia fissa (nessuno spigolo di piega) resta la lamiera della faccia 120x30: 120 x 30 x 2 = 7200 mm3
+                record("convert_to_sheet_metal: volume = faccia fissa 120x30 x spessore 2 = 7200 mm3", ok_csm and abs(v_csm1 - 7200.0) < 0.5,
+                       f"volume {v_csm0:.1f} -> {v_csm1:.1f}")
+                await c.call("close_document", discard=True)
 
-                ok_vnt, _, _ = await c.call("vent_feature", boundary_sketch="Sketch1", rib_width=2.0, spar_width=2.0)
-                record("vent_feature", ok_vnt)
-
-                ok_lb, _, _ = await c.call("loft_bend", profile1_sketch="Sketch1", profile2_sketch="Sketch1", thickness=1.5, bend_count=4)
-                record("loft_bend", ok_lb)
-
-                ok_cef, _, _ = await c.call("curved_edge_flange", edge_point=[60, 0, 30], flange_length=20.0, angle_deg=90.0)
-                record("curved_edge_flange", ok_cef)
+                ok_nim, text_nim, _ = await c.call("loft_bend", profile1_sketch="Sketch1", profile2_sketch="Sketch1", thickness=1.5, bend_count=4)
+                record("loft_bend: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
                 # 10. Saldature e Strutture Metalliche
-                ok_cwb, _, _ = await c.call("cosmetic_weld_bead", face_from_point=[-60, 0, 15], face_to_point=[0, -40, 15], bead_size=4.0)
-                record("cosmetic_weld_bead", ok_cwb)
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=-60, y1=-40, x2=60, y2=40, unit="mm")
+                await c.call("extrude_sketch", depth=30, unit="mm")
+                ok_nim, text_nim, _ = await c.call("cosmetic_weld_bead", face_from_point=[0, 0, 0], face_to_point=[15, -60, 0], bead_size=4.0)
+                record("cosmetic_weld_bead: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
+                await c.call("close_document", discard=True)
 
-                ok_ucl, _, _ = await c.call("update_cut_list", force_rebuild=True)
-                record("update_cut_list", ok_ucl)
-
-                ok_swf, _, _ = await c.call("subweldment_folder", folder_name="MainFrame", member_names=["Member1"])
-                record("subweldment_folder", ok_swf)
-
-                # 11. Stampi (Mold Design) e Plastica
-                ok_ipl, _, _ = await c.call("insert_parting_line", direction_face_point=[0, 0, 30], draft_angle=1.0)
-                record("insert_parting_line", ok_ipl)
-
-                ok_iso, _, _ = await c.call("insert_shut_off_surfaces", patch_all_openings=True)
-                record("insert_shut_off_surfaces", ok_iso)
-
-                ok_ips, _, _ = await c.call("insert_parting_surface", distance=25.0)
-                record("insert_parting_surface", ok_ips)
-
-                ok_its, _, _ = await c.call("insert_tooling_split", core_block_size=[150, 100, 50], cavity_block_size=[150, 100, 50])
-                record("insert_tooling_split", ok_its)
-
-                ok_ilg, _, _ = await c.call("insert_lip_and_groove", edge_points=[[60, 0, 30]], lip_depth=2.0, groove_width=2.2)
-                record("insert_lip_and_groove", ok_ilg)
-
-                ok_ish, _, _ = await c.call("insert_snap_hook", location_point=[30, 20, 30], hook_height=15.0, beam_thickness=2.0)
-                record("insert_snap_hook", ok_ish)
-
-                ok_imb, _, _ = await c.call("insert_mounting_boss", location_point=[-30, 20, 30], height=12.0, outer_diameter=8.0, inner_hole_diameter=3.0)
-                record("insert_mounting_boss", ok_imb)
-
-                # 12. Analisi Geometrica e Qualità B-Rep
-                ok_mbc, _, _ = await c.call("mesh_brep_converter", body_name="SolidBody1", target_type="solid")
-                record("mesh_brep_converter", ok_mbc)
-
-                ok_sda, _, _ = await c.call("surface_deviation_analysis", face1_point=[0, 0, 30], face2_point=[0, 0, 0], samples_count=50)
-                record("surface_deviation_analysis", ok_sda)
+                # distinta e sotto-saldatura su un profilato strutturale 200 mm
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_line", x1=0, y1=0, x2=200, y2=0)
+                await c.call("close_sketch")
+                await c.call("structural_member", standard="iso", profile="square tube", size="40 x 40 x 4")
+                await c.call("weldment_cut_list", update=True)
+                ok_ucl, text_ucl, _ = await c.call("update_cut_list", force_rebuild=True)
+                record("update_cut_list", ok_ucl, text_ucl[:90])
+                wb = await bodies(c)
+                nf_sw0 = len(await feats(c))
+                ok_swf, text_swf, _ = await c.call("subweldment_folder", folder_name="MainFrame", member_names=[wb[0]["name"]])
+                record("subweldment_folder", ok_swf and len(await feats(c)) == nf_sw0 + 1,
+                       f"feature {nf_sw0} -> {len(await feats(c))}: {text_swf[:60]}")
 
                 # Chiudi documento
                 await c.call("close_document", discard=True)

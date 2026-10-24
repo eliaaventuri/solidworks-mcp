@@ -30,6 +30,16 @@ class Drawings2Operations:
         except Exception:
             pass
 
+    def _count_centermarks(self, v) -> int:
+        """Conta segni di centro e linee d'asse di una vista (catene GetFirst... -> GetNext)."""
+        n = 0
+        for first in ("GetFirstCenterMark2", "GetFirstCenterLine"):
+            item = self._com(v, first)
+            while item is not None and n < 1000:
+                n += 1
+                item = self._com(item, "GetNext")
+        return n
+
     # ------------------------------------------------------------------ 1. Fogli e Formati
     def edit_sheet_format(self) -> Dict:
         """Attiva la modalita' di modifica del cartiglio e delle linee di bordo del foglio."""
@@ -39,8 +49,8 @@ class Drawings2Operations:
                 return err
             try:
                 doc.EditTemplate()
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"edit_sheet_format: modifica formato non riuscita: {e}", SwErrors.swGenericError)
             return self._result(
                 True, "Modalita' di modifica del formato foglio (cartiglio/cornice) attivata.",
                 SwErrors.swSuccess, {"editing_format": True}
@@ -56,8 +66,8 @@ class Drawings2Operations:
                 return err
             try:
                 doc.EditSheet()
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"exit_sheet_format: uscita dal formato non riuscita: {e}", SwErrors.swGenericError)
             return self._result(
                 True, "Uscita dalla modalita' formato foglio completata con successo.",
                 SwErrors.swSuccess, {"editing_sheet": True}
@@ -71,22 +81,27 @@ class Drawings2Operations:
             doc, err = self._drawing()
             if err:
                 return err
+            if template_path and not os.path.isfile(str(template_path)):
+                return self._result(False, f"reload_sheet_format: template '{template_path}' non trovato", SwErrors.swFileNotFoundError)
             sheet = None
             try:
                 sheet = doc.GetCurrentSheet()
             except Exception:
                 pass
-            if template_path and sheet:
+            if template_path:
+                if not sheet:
+                    return self._result(False, "reload_sheet_format: foglio corrente non trovato", SwErrors.swSelectionError)
                 try:
                     sheet.SetTemplateName(str(template_path))
-                    sheet.ReloadTemplate()
-                except Exception:
-                    pass
+                    ok = sheet.ReloadTemplate()
+                except Exception as e:
+                    return self._result(False, f"reload_sheet_format: applicazione template non riuscita: {e}", SwErrors.swFeatureError)
+                if not ok:
+                    return self._result(False, "reload_sheet_format: SolidWorks non ha ricaricato il template", SwErrors.swFeatureError)
             self._drw_rebuild(doc)
-            return self._result(
-                True, "Formato foglio ricaricato con successo.",
-                SwErrors.swSuccess, {"template_path": template_path}
-            )
+            msg = (f"Formato foglio ricaricato dal template '{template_path}'." if template_path
+                   else "Foglio rigenerato (nessun template indicato: formato non ricaricato).")
+            return self._result(True, msg, SwErrors.swSuccess, {"template_path": template_path})
         except Exception as e:
             return self._result(False, f"reload_sheet_format: {e}", SwErrors.swGenericError)
 
@@ -164,15 +179,16 @@ class Drawings2Operations:
                 return err
             xm = self._mmu(x, unit)
             ym = self._mmu(y, unit)
-            try:
-                if model_path:
-                    doc.CreateFlatPatternViewFromModelView3(str(model_path), "", xm, ym, 0, False, False)
-            except Exception:
-                pass
+            if not model_path:
+                return self._result(False, "add_flat_pattern_drawing_view: model_path obbligatorio", SwErrors.swInvalidInput)
+            view = doc.CreateFlatPatternViewFromModelView3(str(model_path), "", xm, ym, 0, False, False)
+            if not view:
+                return self._result(False, "add_flat_pattern_drawing_view: vista flat pattern non creata", SwErrors.swFeatureError)
             self._drw_rebuild(doc)
+            ignored = ["show_bend_lines"] + (["scale"] if scale is not None else [])
             return self._result(
                 True, f"Vista di lamiera spianata (flat pattern) inserita a ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"x": x, "y": y, "scale": scale, "bend_lines": show_bend_lines}
+                SwErrors.swSuccess, {"x": x, "y": y, "scale": scale, "ignored_params": ignored}
             )
         except Exception as e:
             return self._result(False, f"add_flat_pattern_drawing_view: {e}", SwErrors.swGenericError)
@@ -209,17 +225,23 @@ class Drawings2Operations:
             doc, err = self._drawing()
             if err:
                 return err
-            try:
+            if view_name:
+                view, err = self._find_view(doc, view_name)
+                if err:
+                    return err
+            else:
                 view = doc.ActiveDrawingView
-                if view:
-                    view.ShowExploded = bool(exploded)
-            except Exception:
-                pass
+                if not view:
+                    return self._result(False, "show_exploded_drawing_view: nessuna vista attiva", SwErrors.swSelectionError)
+            view.ShowExploded(bool(exploded))
             self._drw_rebuild(doc)
+            read = self._view_exploded(view)
+            if read != bool(exploded):
+                return self._result(False, f"show_exploded_drawing_view: stato esploso non applicato (letto {read})", SwErrors.swFeatureError)
             st_str = "esplosa" if exploded else "collassata"
             return self._result(
-                True, f"Vista '{view_name or 'Attiva'}' impostata su stato {st_str}.",
-                SwErrors.swSuccess, {"view_name": view_name, "exploded": bool(exploded), "lines": show_lines}
+                True, f"Vista '{self._com(view, 'GetName2')}' impostata su stato {st_str}.",
+                SwErrors.swSuccess, {"view_name": view_name, "exploded": read, "ignored_params": ["show_lines"]}
             )
         except Exception as e:
             return self._result(False, f"show_exploded_drawing_view: {e}", SwErrors.swGenericError)
@@ -233,16 +255,21 @@ class Drawings2Operations:
                 return err
             rad = math.radians(float(angle_deg))
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(view_name), "DRAWINGVIEW", 0, 0, 0, False, 0, null_variant(), 0)
-            try:
-                doc.DrawingViewRotate(rad)
-            except Exception:
-                pass
+            if not doc.Extension.SelectByID2(str(view_name), "DRAWINGVIEW", 0, 0, 0, False, 0, null_variant(), 0):
+                return self._result(False, f"rotate_drawing_view: vista '{view_name}' non trovata", SwErrors.swSelectionError)
+            doc.DrawingViewRotate(rad)
             doc.ClearSelection2(True)
             self._drw_rebuild(doc)
+            v, err = self._find_view(doc, view_name)
+            if err:
+                return err
+            read = math.degrees(float(self._com(v, "Angle"))) % 360.0
+            diff = (read - float(angle_deg) + 180.0) % 360.0 - 180.0
+            if abs(diff) > 0.01:
+                return self._result(False, f"rotate_drawing_view: angolo non applicato (letto {read:.4f} gradi, chiesto {angle_deg})", SwErrors.swFeatureError)
             return self._result(
                 True, f"Vista '{view_name}' ruotata di {angle_deg} gradi.",
-                SwErrors.swSuccess, {"view_name": view_name, "angle_deg": angle_deg}
+                SwErrors.swSuccess, {"view_name": view_name, "angle_deg": angle_deg, "angle_read_deg": round(read, 4)}
             )
         except Exception as e:
             return self._result(False, f"rotate_drawing_view: {e}", SwErrors.swGenericError)
@@ -253,21 +280,36 @@ class Drawings2Operations:
             doc, err = self._drawing()
             if err:
                 return err
+            modo = str(alignment).lower().strip()
+            if modo not in ("horizontal", "vertical"):
+                return self._result(False, f"align_drawing_views: allineamento '{alignment}' non riconosciuto (usare horizontal o vertical)", SwErrors.swInvalidInput)
             doc.ClearSelection2(True)
-            doc.Extension.SelectByID2(str(view_to_align), "DRAWINGVIEW", 0, 0, 0, False, 0, null_variant(), 0)
-            doc.Extension.SelectByID2(str(base_view), "DRAWINGVIEW", 0, 0, 0, True, 0, null_variant(), 0)
-            try:
-                if str(alignment).lower().strip() == "vertical":
-                    doc.AlignVert()
-                else:
-                    doc.AlignHorz()
-            except Exception:
-                pass
+            if not doc.Extension.SelectByID2(str(view_to_align), "DRAWINGVIEW", 0, 0, 0, False, 0, null_variant(), 0):
+                return self._result(False, f"align_drawing_views: vista '{view_to_align}' non trovata", SwErrors.swSelectionError)
+            if not doc.Extension.SelectByID2(str(base_view), "DRAWINGVIEW", 0, 0, 0, True, 0, null_variant(), 0):
+                return self._result(False, f"align_drawing_views: vista base '{base_view}' non trovata", SwErrors.swSelectionError)
+            if modo == "vertical":
+                doc.AlignVert()
+            else:
+                doc.AlignHorz()
             doc.ClearSelection2(True)
             self._drw_rebuild(doc)
+            v1, err1 = self._find_view(doc, view_to_align)
+            v2, err2 = self._find_view(doc, base_view)
+            if err1 or err2:
+                return err1 or err2
+            idx = 1 if modo == "vertical" else 0
+            p1, p2 = tuple(v1.Position), tuple(v2.Position)
+            c1 = self._mm(float(p1[idx]))
+            c2 = self._mm(float(p2[idx]))
+            dbg = {"x_view_mm": self._mm(float(p1[0])), "x_base_mm": self._mm(float(p2[0])),
+                   "y_view_mm": self._mm(float(p1[1])), "y_base_mm": self._mm(float(p2[1]))}
+            if abs(c1 - c2) > 0.05:
+                return self._result(False, f"align_drawing_views: allineamento non applicato ({c1:.3f} mm contro {c2:.3f} mm) {dbg}", SwErrors.swFeatureError)
             return self._result(
                 True, f"Vista '{view_to_align}' allineata ({alignment}) rispetto a '{base_view}'.",
-                SwErrors.swSuccess, {"view": view_to_align, "base": base_view, "alignment": alignment}
+                SwErrors.swSuccess, {"view": view_to_align, "base": base_view, "alignment": alignment,
+                                     "coord_view_mm": round(c1, 3), "coord_base_mm": round(c2, 3), **dbg}
             )
         except Exception as e:
             return self._result(False, f"align_drawing_views: {e}", SwErrors.swGenericError)
@@ -354,14 +396,20 @@ class Drawings2Operations:
                 return err
             xm = self._mmu(x, unit)
             ym = self._mmu(y, unit)
-            try:
-                doc.InsertRevisionTable2(True, xm, ym, 1, "")
-            except Exception:
-                pass
+            sheet = self._com(doc, "GetCurrentSheet")
+            tabella = sheet.InsertRevisionTable2(True, xm, ym, 1, "", 1, True) if sheet else None
+            if not tabella:
+                return self._result(False, "add_revision_table: tabella revisioni non inserita", SwErrors.swFeatureError)
+            rev_id = tabella.AddRevision(str(revision))
+            read = str(tabella.GetRevisionForId(rev_id) or "")
             self._drw_rebuild(doc)
+            if read != str(revision):
+                return self._result(False, f"add_revision_table: riga di revisione '{revision}' non scritta (letta '{read}')", SwErrors.swFeatureError)
             return self._result(
-                True, f"Tabella revisioni inserita a ({x}, {y}) mm (Rev {revision}).",
-                SwErrors.swSuccess, {"x": x, "y": y, "revision": revision, "description": description, "author": author}
+                True, f"Tabella revisioni inserita a ({x}, {y}) mm con la revisione '{revision}' (descrizione e autore non scritti).",
+                SwErrors.swSuccess,
+                {"x": x, "y": y, "revision": revision, "revision_row": read, "description": description, "author": author,
+                 "ignored_params": ["description", "author"]}
             )
         except Exception as e:
             return self._result(False, f"add_revision_table: {e}", SwErrors.swGenericError)
@@ -390,14 +438,14 @@ class Drawings2Operations:
             c_cnt = max(1, int(columns))
             xm = self._mmu(x, unit)
             ym = self._mmu(y, unit)
-            try:
-                doc.InsertTableAnnotation2(False, xm, ym, 1, "", r_cnt, c_cnt)
-            except Exception:
-                pass
+            tabella = doc.InsertTableAnnotation2(False, xm, ym, 1, "", r_cnt, c_cnt)
+            if not tabella:
+                return self._result(False, "add_general_table: tabella non inserita", SwErrors.swFeatureError)
             self._drw_rebuild(doc)
+            ignored = [n for n, v in (("data", data), ("title", title)) if v is not None]
             return self._result(
-                True, f"Tabella generica {r_cnt}x{c_cnt} creata a ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"rows": r_cnt, "columns": c_cnt, "x": x, "y": y, "title": title}
+                True, f"Tabella generica {r_cnt}x{c_cnt} inserita a ({x}, {y}) mm.",
+                SwErrors.swSuccess, {"rows": r_cnt, "columns": c_cnt, "x": x, "y": y, "ignored_params": ignored}
             )
         except Exception as e:
             return self._result(False, f"add_general_table: {e}", SwErrors.swGenericError)
@@ -409,14 +457,24 @@ class Drawings2Operations:
             doc, err = self._drawing()
             if err:
                 return err
-            try:
-                doc.InsertCenterLine2()
-            except Exception:
-                pass
+            if view_name:
+                v, err = self._find_view(doc, view_name)
+                if err:
+                    return err
+                views = [v]
+            else:
+                views = list(self._sheet_views(doc))
+            before = sum(self._count_centermarks(v) for v in views)
+            ok = False
+            for v in views:
+                ok = bool(v.AutoInsertCenterMarks(1, 0, True, True, True, True, True, True, True)) or ok
             self._drw_rebuild(doc)
+            after = sum(self._count_centermarks(v) for v in views)
+            if not ok or after <= before:
+                return self._result(False, f"add_centerlines: linee d'asse non generate (segni {before} -> {after})", SwErrors.swFeatureError)
             return self._result(
-                True, f"Linee d'asse automatiche generate per la vista '{view_name or 'Attiva'}'.",
-                SwErrors.swSuccess, {"view_name": view_name}
+                True, f"Linee d'asse automatiche generate (segni di centro {before} -> {after}).",
+                SwErrors.swSuccess, {"views_count": len(views), "marks_before": before, "marks_after": after}
             )
         except Exception as e:
             return self._result(False, f"add_centerlines: {e}", SwErrors.swGenericError)
@@ -429,18 +487,25 @@ class Drawings2Operations:
             if err:
                 return err
             color_int = 0
-            if color_rgb and len(color_rgb) == 3:
+            if color_rgb is not None:
+                if len(color_rgb) != 3:
+                    return self._result(False, "create_drawing_layer: color_rgb deve avere 3 valori (R, G, B)", SwErrors.swInvalidInput)
                 r, g, b = [int(v) & 0xFF for v in color_rgb]
                 color_int = r | (g << 8) | (b << 16)
-            try:
-                lm = doc.GetLayerManager()
-                if lm:
-                    lm.AddLayer(str(layer_name), "", color_int, 0, 0)
-            except Exception:
-                pass
+            lm = self._com(doc, "GetLayerManager")
+            if not lm:
+                return self._result(False, "create_drawing_layer: gestore livelli non disponibile", SwErrors.swFeatureError)
+            lm.AddLayer(str(layer_name), "", color_int, 0, 0)
+            layer = lm.GetLayer(str(layer_name))
+            if not layer:
+                return self._result(False, f"create_drawing_layer: livello '{layer_name}' non creato", SwErrors.swFeatureError)
+            read = int(self._com(layer, "Color"))
+            if read != color_int:
+                return self._result(False, f"create_drawing_layer: colore del livello non applicato (letto {read}, atteso {color_int})", SwErrors.swFeatureError)
             return self._result(
                 True, f"Livello CAD (Layer) '{layer_name}' creato con successo.",
-                SwErrors.swSuccess, {"layer_name": layer_name, "color": color_rgb, "style": line_style, "weight": line_weight}
+                SwErrors.swSuccess,
+                {"layer_name": layer_name, "color": color_rgb, "color_read": read, "ignored_params": ["line_style", "line_weight"]}
             )
         except Exception as e:
             return self._result(False, f"create_drawing_layer: {e}", SwErrors.swGenericError)
@@ -468,15 +533,15 @@ class Drawings2Operations:
             xm = self._mmu(x, unit)
             ym = self._mmu(y, unit)
             rad = math.radians(float(angle_deg))
-            try:
-                if block_path and os.path.isfile(block_path):
-                    doc.InsertBlock(str(block_path), xm, ym, 0, float(scale), rad)
-            except Exception:
-                pass
+            if not block_path or not os.path.isfile(str(block_path)):
+                return self._result(False, f"insert_drawing_block: file blocco '{block_path}' non trovato", SwErrors.swFileNotFoundError)
+            if not doc.InsertBlock(str(block_path), xm, ym, 0, float(scale), rad):
+                return self._result(False, "insert_drawing_block: blocco non inserito", SwErrors.swFeatureError)
             self._drw_rebuild(doc)
             return self._result(
-                True, f"Blocco 2D '{block_name}' inserito a coordinate ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"block_name": block_name, "x": x, "y": y, "scale": scale, "angle": angle_deg}
+                True, f"Blocco 2D da '{block_path}' inserito a coordinate ({x}, {y}) mm.",
+                SwErrors.swSuccess,
+                {"block_path": str(block_path), "x": x, "y": y, "scale": scale, "angle": angle_deg, "ignored_params": ["block_name"]}
             )
         except Exception as e:
             return self._result(False, f"insert_drawing_block: {e}", SwErrors.swGenericError)
@@ -492,13 +557,17 @@ class Drawings2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            try:
-                doc.SaveAs3(path, 0, 0)
-            except Exception:
-                pass
+            if os.path.exists(path):
+                os.remove(path)
+            ok, _e, _w = self._save_as(doc, path)
+            if not ok:
+                return self._result(False, f"export_pdf_layers: esportazione PDF non riuscita ({path})", SwErrors.swExportError)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+                return self._result(False, f"export_pdf_layers: file PDF non scritto ({path})", SwErrors.swExportError)
+            ignored = ["include_layers"] if include_layers else []
             return self._result(
-                True, f"Tavola esportata in PDF a livelli in {path}.",
-                SwErrors.swSuccess, {"filepath": path, "layers": include_layers or []}
+                True, f"Tavola esportata in PDF in {path}.",
+                SwErrors.swSuccess, {"filepath": path, "ignored_params": ignored}
             )
         except Exception as e:
             return self._result(False, f"export_pdf_layers: {e}", SwErrors.swGenericError)

@@ -8,10 +8,18 @@ import logging
 import traceback
 from typing import Dict
 
+import pythoncom
+import win32com.client
+
 from ..constants import SwErrors
 from .modeling_base import null_variant
 
 logger = logging.getLogger(__name__)
+
+
+def _byref_i4():
+    """Parametro per riferimento intero (VT_BYREF|VT_I4): il valore si legge da `.value` dopo la chiamata."""
+    return win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
 
 
 class Sketch3Operations:
@@ -68,9 +76,11 @@ class Sketch3Operations:
                     return self._result(False, f"Selezione mezzeria '{centerline}': {msg}", SwErrors.swSelectionError)
             try:
                 sk_mgr.SetDynamicMirror(bool(enable))
-            except Exception:
-                pass
-            current = bool(sk_mgr.GetDynamicMirror())
+            except Exception as e:
+                return self._result(False, f"set_dynamic_mirror_sketch: impostazione non riuscita: {e}", SwErrors.swSketchError)
+            current = bool(self._com(sk_mgr, "GetDynamicMirror"))
+            if current != bool(enable):
+                return self._result(False, f"set_dynamic_mirror_sketch: dynamic mirror in {sk_name} non impostato come richiesto.", SwErrors.swSketchError)
             return self._result(
                 True, f"Dynamic mirror in {sk_name}: {'attivo' if current else 'disattivo'}",
                 SwErrors.swSuccess, {"sketch": sk_name, "dynamic_mirror": current}
@@ -97,9 +107,12 @@ class Sketch3Operations:
             except Exception:
                 sk_mgr.CreateSpline2(pts_m, True)
             after_segs = len(self._segments(sk))
+            if after_segs <= before_segs:
+                return self._result(False, "draw_style_spline: style spline non creata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Style spline creata con {len(points)} punti di controllo.",
-                SwErrors.swSuccess, {"points_count": len(points), "closed": closed, "degree": degree, "new_segments": after_segs - before_segs}
+                SwErrors.swSuccess, {"points_count": len(points), "new_segments": after_segs - before_segs,
+                                     "ignored_params": ["closed", "degree"]}
             )
         except Exception as e:
             logger.error(f"draw_style_spline: {e}\n{traceback.format_exc()}")
@@ -116,14 +129,16 @@ class Sketch3Operations:
                 return self._result(False, "Specificare almeno una o piu' entita' da convertire in fit spline.", SwErrors.swInvalidInput)
             doc.ClearSelection2(True)
             for r in entities:
-                self._select_ref(doc, sk, r, append=True, unit=unit)
+                ok, msg = self._select_ref(doc, sk, r, append=True, unit=unit)
+                if not ok:
+                    return self._result(False, f"fit_spline: selezione di '{r}' non riuscita: {msg}", SwErrors.swSelectionError)
             try:
                 doc.SketchAddConstraints("sgFITSPLINE")
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"fit_spline: vincolo fit spline non applicato: {e}", SwErrors.swSketchError)
             return self._result(
-                True, f"Fit spline creata da {len(entities)} entita' con tolleranza {tolerance} mm.",
-                SwErrors.swSuccess, {"entities_count": len(entities), "tolerance": tolerance, "closed": closed, "delete_original": delete_original}
+                True, f"Vincolo fit spline (sgFITSPLINE) applicato a {len(entities)} entita'.",
+                SwErrors.swSuccess, {"entities_count": len(entities), "ignored_params": ["tolerance", "closed", "delete_original"]}
             )
         except Exception as e:
             logger.error(f"fit_spline: {e}\n{traceback.format_exc()}")
@@ -156,9 +171,11 @@ class Sketch3Operations:
                 ex_m, ey_m, 0.0,
                 1
             )
+            if seg is None:
+                return self._result(False, "draw_elliptical_arc: arco ellittico non creato da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Arco ellittico creato da {start_angle} a {end_angle} deg.",
-                SwErrors.swSuccess, {"center": [cx, cy], "angles": [start_angle, end_angle], "created": seg is not None}
+                SwErrors.swSuccess, {"center": [cx, cy], "angles": [start_angle, end_angle], "created": True}
             )
         except Exception as e:
             logger.error(f"draw_elliptical_arc: {e}\n{traceback.format_exc()}")
@@ -167,17 +184,20 @@ class Sketch3Operations:
     def draw_conic_curve(self, p_start: list, p_end: list, p_apex: list, rho: float = 0.5, unit: str = None) -> Dict:
         """Disegna una curva conica nello schizzo attivo tramite ISketchManager.CreateConic."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
             sk_mgr = doc.SketchManager
             x1, y1 = self._mmu(p_start[0], unit), self._mmu(p_start[1], unit)
             x2, y2 = self._mmu(p_end[0], unit), self._mmu(p_end[1], unit)
             xa, ya = self._mmu(p_apex[0], unit), self._mmu(p_apex[1], unit)
+            before_segs = len(self._segments(sk))
             sk_mgr.CreateConic(0.0, 0.0, 0.0, xa, ya, 0.0, x1, y1, 0.0, x2, y2, 0.0)
+            if len(self._segments(sk)) <= before_segs:
+                return self._result(False, "draw_conic_curve: curva conica non creata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
-                True, f"Curva conica creata tra {p_start} e {p_end} con Rho {rho}.",
-                SwErrors.swSuccess, {"start": p_start, "end": p_end, "apex": p_apex, "rho": rho}
+                True, f"Curva conica creata tra {p_start} e {p_end}.",
+                SwErrors.swSuccess, {"start": p_start, "end": p_end, "apex": p_apex, "ignored_params": ["rho"]}
             )
         except Exception as e:
             logger.error(f"draw_conic_curve: {e}\n{traceback.format_exc()}")
@@ -186,7 +206,7 @@ class Sketch3Operations:
     def draw_centerline(self, x1: float, y1: float, x2: float, y2: float, unit: str = None) -> Dict:
         """Traccia una linea di costruzione / mezzeria direttamente."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
             x1_m = self._mmu(x1, unit)
@@ -194,10 +214,17 @@ class Sketch3Operations:
             x2_m = self._mmu(x2, unit)
             y2_m = self._mmu(y2, unit)
             sk_mgr = doc.SketchManager
+            segs_before = self._segments(sk)
+            before_segs = len(segs_before)
+            before_constr = sum(1 for s in segs_before if bool(s.ConstructionGeometry))
             try:
                 sk_mgr.CreateCenterLine(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
             except Exception:
                 doc.CreateCenterLineVB(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
+            segs_after = self._segments(sk)
+            after_constr = sum(1 for s in segs_after if bool(s.ConstructionGeometry))
+            if len(segs_after) <= before_segs or after_constr <= before_constr:
+                return self._result(False, "draw_centerline: linea di mezzeria non creata come costruzione da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Linea di mezzeria tracciata da ({x1}, {y1}) a ({x2}, {y2}).",
                 SwErrors.swSuccess, {"start": [x1, y1], "end": [x2, y2], "construction": True}
@@ -239,7 +266,7 @@ class Sketch3Operations:
                               angle: float = 0.0, unit: str = None) -> Dict:
         """Disegna un'asola rettilinea dal centro."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
             sk_mgr = doc.SketchManager
@@ -250,7 +277,10 @@ class Sketch3Operations:
             x2_m = cx_m + self._mmu(hl * math.cos(rad), unit)
             y2_m = cy_m + self._mmu(hl * math.sin(rad), unit)
             w_m = self._mmu(width, unit)
-            sk_mgr.CreateSketchSlot(1, 0, w_m, cx_m, cy_m, 0.0, x2_m, y2_m, 0.0, 0.0, 0.0, 0.0, 0, False)
+            before_segs = len(self._segments(sk))
+            res = sk_mgr.CreateSketchSlot(0, 0, w_m, cx_m, cy_m, 0.0, x2_m, y2_m, 0.0, 0.0, 0.0, 0.0, 1, False)
+            if res is None or len(self._segments(sk)) <= before_segs:
+                return self._result(False, "draw_centerpoint_slot: asola non creata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Asola dal centro {cx},{cy} creata: lunghezza {length}, larghezza {width}.",
                 SwErrors.swSuccess, {"center": [cx, cy], "length": length, "width": width, "angle": angle}
@@ -263,9 +293,12 @@ class Sketch3Operations:
                       end_angle: float = 90.0, slot_type: str = "centerpoint_arc", unit: str = None) -> Dict:
         """Disegna un'asola curvilinea ad arco."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
+            if "center" not in str(slot_type or "").lower():
+                return self._result(False, f"draw_arc_slot: tipo '{slot_type}' non supportato da questo tool: usa 'centerpoint_arc'.",
+                                    SwErrors.swInvalidInput)
             sk_mgr = doc.SketchManager
             cx_m = self._mmu(cx, unit)
             cy_m = self._mmu(cy, unit)
@@ -277,11 +310,13 @@ class Sketch3Operations:
             y1 = cy_m + r_m * math.sin(a1)
             x2 = cx_m + r_m * math.cos(a2)
             y2 = cy_m + r_m * math.sin(a2)
-            creation_type = 3 if "center" in slot_type.lower() else 2
-            sk_mgr.CreateSketchSlot(creation_type, 0, w_m, cx_m, cy_m, 0.0, x1, y1, 0.0, x2, y2, 0.0, 0, False)
+            before_segs = len(self._segments(sk))
+            res = sk_mgr.CreateSketchSlot(2, 0, w_m, cx_m, cy_m, 0.0, x1, y1, 0.0, x2, y2, 0.0, 1, False)
+            if res is None or len(self._segments(sk)) <= before_segs:
+                return self._result(False, "draw_arc_slot: asola ad arco non creata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Asola ad arco creata: raggio {radius}, larghezza {width}, angoli {start_angle}-{end_angle}.",
-                SwErrors.swSuccess, {"center": [cx, cy], "radius": radius, "width": width}
+                SwErrors.swSuccess, {"center": [cx, cy], "radius": radius, "width": width, "slot_type": "centerpoint_arc"}
             )
         except Exception as e:
             logger.error(f"draw_arc_slot: {e}\n{traceback.format_exc()}")
@@ -297,11 +332,13 @@ class Sketch3Operations:
             x_m = self._mmu(x, unit)
             y_m = self._mmu(y, unit)
             if guide_entity:
-                self._select_ref(doc, sk, guide_entity, append=False, unit=unit)
+                ok, msg = self._select_ref(doc, sk, guide_entity, append=False, unit=unit)
+                if not ok:
+                    return self._result(False, f"draw_sketch_text: guida '{guide_entity}' non selezionabile: {msg}", SwErrors.swSelectionError)
             doc.InsertSketchText(x_m, y_m, 0.0, str(text), 1, 0, 0, 100, 0)
             return self._result(
                 True, f"Testo vettoriale '{text}' inserito a ({x}, {y}).",
-                SwErrors.swSuccess, {"text": text, "position": [x, y], "font": font_name, "height": text_height}
+                SwErrors.swSuccess, {"text": text, "position": [x, y], "ignored_params": ["text_height", "font_name"]}
             )
         except Exception as e:
             logger.error(f"draw_sketch_text: {e}\n{traceback.format_exc()}")
@@ -310,14 +347,18 @@ class Sketch3Operations:
     def draw_3d_arc(self, p1: list, p2: list, p3: list, unit: str = None) -> Dict:
         """Disegna un arco nello spazio 3D nello schizzo 3D attivo."""
         try:
-            doc, err = self._part()
+            doc, sm, err = self._s2_3d_ready()
             if err:
                 return err
-            sk_mgr = doc.SketchManager
+            sk_mgr = sm
             x1, y1, z1 = self._mmu(p1[0], unit), self._mmu(p1[1], unit), self._mmu(p1[2], unit)
             x2, y2, z2 = self._mmu(p2[0], unit), self._mmu(p2[1], unit), self._mmu(p2[2], unit)
             x3, y3, z3 = self._mmu(p3[0], unit), self._mmu(p3[1], unit), self._mmu(p3[2], unit)
+            sk3d = self._com(sm, "ActiveSketch")
+            before_segs = len(self._segments(sk3d))
             sk_mgr.Create3PointArc(x1, y1, z1, x2, y2, z2, x3, y3, z3)
+            if len(self._segments(sk3d)) <= before_segs:
+                return self._result(False, "draw_3d_arc: arco 3D non creato da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Arco 3D creato tra {p1}, {p2}, {p3}.",
                 SwErrors.swSuccess, {"p1": p1, "p2": p2, "p3": p3}
@@ -335,9 +376,11 @@ class Sketch3Operations:
                 return err
             sk_mgr = doc.SketchManager
             res = sk_mgr.CreateSketchPlane(int(relation1), int(relation2), int(relation3))
+            if not res:
+                return self._result(False, "create_3d_sketch_plane: piano di schizzo 3D non creato da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, "Piano di schizzo 3D creato.",
-                SwErrors.swSuccess, {"result": bool(res), "refs": [ref1, ref2, ref3]}
+                SwErrors.swSuccess, {"result": True, "ignored_params": ["ref1", "ref2", "ref3"]}
             )
         except Exception as e:
             logger.error(f"create_3d_sketch_plane: {e}\n{traceback.format_exc()}")
@@ -352,19 +395,23 @@ class Sketch3Operations:
                 return err
             sk_mgr = doc.SketchManager
             doc.ClearSelection2(True)
-            self._select_ref(doc, sk, entity, append=False, unit=unit)
+            ok, msg = self._select_ref(doc, sk, entity, append=False, unit=unit)
+            if not ok:
+                return self._result(False, f"add_3d_sketch_axis_dimension: selezione di '{entity}' non riuscita: {msg}", SwErrors.swSelectionError)
             px = self._mmu(x or 0.0, unit)
             py = self._mmu(y or 0.0, unit)
             pz = self._mmu(z or 0.0, unit)
             ax = str(axis or "x").lower().strip()
             if ax == "x":
-                sk_mgr.AddAlongXDimension(px, py, pz)
+                dim = sk_mgr.AddAlongXDimension(px, py, pz)
             elif ax == "y":
-                sk_mgr.AddAlongYDimension(px, py, pz)
+                dim = sk_mgr.AddAlongYDimension(px, py, pz)
             elif ax == "z":
-                sk_mgr.AddAlongZDimension(px, py, pz)
+                dim = sk_mgr.AddAlongZDimension(px, py, pz)
             else:
                 return self._result(False, f"Asse '{axis}' non valido: usa 'x', 'y' o 'z'.", SwErrors.swInvalidInput)
+            if dim is None:
+                return self._result(False, "add_3d_sketch_axis_dimension: quota non creata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Quota 3D lungo l'asse {ax.upper()} aggiunta su {entity}.",
                 SwErrors.swSuccess, {"axis": ax, "entity": entity}
@@ -402,11 +449,14 @@ class Sketch3Operations:
             if not name:
                 sk_mgr.EndEditSketchBlock()
                 return self._result(True, "Uscita dalla modifica del blocco di schizzo.", SwErrors.swSuccess)
-            doc.Extension.SelectByID2(name, "SKETCHBLOCKDEF", 0, 0, 0, False, 0, null_variant(), 0)
+            if not doc.Extension.SelectByID2(name, "SKETCHBLOCKDEF", 0, 0, 0, False, 0, null_variant(), 0):
+                return self._result(False, f"edit_sketch_block: blocco '{name}' non trovato", SwErrors.swSelectionError)
             res = sk_mgr.EditSketchBlock()
+            if not res:
+                return self._result(False, f"edit_sketch_block: modifica del blocco '{name}' non avviata da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Modifica del blocco '{name}' aperta.",
-                SwErrors.swSuccess, {"block_name": name, "editing": bool(res)}
+                SwErrors.swSuccess, {"block_name": name, "editing": True}
             )
         except Exception as e:
             logger.error(f"edit_sketch_block: {e}\n{traceback.format_exc()}")
@@ -420,11 +470,14 @@ class Sketch3Operations:
                 return err
             sk_mgr = doc.SketchManager
             if instance_name:
-                doc.Extension.SelectByID2(str(instance_name), "SKETCHBLOCKINSTANCE", 0, 0, 0, False, 0, null_variant(), 0)
+                if not doc.Extension.SelectByID2(str(instance_name), "SKETCHBLOCKINSTANCE", 0, 0, 0, False, 0, null_variant(), 0):
+                    return self._result(False, f"explode_sketch_block: istanza '{instance_name}' non trovata", SwErrors.swSelectionError)
             res = sk_mgr.ExplodeSketchBlockInstance(None)
+            if not res:
+                return self._result(False, f"explode_sketch_block: blocco '{instance_name or 'selezionato'}' non esploso da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Blocco di schizzo {instance_name or 'selezionato'} esploso.",
-                SwErrors.swSuccess, {"instance_name": instance_name, "exploded": bool(res)}
+                SwErrors.swSuccess, {"instance_name": instance_name, "exploded": True}
             )
         except Exception as e:
             logger.error(f"explode_sketch_block: {e}\n{traceback.format_exc()}")
@@ -436,20 +489,19 @@ class Sketch3Operations:
             _doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
-            open_count = 0
-            closed_count = 0
-            try:
-                sk.CheckFeatureUse(0, open_count, closed_count)
-            except Exception:
-                pass
+            open_ref = _byref_i4()
+            closed_ref = _byref_i4()
+            sk.CheckFeatureUse(0, open_ref, closed_ref)
+            open_count = int(open_ref.value)
+            closed_count = int(closed_ref.value)
             return self._result(
-                True, f"Verifica schizzo completata con tolleranza {gap_tolerance} mm.",
-                SwErrors.swSuccess, {"gap_tolerance": gap_tolerance, "close_gaps": close_gaps,
-                                     "open_contours": open_count, "closed_contours": closed_count}
+                True, f"Verifica schizzo completata: contorni aperti {open_count}, chiusi {closed_count}.",
+                SwErrors.swSuccess, {"open_contours": open_count, "closed_contours": closed_count,
+                                     "ignored_params": ["close_gaps", "gap_tolerance"]}
             )
         except Exception as e:
             logger.error(f"repair_sketch: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+            return self._result(False, f"repair_sketch: verifica non riuscita: {e}", SwErrors.swSketchError)
 
     def check_sketch_for_feature(self, feature_type: str = "base_extrude", sketch: str = None) -> Dict:
         """Verifica se lo schizzo e' valido per una determinata feature (contorni aperti/chiusi)."""
@@ -458,15 +510,17 @@ class Sketch3Operations:
             if err:
                 return err
             ft_code = {"base_extrude": 0, "boss_revolve": 1, "cut_extrude": 2, "sweep": 3}.get(
-                str(feature_type).lower().strip(), 0
+                str(feature_type).lower().strip()
             )
-            open_c = 0
-            closed_c = 0
-            valid = True
-            try:
-                valid = bool(sk.CheckFeatureUse(ft_code, open_c, closed_c) == 0)
-            except Exception:
-                pass
+            if ft_code is None:
+                return self._result(False, f"check_sketch_for_feature: tipo di feature '{feature_type}' non riconosciuto.",
+                                    SwErrors.swInvalidInput)
+            open_ref = _byref_i4()
+            closed_ref = _byref_i4()
+            ret = sk.CheckFeatureUse(ft_code, open_ref, closed_ref)
+            open_c = int(open_ref.value)
+            closed_c = int(closed_ref.value)
+            valid = bool(ret == 0)
             return self._result(
                 True, f"Controllo schizzo {sk_name} per {feature_type}: valido={valid}.",
                 SwErrors.swSuccess, {"sketch": sk_name, "feature_type": feature_type,
@@ -474,7 +528,7 @@ class Sketch3Operations:
             )
         except Exception as e:
             logger.error(f"check_sketch_for_feature: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+            return self._result(False, f"check_sketch_for_feature: controllo non riuscito: {e}", SwErrors.swSketchError)
 
     def close_sketch_to_model(self, direction: str = "x", reverse: bool = False) -> Dict:
         """Chiude automaticamente un profilo di schizzo aperto estendendolo al modello."""
@@ -485,8 +539,8 @@ class Sketch3Operations:
             sk_mgr = doc.SketchManager
             try:
                 sk_mgr.CloseSketchToModel(str(direction).upper(), bool(reverse))
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"close_sketch_to_model: chiusura non riuscita: {e}", SwErrors.swSketchError)
             return self._result(
                 True, f"Profilo esteso e chiuso verso il modello lungo {direction}.",
                 SwErrors.swSuccess, {"direction": direction, "reverse": reverse}
@@ -503,7 +557,9 @@ class Sketch3Operations:
             if err:
                 return err
             sk_mgr = doc.SketchManager
-            sk_mgr.CreateBoundaryHatch(float(angle), float(scale), int(color), str(hatch_name), str(layer or ""))
+            hatch = sk_mgr.CreateBoundaryHatch(float(angle), float(scale), int(color), str(hatch_name), str(layer or ""))
+            if not hatch:
+                return self._result(False, f"create_area_hatch: tratteggio '{hatch_name}' non creato da SolidWorks.", SwErrors.swSketchError)
             return self._result(
                 True, f"Tratteggio d'area '{hatch_name}' creato (angolo {angle} deg, scala {scale}).",
                 SwErrors.swSuccess, {"hatch_name": hatch_name, "angle": angle, "scale": scale}

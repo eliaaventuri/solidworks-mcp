@@ -22,13 +22,19 @@ class Surfaces2Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            self._select_point(doc, face_point, mark=1, unit=unit)
+            ok, info = self._select_point(doc, "face", face_point, unit=unit, mark=1)
+            if not ok:
+                return self._result(False, f"thicken_cut: faccia {face_point} non selezionata: {info.get('error', info)}",
+                                    SwErrors.swSelectionError)
             fm = doc.FeatureManager
             t_m = self._mmu(thickness, unit)
             feat = fm.FeatureCutThicken(t_m, int(direction), False, False, False, False, False)
+            if feat is None:
+                return self._result(False, "thicken_cut: taglio per ispessimento non creato da SolidWorks",
+                                    SwErrors.swFeatureError, {"created": False, "thickness": thickness})
             return self._result(
                 True, f"Taglio per ispessimento ({thickness} mm) eseguito.",
-                SwErrors.swSuccess, {"created": feat is not None, "thickness": thickness}
+                SwErrors.swSuccess, {"created": True, "thickness": thickness}
             )
         except Exception as e:
             logger.error(f"thicken_cut: {e}\n{traceback.format_exc()}")
@@ -83,11 +89,12 @@ class Surfaces2Operations:
                 edges = b.GetEdges() or []
                 for e in edges:
                     faces = e.GetTwoAdjacentFaces2()
-                    if not faces or len(faces) < 2:
+                    if not faces or len(faces) < 2 or any(f is None for f in faces):
                         open_edges_count += 1
             return self._result(
                 True, f"Controllo bordi aperti completato: {open_edges_count} bordi aperti rilevati.",
-                SwErrors.swSuccess, {"open_edges_count": open_edges_count, "surface_bodies": len(bodies)}
+                SwErrors.swSuccess, {"open_edges_count": open_edges_count, "surface_bodies": len(bodies),
+                                     "ignored_params": ["surface_point"] if surface_point is not None else []}
             )
         except Exception as e:
             logger.error(f"find_open_surface_edges: {e}\n{traceback.format_exc()}")
@@ -104,12 +111,13 @@ class Surfaces2Operations:
             for b in bodies:
                 for e in (b.GetEdges() or []):
                     faces = e.GetTwoAdjacentFaces2()
-                    if not faces or len(faces) < 2:
+                    if not faces or len(faces) < 2 or any(f is None for f in faces):
                         open_edges += 1
             is_watertight = (open_edges == 0 and len(bodies) > 0)
             return self._result(
                 True, f"Verifica tenuta stagna: {'chiuso (watertight)' if is_watertight else 'aperto'}.",
-                SwErrors.swSuccess, {"watertight": is_watertight, "open_edges": open_edges, "bodies": len(bodies)}
+                SwErrors.swSuccess, {"watertight": is_watertight, "open_edges": open_edges, "bodies": len(bodies),
+                                     "ignored_params": ["surface_point"] if surface_point is not None else []}
             )
         except Exception as e:
             logger.error(f"check_watertight_surface: {e}\n{traceback.format_exc()}")
@@ -121,14 +129,11 @@ class Surfaces2Operations:
             doc, err = self._part()
             if err:
                 return err
-            # Toggle zebra stripes view
-            try:
-                doc.ViewDisplayZebrastripes()
-            except Exception:
-                pass
+            # Interruttore: non si legge lo stato attuale, quindi il parametro enable non viene applicato
+            doc.ViewDisplayZebrastripes()
             return self._result(
-                True, f"Visualizzazione strisce zebrate: {'attivata' if enable else 'disattivata'}.",
-                SwErrors.swSuccess, {"zebra_enabled": bool(enable)}
+                True, "Visualizzazione strisce zebrate: visualizzazione commutata.",
+                SwErrors.swSuccess, {"ignored_params": ["enable"]}
             )
         except Exception as e:
             logger.error(f"zebra_stripes_display: {e}\n{traceback.format_exc()}")
@@ -141,13 +146,11 @@ class Surfaces2Operations:
             doc, err = self._part()
             if err:
                 return err
-            try:
-                doc.ViewDisplayCurvature()
-            except Exception:
-                pass
+            # Interruttore: non si legge lo stato attuale, quindi enable, min_radius e max_radius non vengono applicati
+            doc.ViewDisplayCurvature()
             return self._result(
-                True, f"Mappa di curvatura gaussiana: {'attivata' if enable else 'disattivata'}.",
-                SwErrors.swSuccess, {"curvature_enabled": bool(enable), "min_radius": min_radius, "max_radius": max_radius}
+                True, "Mappa di curvatura gaussiana: visualizzazione commutata.",
+                SwErrors.swSuccess, {"ignored_params": ["enable", "min_radius", "max_radius"]}
             )
         except Exception as e:
             logger.error(f"gaussian_curvature_display: {e}\n{traceback.format_exc()}")

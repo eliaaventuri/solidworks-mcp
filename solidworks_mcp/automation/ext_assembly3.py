@@ -37,6 +37,27 @@ class Assembly3Operations:
         except Exception:
             return 0
 
+    def _as_byref(self, kind: str):
+        """Parametro per riferimento (VT_BYREF) per chiamate COM con uscita. Senza pywin32 un contenitore con .value."""
+        try:
+            import pythoncom
+            import win32com.client
+            vt = {"dispatch": pythoncom.VT_DISPATCH, "i4": pythoncom.VT_I4, "variant": pythoncom.VT_VARIANT}[kind]
+            return win32com.client.VARIANT(pythoncom.VT_BYREF | vt, 0 if kind == "i4" else None)
+        except ImportError:
+            class _Out:
+                value = 0 if kind == "i4" else None
+            return _Out()
+
+    def _as_addmate_err(self, res, err_var):
+        """Esito di AddMate5: None se creato, altrimenti il motivo. Il codice by-ref vale solo se letto (1 = nessun errore)."""
+        if res is None:
+            return "SolidWorks non ha creato l'accoppiamento"
+        code = getattr(err_var, "value", None)
+        if isinstance(code, int) and code != 1:
+            return f"codice errore AddMate5 {code}"
+        return None
+
     # ------------------------------------------------------------------ Gestione Componenti & Istanze
     def make_component_independent(self, component_name: str, new_filepath: str = None) -> Dict:
         """Rende una specifica istanza indipendente duplicandola su nuovo file o rendendola autonoma."""
@@ -45,24 +66,40 @@ class Assembly3Operations:
             if err:
                 return err
             comp, _ = self._as_comp(doc, component_name, False)
-            res = True
-            if comp is not None:
+            if comp is None:
+                return self._result(False, f"make_component_independent: '{component_name}' non trovato", SwErrors.swSelectionError)
+            doc.ClearSelection2(True)
+            if not self._as_select_comps(doc, [comp]):
                 doc.ClearSelection2(True)
-                self._as_select_comps(doc, [comp])
-                try:
-                    if new_filepath:
-                        target_path = os.path.abspath(new_filepath)
-                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                        res = doc.MakeIndependent2(str(component_name), target_path, True, False)
-                    else:
-                        res = doc.MakeIndependent()
-                except Exception:
-                    pass
+                return self._result(False, f"make_component_independent: selezione di '{component_name}' non riuscita", SwErrors.swSelectionError)
+            if not new_filepath:
                 doc.ClearSelection2(True)
-            cname = str(comp.Name2) if comp is not None else component_name
+                return self._result(False, "make_component_independent: serve il percorso del nuovo file (new_filepath)", SwErrors.swInvalidInput)
+            target_path = os.path.abspath(new_filepath)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            try:
+                res = doc.MakeIndependent(target_path)
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"make_component_independent: operazione non riuscita: {e}", SwErrors.swFeatureError)
+            doc.ClearSelection2(True)
+            if not res:
+                return self._result(False, f"make_component_independent: '{component_name}' non reso indipendente", SwErrors.swFeatureError)
+            if target_path and not (os.path.isfile(target_path) and os.path.getsize(target_path) > 0):
+                return self._result(False, f"make_component_independent: file non scritto ({target_path})", SwErrors.swExportError)
+            # dopo il comando l'istanza prende il nome del nuovo file: si cerca il componente che punta a quel file
+            new_name = str(comp.Name2)
+            try:
+                for cc in (doc.GetComponents(False) or ()):
+                    if os.path.normcase(os.path.abspath(str(self._com(cc, "GetPathName")))) == os.path.normcase(target_path):
+                        new_name = str(cc.Name2)
+                        break
+            except Exception:
+                pass
             return self._result(
-                True, f"Componente '{component_name}' reso indipendente.",
-                SwErrors.swSuccess, {"component": cname, "independent": bool(res), "new_filepath": new_filepath}
+                True, f"Componente '{component_name}' reso indipendente: ora e' '{new_name}'.",
+                SwErrors.swSuccess, {"component": new_name, "previous_name": component_name, "independent": True,
+                                     "new_filepath": new_filepath}
             )
         except Exception as e:
             return self._as_fail("make_component_independent", e)
@@ -73,17 +110,28 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            which_way = 1 if str(position).lower().strip() == "before" else 2
+            pos = str(position).lower().strip()
+            if pos not in ("before", "after"):
+                return self._result(False, f"reorder_components: posizione '{position}' non valida (before | after)", SwErrors.swInvalidInput)
+            which_way = 1 if pos == "before" else 2
+            src = []
+            for n in list(components or []) + [target_component]:
+                comp, e_c = self._as_comp(doc, n, False)
+                if e_c:
+                    return self._result(False, f"reorder_components: '{n}' non trovato", SwErrors.swSelectionError)
+                src.append(comp)
             doc.ClearSelection2(True)
-            res = True
             try:
-                res = doc.ReorderComponents(components, target_component, which_way)
-            except Exception:
-                pass
+                from .modeling_base import disp_array
+                res = doc.ReorderComponents(disp_array(src[:-1]), src[-1], which_way)
+            except Exception as e:
+                return self._result(False, f"reorder_components: riordino non riuscito: {e}", SwErrors.swFeatureError)
+            if not res:
+                return self._result(False, f"reorder_components: riordino non riuscito a '{target_component}'", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, f"Componenti riordinati {position} a '{target_component}'.",
-                SwErrors.swSuccess, {"components": components, "target": target_component, "position": position, "reordered": bool(res)}
+                SwErrors.swSuccess, {"components": components, "target": target_component, "position": position, "reordered": True}
             )
         except Exception as e:
             return self._as_fail("reorder_components", e)
@@ -95,11 +143,13 @@ class Assembly3Operations:
             if err:
                 return err
             pct = max(0.0, min(100.0, float(percentage)))
-            selected_count = 0
             try:
-                selected_count = int(doc.SelectComponentsBySize(pct) or 0)
-            except Exception:
-                pass
+                raw = doc.SelectComponentsBySize(pct)
+            except Exception as e:
+                return self._result(False, f"select_components_by_size: selezione non riuscita: {e}", SwErrors.swSelectionError)
+            if raw is None:
+                return self._result(False, "select_components_by_size: SolidWorks non ha restituito il numero di componenti", SwErrors.swSelectionError)
+            selected_count = int(raw)
             return self._result(
                 True, f"Selezionati {selected_count} componenti con soglia dimensione {pct}%.",
                 SwErrors.swSuccess, {"percentage": pct, "selected_count": selected_count}
@@ -114,21 +164,24 @@ class Assembly3Operations:
             if err:
                 return err
             comp, _ = self._as_comp(doc, component_name, False)
-            if comp is not None:
+            if comp is None:
+                return self._result(False, f"set_component_transparency: '{component_name}' non trovato", SwErrors.swSelectionError)
+            doc.ClearSelection2(True)
+            if not self._as_select_comps(doc, [comp]):
                 doc.ClearSelection2(True)
-                self._as_select_comps(doc, [comp])
+                return self._result(False, f"set_component_transparency: selezione di '{component_name}' non riuscita", SwErrors.swSelectionError)
+            try:
+                doc.SetComponentTransparent(bool(transparent))
+            except Exception:
                 try:
-                    doc.SetComponentTransparent(bool(transparent))
-                except Exception:
-                    try:
-                        comp.Transparency = 1 if transparent else 0
-                    except Exception:
-                        pass
-                doc.ClearSelection2(True)
-            cname = str(comp.Name2) if comp is not None else component_name
+                    comp.Transparency = 1 if transparent else 0
+                except Exception as e:
+                    doc.ClearSelection2(True)
+                    return self._result(False, f"set_component_transparency: impostazione non riuscita: {e}", SwErrors.swFeatureError)
+            doc.ClearSelection2(True)
             return self._result(
                 True, f"Trasparenza componente '{component_name}' impostata a {transparent}.",
-                SwErrors.swSuccess, {"component": cname, "transparent": bool(transparent)}
+                SwErrors.swSuccess, {"component": str(comp.Name2), "transparent": bool(transparent)}
             )
         except Exception as e:
             return self._as_fail("set_component_transparency", e)
@@ -141,16 +194,24 @@ class Assembly3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            created_name = part_name or "VirtualPart"
+            plane = self._std_ref_feature(doc, plane_or_face or "Front Plane")
+            if plane is None or not bool(plane.Select2(False, 0)):
+                doc.ClearSelection2(True)
+                return self._result(False, f"insert_new_virtual_part: piano/faccia '{plane_or_face}' non selezionato", SwErrors.swSelectionError)
+            ent = doc.SelectionManager.GetSelectedObject6(1, -1)
+            doc.ClearSelection2(True)
+            out = self._as_byref("dispatch")
             try:
-                res = doc.InsertNewVirtualPart(None, None)
-                if res and hasattr(res, "Name2"):
-                    created_name = str(res.Name2)
-            except Exception:
-                pass
+                ret_vp = doc.InsertNewVirtualPart(ent, out)
+            except Exception as e:
+                return self._result(False, f"insert_new_virtual_part: creazione non riuscita: {e}", SwErrors.swFeatureError)
+            res = out.value
+            if res is None:
+                return self._result(False, f"insert_new_virtual_part: SolidWorks non ha creato la parte virtuale (ritorno {ret_vp}, selezione {type(ent).__name__})", SwErrors.swFeatureError)
+            created_name = str(res.Name2) if hasattr(res, "Name2") else None
             return self._result(
-                True, f"Nuova parte virtuale creata nell'assieme: '{created_name}'.",
-                SwErrors.swSuccess, {"virtual_part": created_name, "plane_or_face": plane_or_face}
+                True, "Nuova parte virtuale creata nell'assieme.",
+                SwErrors.swSuccess, {"virtual_part": created_name, "ignored_params": ["plane_or_face", "part_name"]}
             )
         except Exception as e:
             return self._as_fail("insert_new_virtual_part", e)
@@ -161,16 +222,18 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            created_name = subassembly_name or "VirtualSubAssy"
+            out = self._as_byref("dispatch")
             try:
-                res = doc.InsertNewVirtualAssembly(None)
-                if res and hasattr(res, "Name2"):
-                    created_name = str(res.Name2)
-            except Exception:
-                pass
+                doc.InsertNewVirtualAssembly(out)
+            except Exception as e:
+                return self._result(False, f"insert_new_virtual_assembly: creazione non riuscita: {e}", SwErrors.swFeatureError)
+            res = out.value
+            if res is None:
+                return self._result(False, "insert_new_virtual_assembly: SolidWorks non ha creato il sotto-assieme virtuale", SwErrors.swFeatureError)
+            created_name = str(res.Name2) if hasattr(res, "Name2") else None
             return self._result(
-                True, f"Nuovo sotto-assieme virtuale creato nell'assieme: '{created_name}'.",
-                SwErrors.swSuccess, {"virtual_subassembly": created_name}
+                True, "Nuovo sotto-assieme virtuale creato nell'assieme.",
+                SwErrors.swSuccess, {"virtual_subassembly": created_name, "ignored_params": ["subassembly_name"]}
             )
         except Exception as e:
             return self._as_fail("insert_new_virtual_assembly", e)
@@ -182,18 +245,24 @@ class Assembly3Operations:
             if err:
                 return err
             comp, _ = self._as_comp(doc, component_name, False)
-            res = True
-            if comp is not None:
+            if comp is None:
+                return self._result(False, f"edit_part_in_context: '{component_name}' non trovato", SwErrors.swSelectionError)
+            doc.ClearSelection2(True)
+            if not self._as_select_comps(doc, [comp]):
                 doc.ClearSelection2(True)
-                self._as_select_comps(doc, [comp])
-                try:
-                    res = doc.EditPart2(True, True, 0)
-                except Exception:
-                    pass
-            cname = str(comp.Name2) if comp is not None else component_name
+                return self._result(False, f"edit_part_in_context: selezione di '{component_name}' non riuscita", SwErrors.swSelectionError)
+            info = self._as_byref("i4")
+            try:
+                res = doc.EditPart2(True, True, info)
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"edit_part_in_context: attivazione non riuscita: {e}", SwErrors.swFeatureError)
+            if not res:
+                doc.ClearSelection2(True)
+                return self._result(False, f"edit_part_in_context: modifica in-context non attivata per '{component_name}'", SwErrors.swFeatureError)
             return self._result(
                 True, f"Modalita' di modifica in-context attivata per '{component_name}'.",
-                SwErrors.swSuccess, {"component": cname, "in_context": bool(res)}
+                SwErrors.swSuccess, {"component": str(comp.Name2), "in_context": True}
             )
         except Exception as e:
             return self._as_fail("edit_part_in_context", e)
@@ -206,8 +275,8 @@ class Assembly3Operations:
                 return err
             try:
                 doc.EditAssembly()
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"exit_part_in_context: uscita non riuscita: {e}", SwErrors.swFeatureError)
             return self._result(
                 True, "Uscita dalla modifica in-context effettuata con successo.",
                 SwErrors.swSuccess, {"active_assembly": self._get_doc_title(doc)}
@@ -224,20 +293,29 @@ class Assembly3Operations:
             path = os.path.abspath(filepath)
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
             comp, _ = self._as_comp(doc, component_name, False)
-            if comp is not None:
+            if comp is None:
+                return self._result(False, f"save_virtual_component_external: '{component_name}' non trovato", SwErrors.swSelectionError)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            pre_mtime = os.path.getmtime(path) if os.path.isfile(path) else None
+            doc.ClearSelection2(True)
+            if not self._as_select_comps(doc, [comp]):
                 doc.ClearSelection2(True)
-                self._as_select_comps(doc, [comp])
-                try:
-                    doc.SaveVirtualComponent(path)
-                except Exception:
-                    pass
+                return self._result(False, f"save_virtual_component_external: selezione di '{component_name}' non riuscita", SwErrors.swSelectionError)
+            try:
+                saved = comp.SaveVirtualComponent(path)
+            except Exception as e:
                 doc.ClearSelection2(True)
-            cname = str(comp.Name2) if comp is not None else component_name
+                return self._result(False, f"save_virtual_component_external: salvataggio non riuscito: {e}", SwErrors.swExportError)
+            doc.ClearSelection2(True)
+            if not saved:
+                return self._result(False, f"save_virtual_component_external: SolidWorks non ha salvato '{component_name}'", SwErrors.swExportError)
+            written = os.path.isfile(path) and os.path.getsize(path) > 0 and (pre_mtime is None or os.path.getmtime(path) != pre_mtime)
+            if not written:
+                return self._result(False, f"save_virtual_component_external: file non scritto ({path})", SwErrors.swExportError)
             return self._result(
                 True, f"Componente virtuale '{component_name}' salvato esternamente in {path}.",
-                SwErrors.swSuccess, {"component": cname, "filepath": path}
+                SwErrors.swSuccess, {"component": str(comp.Name2), "filepath": path}
             )
         except Exception as e:
             return self._as_fail("save_virtual_component_external", e)
@@ -249,16 +327,20 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            feat = self._as_feature_of_doc(doc, mate_name)
-            if feat is not None:
-                mate = feat.GetSpecificFeature2()
-                if mate is not None and hasattr(mate, "LockRotation"):
-                    mate.LockRotation = bool(locked)
-                    try:
-                        feat.ModifyDefinition(mate, doc, None)
-                    except Exception:
-                        pass
-                self._as_rebuild(doc)
+            feat = self._as_mate_by_name(doc, mate_name)
+            if feat is None:
+                return self._result(False, f"lock_mate_rotation: accoppiamento '{mate_name}' non trovato", SwErrors.swSelectionError)
+            mate = self._com(feat, "GetSpecificFeature2")
+            if mate is None or not hasattr(mate, "LockRotation"):
+                return self._result(False, f"lock_mate_rotation: '{mate_name}' non supporta il blocco rotazione", SwErrors.swFeatureError)
+            try:
+                mate.LockRotation = bool(locked)
+                feat.ModifyDefinition(mate, doc, None)
+            except Exception as e:
+                return self._result(False, f"lock_mate_rotation: modifica non riuscita: {e}", SwErrors.swFeatureError)
+            self._as_rebuild(doc)
+            if bool(self._com(feat, "GetSpecificFeature2").LockRotation) != bool(locked):
+                return self._result(False, f"lock_mate_rotation: blocco rotazione di '{mate_name}' non applicato", SwErrors.swFeatureError)
             return self._result(
                 True, f"Rotazione per accoppiamento '{mate_name}' impostata a bloccata={locked}.",
                 SwErrors.swSuccess, {"mate_name": mate_name, "locked": bool(locked)}
@@ -273,13 +355,10 @@ class Assembly3Operations:
             if err:
                 return err
             res = self.add_mate(mate_type="concentric", entity1=entity1, entity2=entity2, align=align, unit=unit)
-            if not res.get("success"):
-                return self._result(
-                    True, f"Accoppiamento concentrico configurato con tolleranza {tolerance} mm.",
-                    SwErrors.swSuccess, {"entity1": entity1, "entity2": entity2, "tolerance": tolerance, "align": align}
-                )
-            res["data"]["tolerance"] = tolerance
-            res["message"] += f" (tolleranza compensata: {tolerance} mm)"
+            if res.get("success"):
+                data = res.get("data") or {}
+                data["ignored_params"] = ["tolerance"]
+                res["data"] = data
             return res
         except Exception as e:
             return self._as_fail("add_concentric_mate_with_tolerance", e)
@@ -290,20 +369,24 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            feat = self._as_feature_of_doc(doc, mate_name)
-            new_align = "flipped"
-            if feat is not None:
-                mate = feat.GetSpecificFeature2()
-                if mate is not None and hasattr(mate, "Alignment"):
-                    cur = mate.Alignment
-                    tgt = 2 if cur == 1 else 1
-                    mate.Alignment = tgt
-                    try:
-                        feat.ModifyDefinition(mate, doc, None)
-                    except Exception:
-                        pass
-                    new_align = "anti_aligned" if tgt == 2 else "aligned"
-                self._as_rebuild(doc)
+            feat = self._as_mate_by_name(doc, mate_name)
+            if feat is None:
+                return self._result(False, f"flip_mate_alignment: accoppiamento '{mate_name}' non trovato", SwErrors.swSelectionError)
+            mate = self._com(feat, "GetSpecificFeature2")
+            if mate is None or not hasattr(mate, "Flipped"):
+                return self._result(False, f"flip_mate_alignment: '{mate_name}' non ha allineamento invertibile", SwErrors.swFeatureError)
+            if not bool(mate.CanBeFlipped):
+                return self._result(False, f"flip_mate_alignment: '{mate_name}' non si puo' invertire", SwErrors.swFeatureError)
+            cur = bool(mate.Flipped)
+            try:
+                mate.Flipped = not cur
+                feat.ModifyDefinition(mate, doc, None)
+            except Exception as e:
+                return self._result(False, f"flip_mate_alignment: modifica non riuscita: {e}", SwErrors.swFeatureError)
+            self._as_rebuild(doc)
+            if bool(self._com(feat, "GetSpecificFeature2").Flipped) == cur:
+                return self._result(False, f"flip_mate_alignment: allineamento di '{mate_name}' non invertito", SwErrors.swFeatureError)
+            new_align = "anti_aligned" if not cur else "aligned"
             return self._result(
                 True, f"Allineamento accoppiamento '{mate_name}' invertito ({new_align}).",
                 SwErrors.swSuccess, {"mate_name": mate_name, "alignment": new_align}
@@ -317,16 +400,10 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            res = self.add_mate(
+            return self.add_mate(
                 mate_type="gear", entity1=entity1, entity2=entity2,
                 gear_ratio=[float(ratio_num), float(ratio_den)], flip=reverse
             )
-            if not res.get("success"):
-                return self._result(
-                    True, f"Accoppiamento ingranaggi configurato (rapporto {ratio_num}:{ratio_den}).",
-                    SwErrors.swSuccess, {"entity1": entity1, "entity2": entity2, "ratio": [ratio_num, ratio_den], "reverse": reverse}
-                )
-            return res
         except Exception as e:
             return self._as_fail("add_gear_mate", e)
 
@@ -337,15 +414,22 @@ class Assembly3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            i1, _ = self._as_select_entity(doc, rack_entity, unit, mark=1, append=True)
-            i2, _ = self._as_select_entity(doc, pinion_entity, unit, mark=1, append=True)
+            i1, e1 = self._as_select_entity(doc, rack_entity, unit, mark=1, append=True)
+            if e1:
+                return self._result(False, f"add_rack_pinion_mate: cremagliera non selezionata: {e1}", SwErrors.swSelectionError)
+            i2, e2 = self._as_select_entity(doc, pinion_entity, unit, mark=1, append=True)
+            if e2:
+                return self._result(False, f"add_rack_pinion_mate: pignone non selezionato: {e2}", SwErrors.swSelectionError)
             pd_m = self._mmu(pitch_diameter, unit)
             try:
                 err_var = self._as_err_var()
-                doc.AddMate5(13, 0, bool(reverse), pd_m, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception:
-                pass
+                mate_feat = doc.AddMate5(13, 0, bool(reverse), pd_m, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
+            except Exception as e:
+                return self._result(False, f"add_rack_pinion_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            motivo = self._as_addmate_err(mate_feat, err_var)
+            if motivo:
+                return self._result(False, f"add_rack_pinion_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, f"Accoppiamento pignone-cremagliera aggiunto (diametro primitivo: {pitch_diameter} mm).",
@@ -360,16 +444,25 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
+            if not cam_faces:
+                return self._result(False, "add_cam_mate: serve almeno una faccia di camma", SwErrors.swInvalidInput)
             doc.ClearSelection2(True)
-            for cf in cam_faces or []:
-                self._as_select_entity(doc, cf, None, mark=1, append=True)
-            i_f, _ = self._as_select_entity(doc, follower_face, None, mark=1, append=True)
+            for cf in cam_faces:
+                _, e_cf = self._as_select_entity(doc, cf, None, mark=1, append=True)
+                if e_cf:
+                    return self._result(False, f"add_cam_mate: faccia di camma non selezionata: {e_cf}", SwErrors.swSelectionError)
+            i_f, e_f = self._as_select_entity(doc, follower_face, None, mark=1, append=True)
+            if e_f:
+                return self._result(False, f"add_cam_mate: punteria non selezionata: {e_f}", SwErrors.swSelectionError)
             try:
                 err_var = self._as_err_var()
-                doc.AddMate5(9, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception:
-                pass
+                mate_feat = doc.AddMate5(9, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
+            except Exception as e:
+                return self._result(False, f"add_cam_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            motivo = self._as_addmate_err(mate_feat, err_var)
+            if motivo:
+                return self._result(False, f"add_cam_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, f"Accoppiamento camma-punteria creato su {len(cam_faces or [])} facce di camma.",
@@ -385,18 +478,26 @@ class Assembly3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            i1, _ = self._as_select_entity(doc, slot_entity, unit, mark=1, append=True)
-            i2, _ = self._as_select_entity(doc, pin_entity, unit, mark=1, append=True)
+            i1, e1 = self._as_select_entity(doc, slot_entity, unit, mark=1, append=True)
+            if e1:
+                return self._result(False, f"add_slot_mate: asola non selezionata: {e1}", SwErrors.swSelectionError)
+            i2, e2 = self._as_select_entity(doc, pin_entity, unit, mark=1, append=True)
+            if e2:
+                return self._result(False, f"add_slot_mate: perno non selezionato: {e2}", SwErrors.swSelectionError)
             try:
                 err_var = self._as_err_var()
-                doc.AddMate5(21, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception:
-                pass
+                mate_feat = doc.AddMate5(21, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
+            except Exception as e:
+                return self._result(False, f"add_slot_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            motivo = self._as_addmate_err(mate_feat, err_var)
+            if motivo:
+                return self._result(False, f"add_slot_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
-                True, f"Accoppiamento asola creato (vincolo: {constraint_type}).",
-                SwErrors.swSuccess, {"slot": i1 or slot_entity, "pin": i2 or pin_entity, "constraint": constraint_type, "distance": distance, "percent": percent}
+                True, "Accoppiamento asola creato.",
+                SwErrors.swSuccess, {"slot": i1 or slot_entity, "pin": i2 or pin_entity,
+                                     "ignored_params": ["constraint_type", "distance", "percent"]}
             )
         except Exception as e:
             return self._as_fail("add_slot_mate", e)
@@ -408,11 +509,16 @@ class Assembly3Operations:
             if err:
                 return err
             r1 = self.add_mate(mate_type="concentric", entity1=concentric_entity1, entity2=concentric_entity2)
+            if not r1.get("success"):
+                return r1
             r2 = self.add_mate(mate_type="coincident", entity1=coincident_face1, entity2=coincident_face2)
-            has_limits = min_angle is not None or max_angle is not None
+            if not r2.get("success"):
+                return self._result(False, f"add_hinge_mate: accoppiamento assiale creato, piano non creato: {r2.get('message')}",
+                                    SwErrors.swFeatureError, {"axis_mate": r1.get("data")})
+            ignored = [n for n, v in (("min_angle", min_angle), ("max_angle", max_angle)) if v is not None]
             return self._result(
-                True, f"Accoppiamento a cerniera creato con successo{' (con limiti angolari)' if has_limits else ''}.",
-                SwErrors.swSuccess, {"axis_mate": r1.get("data"), "axial_mate": r2.get("data"), "min_angle": min_angle, "max_angle": max_angle}
+                True, "Accoppiamento a cerniera creato (asse e piano).",
+                SwErrors.swSuccess, {"axis_mate": r1.get("data"), "axial_mate": r2.get("data"), "ignored_params": ignored}
             )
         except Exception as e:
             return self._as_fail("add_hinge_mate", e)
@@ -427,11 +533,10 @@ class Assembly3Operations:
                 mate_type="screw", entity1=axis_entity1, entity2=axis_entity2,
                 pitch=pitch, flip=reverse, unit=unit
             )
-            if not res.get("success"):
-                return self._result(
-                    True, f"Accoppiamento a vite configurato (passo {pitch} mm).",
-                    SwErrors.swSuccess, {"axis1": axis_entity1, "axis2": axis_entity2, "pitch": pitch, "reverse": reverse}
-                )
+            if res.get("success"):
+                data = res.get("data") or {}
+                data["ignored_params"] = ["revs_per_distance"]
+                res["data"] = data
             return res
         except Exception as e:
             return self._as_fail("add_screw_mate", e)
@@ -443,14 +548,21 @@ class Assembly3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            i1, _ = self._as_select_entity(doc, entity1, None, mark=1, append=True)
-            i2, _ = self._as_select_entity(doc, entity2, None, mark=1, append=True)
+            i1, e1 = self._as_select_entity(doc, entity1, None, mark=1, append=True)
+            if e1:
+                return self._result(False, f"add_linear_coupler_mate: entita' 1 non selezionata: {e1}", SwErrors.swSelectionError)
+            i2, e2 = self._as_select_entity(doc, entity2, None, mark=1, append=True)
+            if e2:
+                return self._result(False, f"add_linear_coupler_mate: entita' 2 non selezionata: {e2}", SwErrors.swSelectionError)
             try:
                 err_var = self._as_err_var()
-                doc.AddMate5(18, 0, bool(reverse), 0, 0, 0, float(ratio), 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception:
-                pass
+                mate_feat = doc.AddMate5(18, 0, bool(reverse), 0, 0, 0, float(ratio), 1.0, 0, 0, 0, False, False, 0, err_var)
+            except Exception as e:
+                return self._result(False, f"add_linear_coupler_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            motivo = self._as_addmate_err(mate_feat, err_var)
+            if motivo:
+                return self._result(False, f"add_linear_coupler_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, f"Accoppiatore lineare aggiunto con rapporto {ratio}:1.",
@@ -466,14 +578,21 @@ class Assembly3Operations:
             if err:
                 return err
             doc.ClearSelection2(True)
-            i1, _ = self._as_select_entity(doc, shaft_entity1, None, mark=1, append=True)
-            i2, _ = self._as_select_entity(doc, shaft_entity2, None, mark=1, append=True)
+            i1, e1 = self._as_select_entity(doc, shaft_entity1, None, mark=1, append=True)
+            if e1:
+                return self._result(False, f"add_universal_joint_mate: albero 1 non selezionato: {e1}", SwErrors.swSelectionError)
+            i2, e2 = self._as_select_entity(doc, shaft_entity2, None, mark=1, append=True)
+            if e2:
+                return self._result(False, f"add_universal_joint_mate: albero 2 non selezionato: {e2}", SwErrors.swSelectionError)
             try:
                 err_var = self._as_err_var()
-                doc.AddMate5(19, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception:
-                pass
+                mate_feat = doc.AddMate5(19, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
+            except Exception as e:
+                return self._result(False, f"add_universal_joint_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            motivo = self._as_addmate_err(mate_feat, err_var)
+            if motivo:
+                return self._result(False, f"add_universal_joint_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, "Accoppiamento a giunto cardanico (universale) aggiunto con successo.",
@@ -491,11 +610,17 @@ class Assembly3Operations:
                 return err
             doc.ClearSelection2(True)
             try:
-                doc.Extension.SelectByID2(str(pattern_name), "COMPPATTERN", 0, 0, 0, False, 0, null_variant(), 0)
-                doc.DissolveComponentPattern()
-            except Exception:
-                pass
+                sel = doc.Extension.SelectByID2(str(pattern_name), "COMPPATTERN", 0, 0, 0, False, 0, null_variant(), 0)
+                if not sel:
+                    doc.ClearSelection2(True)
+                    return self._result(False, f"dissolve_component_pattern: ripetizione '{pattern_name}' non trovata", SwErrors.swSelectionError)
+                ok = self._com(doc, "DissolveComponentPattern")
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"dissolve_component_pattern: operazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
+            if not ok:
+                return self._result(False, f"dissolve_component_pattern: '{pattern_name}' non dissolta", SwErrors.swFeatureError)
             self._as_rebuild(doc)
             return self._result(
                 True, f"Ripetizione di componenti '{pattern_name}' dissolta in istanze indipendenti.",
@@ -525,18 +650,21 @@ class Assembly3Operations:
             if err:
                 return err
             comp, _ = self._as_comp(doc, component_name, False)
-            if comp is not None:
-                try:
-                    # swComponentFlexibleSolving = 1, swComponentRigidSolving = 0
-                    comp.Solving = 1 if flexible else 0
-                except Exception:
-                    pass
-                self._as_rebuild(doc)
-            cname = str(comp.Name2) if comp is not None else component_name
+            if comp is None:
+                return self._result(False, f"set_subassembly_flexible: '{component_name}' non trovato", SwErrors.swSelectionError)
+            # swComponentFlexibleSolving = 1, swComponentRigidSolving = 0
+            want = 1 if flexible else 0
+            try:
+                comp.Solving = want
+            except Exception as e:
+                return self._result(False, f"set_subassembly_flexible: impostazione non riuscita: {e}", SwErrors.swFeatureError)
+            self._as_rebuild(doc)
+            if int(comp.Solving) != want:
+                return self._result(False, f"set_subassembly_flexible: '{component_name}' non impostato come richiesto", SwErrors.swFeatureError)
             mode_str = "flessibile (articolato)" if flexible else "rigido"
             return self._result(
                 True, f"Sotto-assieme '{component_name}' configurato come {mode_str}.",
-                SwErrors.swSuccess, {"component": cname, "flexible": bool(flexible)}
+                SwErrors.swSuccess, {"component": str(comp.Name2), "flexible": bool(flexible)}
             )
         except Exception as e:
             return self._as_fail("set_subassembly_flexible", e)
@@ -574,16 +702,23 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            doc.ClearSelection2(True)
+            comps = []
             for c in components or []:
-                doc.Extension.SelectByID2(str(c), "COMPONENT", 0, 0, 0, True, 0, null_variant(), 0)
+                comp, e = self._as_comp(doc, c)
+                if comp is None:
+                    return self._result(False, f"isolate_components: componente '{c}' non trovato: {e}", SwErrors.swSelectionError)
+                comps.append(comp)
+            if not self._as_select_comps(doc, comps):
+                doc.ClearSelection2(True)
+                return self._result(False, "isolate_components: componente non selezionato", SwErrors.swSelectionError)
             try:
-                doc.Isolate()
-            except Exception:
-                pass
+                self._com(doc, "Isolate")
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"isolate_components: isolamento non riuscito: {e}", SwErrors.swFeatureError)
             return self._result(
                 True, f"Isolamento attivato per {len(components or [])} componenti.",
-                SwErrors.swSuccess, {"isolated_components": components, "transparent_others": transparent_others}
+                SwErrors.swSuccess, {"isolated_components": components, "ignored_params": ["transparent_others"]}
             )
         except Exception as e:
             return self._as_fail("isolate_components", e)
@@ -595,9 +730,9 @@ class Assembly3Operations:
             if err:
                 return err
             try:
-                doc.ExitIsolate()
-            except Exception:
-                pass
+                self._com(doc, "ExitIsolate")
+            except Exception as e:
+                return self._result(False, f"exit_isolate: uscita non riuscita: {e}", SwErrors.swFeatureError)
             return self._result(
                 True, "Uscita dalla modalita' isolamento completata con successo.",
                 SwErrors.swSuccess, {}
@@ -611,15 +746,18 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            repaired_count = 0
+            processed = self._as_byref("variant")
+            failed = self._as_byref("variant")
             try:
-                doc.AutoMateRepair()
-            except Exception:
-                pass
+                res = doc.AutoMateRepair(processed, failed)
+            except Exception as e:
+                return self._result(False, f"auto_repair_mates: riparazione non riuscita: {e}", SwErrors.swFeatureError)
             self._as_rebuild(doc)
+            repaired_count = len(list(processed.value or [])) if processed.value is not None else 0
+            failed_count = len(list(failed.value or [])) if failed.value is not None else 0
             return self._result(
                 True, "Procedura di riparazione automatica degli accoppiamenti completata.",
-                SwErrors.swSuccess, {"repaired_mates": repaired_count}
+                SwErrors.swSuccess, {"repaired_mates": repaired_count, "failed_mates": failed_count, "result": res}
             )
         except Exception as e:
             return self._as_fail("auto_repair_mates", e)
@@ -654,11 +792,11 @@ class Assembly3Operations:
             try:
                 # 1 = Graphics SpeedPak, 2 = Mated SpeedPak
                 doc.CreateSpeedPak(1 if graphic_only else 2)
-            except Exception:
-                pass
+            except Exception as e:
+                return self._result(False, f"create_speedpak: creazione non riuscita: {e}", SwErrors.swFeatureError)
             return self._result(
-                True, f"Configurazione SpeedPak '{name}' creata con successo.",
-                SwErrors.swSuccess, {"name": name, "graphic_only": graphic_only, "include_faces": include_faces}
+                True, "Configurazione SpeedPak creata.",
+                SwErrors.swSuccess, {"graphic_only": graphic_only, "ignored_params": ["name", "include_faces"]}
             )
         except Exception as e:
             return self._as_fail("create_speedpak", e)
@@ -670,19 +808,18 @@ class Assembly3Operations:
             if err:
                 return err
             comp, _ = self._as_comp(doc, component_name, False)
-            if comp is not None:
-                try:
-                    comp.Envelope = bool(is_envelope)
-                except Exception:
-                    try:
-                        comp.ExcludeFromBOM = bool(is_envelope)
-                    except Exception:
-                        pass
-                self._as_rebuild(doc)
-            cname = str(comp.Name2) if comp is not None else component_name
+            if comp is None:
+                return self._result(False, f"set_envelope_component: '{component_name}' non trovato", SwErrors.swSelectionError)
+            try:
+                comp.Envelope = bool(is_envelope)
+            except Exception as e:
+                return self._result(False, f"set_envelope_component: proprieta' envelope non impostabile: {e}", SwErrors.swFeatureError)
+            if bool(comp.Envelope) != bool(is_envelope):
+                return self._result(False, f"set_envelope_component: stato Busta di '{component_name}' non applicato", SwErrors.swFeatureError)
+            self._as_rebuild(doc)
             return self._result(
                 True, f"Stato Busta per componente '{component_name}' impostato a {is_envelope}.",
-                SwErrors.swSuccess, {"component": cname, "is_envelope": bool(is_envelope)}
+                SwErrors.swSuccess, {"component": str(comp.Name2), "is_envelope": bool(is_envelope)}
             )
         except Exception as e:
             return self._as_fail("set_envelope_component", e)
@@ -693,13 +830,20 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            doc.ClearSelection2(True)
+            comps = []
             for c in tooling_components or []:
-                doc.Extension.SelectByID2(str(c), "COMPONENT", 0, 0, 0, True, 0, null_variant(), 0)
+                comp, e = self._as_comp(doc, c)
+                if comp is None:
+                    return self._result(False, f"insert_cavity_feature: componente '{c}' non trovato: {e}", SwErrors.swSelectionError)
+                comps.append(comp)
+            if not self._as_select_comps(doc, comps):
+                doc.ClearSelection2(True)
+                return self._result(False, "insert_cavity_feature: componente non selezionato", SwErrors.swSelectionError)
             try:
                 doc.InsertCavity4(float(scale_percentage), 0, 0, 0, 0, 0)
-            except Exception:
-                pass
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"insert_cavity_feature: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
             self._as_rebuild(doc)
             return self._result(
@@ -715,13 +859,20 @@ class Assembly3Operations:
             doc, err = self._asm()
             if err:
                 return err
-            doc.ClearSelection2(True)
+            comps = []
             for c in components or []:
-                doc.Extension.SelectByID2(str(c), "COMPONENT", 0, 0, 0, True, 0, null_variant(), 0)
+                comp, e = self._as_comp(doc, c)
+                if comp is None:
+                    return self._result(False, f"insert_join_feature: componente '{c}' non trovato: {e}", SwErrors.swSelectionError)
+                comps.append(comp)
+            if not self._as_select_comps(doc, comps):
+                doc.ClearSelection2(True)
+                return self._result(False, "insert_join_feature: componente non selezionato", SwErrors.swSelectionError)
             try:
-                doc.InsertJoin2(bool(hide_parts), False, False)
-            except Exception:
-                pass
+                doc.InsertJoin2(bool(hide_parts), False)
+            except Exception as e:
+                doc.ClearSelection2(True)
+                return self._result(False, f"insert_join_feature: creazione non riuscita: {e}", SwErrors.swFeatureError)
             doc.ClearSelection2(True)
             self._as_rebuild(doc)
             return self._result(
