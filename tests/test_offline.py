@@ -2702,9 +2702,9 @@ def test_data2_tools(tmp):
            ok_ddm["success"] and ok_ddt["success"] and ok_dgt["success"] and ok_ads["success"] and ok_lda["success"])
 
     ok_svb = sw.set_view_background("studio")
-    ok_app = sw.apply_appearance("polished_chrome", color_rgb=[220, 220, 220])
-    record("data2: personalizzazione grafica vista 3D e aspetti fotorealistici",
-           ok_svb["success"] and ok_app["success"])
+    ok_app = sw.apply_appearance("")          # dal 2026-10-24 apply_appearance e' reale (prova dal vivo in test_data2_live)
+    record("data2: sfondo della vista 3D; apply_appearance senza nome rifiutato",
+           ok_svb["success"] and not ok_app["success"])
 
     # Controlli negativi: proprieta' non riletta, riepilogo rifiutato, configurazione non creata, export rifiutato
     class _RefuseDataDoc(_MockDataDoc):

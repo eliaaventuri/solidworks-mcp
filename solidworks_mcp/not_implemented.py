@@ -79,7 +79,6 @@ NOT_IMPLEMENTED = {
     "auto_dimension_scheme_dimxpert": _WHY_NO_COM,
     "list_dimxpert_annotations": _WHY_FIXED,
     "set_view_background": _WHY_NO_COM,
-    "apply_appearance": _WHY_NO_COM,
     "edit_design_table": _WHY_NO_COM,
     "create_custom_material": _WHY_NO_COM,
     "get_projected_area": _WHY_FIXED + " (area sempre 100x100 mm)",

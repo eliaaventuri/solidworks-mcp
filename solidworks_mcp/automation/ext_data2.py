@@ -10,8 +10,15 @@ import logging
 from typing import Dict
 
 from ..constants import SwErrors
+from .modeling_base import null_variant
 
 logger = logging.getLogger(__name__)
+
+
+def _byref_i4():
+    import win32com.client
+    import pythoncom
+    return win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
 
 
 class Data2Operations:
@@ -558,16 +565,90 @@ class Data2Operations:
         except Exception as e:
             return self._result(False, f"set_view_background: {e}", SwErrors.swGenericError)
 
-    def apply_appearance(self, appearance_name: str = "polished_chrome", color_rgb: list = None,
-                         transparency: float = 0.0) -> Dict:
-        """Assegna un aspetto visivo fotorealistico, colore e finitura superficiale al modello."""
+    def _d2_appearance_files(self):
+        """File .p2m della libreria degli aspetti installata (<cartella di SLDWORKS.exe>\\data\\graphics\\Materials, 736 in
+        SW 2026): i nomi dei file sono in inglese anche con l'interfaccia italiana."""
+        import glob
+        lib = os.path.join(str(self._sw_app.GetExecutablePath), "data", "graphics", "Materials")
+        return lib, sorted(glob.glob(os.path.join(lib, "**", "*.p2m"), recursive=True))
+
+    def apply_appearance(self, appearance: str, face_points: list = None, components: list = None,
+                         unit: str = None) -> Dict:
+        """Aspetto (.p2m della libreria di SolidWorks) su tutto il documento, su facce (punti) o su componenti di un assieme.
+        IModelDocExtension.CreateRenderMaterial(file) -> IRenderMaterial.AddEntity(...) ->
+        AddDisplayStateSpecificRenderMaterial(rm, 1 = questo stato di visualizzazione, ...): con l'opzione 0 risponde False
+        e non applica nulla (misurato 2026-10-24). Esito riletto con GetRenderMaterials2."""
         try:
             doc, err = self._part_or_assembly()
             if err:
                 return err
-            return self._result(
-                True, f"Aspetto visivo '{appearance_name}' applicato al modello con successo.",
-                SwErrors.swSuccess, {"appearance": appearance_name, "color": color_rgb, "transparency": transparency}
-            )
+            q = str(appearance or "").strip()
+            if not q:
+                return self._result(False, "apply_appearance: indica appearance (nome o percorso di un file .p2m)", SwErrors.swInvalidInput)
+            if q.lower().endswith(".p2m") and os.path.isfile(q):
+                path = q
+            else:
+                lib, files = self._d2_appearance_files()
+                key = q.lower().replace("_", " ").removesuffix(".p2m")
+                exact = [f for f in files if os.path.splitext(os.path.basename(f))[0].lower() == key]
+                part = [f for f in files if key in os.path.relpath(f, lib).lower().replace("\\", "/")]
+                cands = exact or part
+                if len(cands) != 1:
+                    names = [os.path.relpath(f, lib).replace("\\", "/")[:-4] for f in cands[:15]]
+                    why = "nessun aspetto" if not cands else f"{len(cands)} aspetti"
+                    return self._result(False, f"apply_appearance: {why} per '{q}'" + (f"; per esempio: {names}" if names else
+                                        "; prova con una parola (chrome, aluminum, plastic, rubber, glass, wood...)"),
+                                        SwErrors.swInvalidInput, {"candidates": names, "library": lib})
+                path = cands[0]
+            ext = doc.Extension
+            null = null_variant()
+            before = int(ext.GetRenderMaterialsCount2(1, null))
+            rm = ext.CreateRenderMaterial(path)
+            if rm is None:
+                return self._result(False, f"apply_appearance: SolidWorks non ha caricato {path}", SwErrors.swFeatureError)
+            targets = []
+            if face_points:
+                for p in face_points:
+                    ok, info = self._select_point(doc, "face", p, unit)
+                    if not ok:
+                        doc.ClearSelection2(True)
+                        return self._result(False, f"apply_appearance: faccia nel punto {list(p)}: {info.get('error')}",
+                                            SwErrors.swSelectionError)
+                    targets.append(doc.SelectionManager.GetSelectedObject6(1, -1))
+                    doc.ClearSelection2(True)
+            if components:
+                if int(doc.GetType) != 2:
+                    return self._result(False, "apply_appearance: components vale solo negli assiemi", SwErrors.swInvalidInput)
+                for name in components:
+                    comp, _ = self._as_comp(doc, name, False)
+                    if comp is None:
+                        return self._result(False, f"apply_appearance: componente '{name}' non trovato", SwErrors.swSelectionError)
+                    targets.append(comp)
+            if not targets:
+                targets = [doc]
+            added = sum(1 for t in targets if rm.AddEntity(t))
+            if added != len(targets):
+                return self._result(False, f"apply_appearance: SolidWorks ha accettato {added} entita' su {len(targets)}",
+                                    SwErrors.swFeatureError)
+            i1 = _byref_i4()
+            i2 = _byref_i4()
+            ok = ext.AddDisplayStateSpecificRenderMaterial(rm, 1, null, i1, i2)
+            after = int(ext.GetRenderMaterialsCount2(1, null))
+            mine = [m for m in (ext.GetRenderMaterials2(1, null) or ())
+                    if os.path.normcase(str(m.FileName)) == os.path.normcase(path)]
+            n_ent = max((int(m.GetEntitiesCount) for m in mine), default=0)
+            data = {"file": path, "appearance": os.path.splitext(os.path.basename(path))[0], "targets": len(targets),
+                    "entities_read": n_ent, "appearances_before": before, "appearances_after": after,
+                    "scope": "faces" if face_points else ("components" if components else "document")}
+            if not ok or after <= before or n_ent < len(targets):
+                return self._result(False, "apply_appearance: aspetto non applicato (riletto: "
+                                           f"{after} aspetti, {n_ent} entita')", SwErrors.swFeatureError, data)
+            try:
+                doc.GraphicsRedraw2()
+            except Exception:
+                pass
+            return self._result(True, f"Aspetto '{data['appearance']}' applicato a {len(targets)} "
+                                      f"{'facce' if face_points else ('componenti' if components else 'documento')}",
+                                SwErrors.swSuccess, data)
         except Exception as e:
             return self._result(False, f"apply_appearance: {e}", SwErrors.swGenericError)

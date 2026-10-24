@@ -251,13 +251,18 @@ TOOLS = {
     ),
     "apply_appearance": (
         "apply_appearance",
-        "Apply photorealistic appearance material, color and surface texture onto faces or bodies.",
+        "Apply a SolidWorks appearance from the installed appearance library (.p2m files: chrome, aluminum, brushed steel, "
+        "plastics, rubber, glass, wood, paint...) to the whole part/assembly, to some faces (points) or to assembly "
+        "components. `appearance` is a file name or part of its library path (e.g. 'matte chrome', 'high gloss/red', "
+        "'brushed aluminum'); if several match, the tool lists them. The result is read back from the model. For a plain "
+        "colour use set_appearance.",
         {
-            "appearance_name": (S, "Appearance material style (e.g. 'polished_chrome', 'matte_plastic', 'cast_iron')"),
-            "color_rgb": (A, "Color tint RGB triplet [R, G, B] integers"),
-            "transparency": (N, "Optical transparency factor ratio between 0.0 and 1.0 (default 0.0)"),
+            "appearance": (S, "Appearance name or library path fragment (English file names), or a full path to a .p2m file"),
+            "face_points": (A, "Optional points [[x, y, z], ...] on the faces to paint, model mm (`unit`)"),
+            "components": (A, "Optional assembly component names (e.g. ['bracket-1'])"),
+            "unit": UNIT,
         },
-        [],
+        ["appearance"],
     ),
 }
 

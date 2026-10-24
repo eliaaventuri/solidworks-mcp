@@ -119,6 +119,24 @@ async def run():
                 ok_nim, text_nim, _ = await c.call("add_dimxpert_dimension", face1_point=[0, 0, 25], dimension_type="size")
                 record("add_dimxpert_dimension: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
 
+                # 8. Aspetti dalla libreria di SolidWorks (pezzo: x 0..25, y -50..50, z -30..30; faccia x=25)
+                ok_ap, text_ap, d_ap = await c.call("apply_appearance", appearance="matte chrome")
+                record("apply_appearance: cromo opaco su tutto il pezzo, riletto (1 aspetto in piu', 1 entita')",
+                       ok_ap and d_ap.get("appearances_after") == d_ap.get("appearances_before", -9) + 1 and d_ap.get("entities_read") == 1,
+                       f"{d_ap.get('appearances_before')} -> {d_ap.get('appearances_after')} aspetti" if ok_ap else text_ap[:80])
+                ok_af, text_af, d_af = await c.call("apply_appearance", appearance="red high gloss plastic", face_points=[[25, 0, 0]])
+                record("apply_appearance: plastica rossa lucida su una faccia, rilettura 1 entita'",
+                       ok_af and d_af.get("scope") == "faces" and d_af.get("entities_read") == 1,
+                       f"{d_af.get('appearance')} su {d_af.get('entities_read')} facce" if ok_af else text_af[:80])
+                ok_aa, text_aa, d_aa = await c.call("apply_appearance", appearance="chrome")
+                record("apply_appearance: nome ambiguo rifiutato con l'elenco dei candidati",
+                       not ok_aa and len((d_aa or {}).get("candidates", [])) >= 2, text_aa[:90])
+                ok_az, text_az, _ = await c.call("apply_appearance", appearance="zzz_inesistente")
+                record("apply_appearance: aspetto inesistente rifiutato", not ok_az, text_az[:80])
+                ok_ap2, text_ap2, _ = await c.call("apply_appearance", appearance="matte chrome", face_points=[[100, 100, 100]])
+                record("apply_appearance: punto fuori dal pezzo rifiutato", not ok_ap2, text_ap2[:80])
+                await c.call("export_model_image", filepath=str(OUT / "data2_aspetto.png"), overwrite=True)
+
                 # Chiudi documento
                 await c.call("close_document", discard=True)
 
