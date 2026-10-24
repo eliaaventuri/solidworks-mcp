@@ -4,6 +4,7 @@ restano nascosti da list_tools e una chiamata diretta riceve un errore esplicito
 un'implementazione vera e a un test live che rilegge il risultato da SolidWorks."""
 
 _WHY_NO_COM = "il metodo non chiama SolidWorks: rispondeva SUCCESS senza fare nulla"
+_WHY_NO_API_PLASTIC = "nessuna API nella type library di SolidWorks 2026: niente Insert*/swFm* per agganci a scatto, borchie, labbri e griglie (cercati in sldworks_methods e swconst, 2026-10-24); il comando c'e' solo come PropertyManager interattivo"
 _WHY_FIXED = "il metodo restituisce valori fissi, non misurati da SolidWorks"
 
 NOT_IMPLEMENTED = {
@@ -51,9 +52,9 @@ NOT_IMPLEMENTED = {
     "insert_shut_off_surfaces": _WHY_NO_COM,
     "insert_parting_surface": _WHY_NO_COM,
     "insert_tooling_split": _WHY_NO_COM,
-    "insert_lip_and_groove": _WHY_NO_COM,
-    "insert_snap_hook": _WHY_NO_COM,
-    "insert_mounting_boss": _WHY_NO_COM,
+    "insert_lip_and_groove": _WHY_NO_API_PLASTIC,
+    "insert_snap_hook": _WHY_NO_API_PLASTIC,
+    "insert_mounting_boss": _WHY_NO_API_PLASTIC,
     "mesh_brep_converter": _WHY_NO_COM,
     "surface_deviation_analysis": _WHY_FIXED,
     "extrude_from_surface": "doppione non provato di extrude_boss con start_from=surface (strada gia' misurata)",
@@ -63,7 +64,7 @@ NOT_IMPLEMENTED = {
     "cosmetic_weld_bead": "InsertCosmeticWeldBead non crea nessuna feature dal vivo (2 firme provate)",
     "create_reference_curve_from_equation": "le equazioni non venivano usate",
     "stud_wizard": "chiamava la creazione guidata senza passare nessun parametro (diametro, lunghezza, filetto)",
-    "vent_feature": "chiamava la feature senza passare nessun parametro (costole, longheroni)",
+    "vent_feature": _WHY_NO_API_PLASTIC,
     "setback_fillet": "faceva un raccordo semplice, senza arretramento (gia' disponibile come fillet_edges)",
     "curvature_continuous_fillet": "faceva un raccordo semplice, senza continuita' G2 (gia' disponibile come fillet_edges)",
     # feature 3
