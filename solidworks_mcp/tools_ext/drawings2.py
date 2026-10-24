@@ -25,17 +25,19 @@ TOOLS = {
     ),
     "add_relative_view": (
         "add_relative_view",
-        "Create a relative-to-model drawing view oriented by two selected planar faces on coordinates X and Y.",
+        "Create a drawing view oriented by two PLANAR faces of the model: the first face looks at the viewer (front), the "
+        "second faces right. Useful for parts whose main faces are not aligned with the standard planes. The orientation is "
+        "checked by projecting the two face normals through the new view.",
         {
-            "model_path": (S, "Path to the 3D model file (default active model)"),
-            "front_face_point": (A, "3D point [x,y,z] on model face defining front direction (`unit`)"),
-            "right_face_point": (A, "3D point [x,y,z] on model face defining right direction (`unit`)"),
-            "x": (N, "X coordinate of view center on drawing sheet in mm (`unit`, default 100.0)"),
-            "y": (N, "Y coordinate of view center on drawing sheet in mm (`unit`, default 100.0)"),
-            "scale": (S, "Optional view scale ratio (e.g. '1:2', '2:1')"),
+            "model_path": (S, "Model file (default: the model of the first view of the drawing)"),
+            "front_face_point": (A, "Point [x, y, z] on the planar face that must face the viewer, model mm (`unit`)"),
+            "right_face_point": (A, "Point [x, y, z] on the planar face that must face right (perpendicular to the first), model mm"),
+            "x": (N, "View centre X on the sheet, mm (`unit`, default 100)"),
+            "y": (N, "View centre Y on the sheet, mm (`unit`, default 100)"),
+            "scale": (S, "Optional view scale (e.g. '1:2', '2:1')"),
             "unit": UNIT,
         },
-        [],
+        ["front_face_point", "right_face_point"],
     ),
     "add_predefined_view": (
         "add_predefined_view",
@@ -51,18 +53,22 @@ TOOLS = {
     ),
     "add_aligned_section_view": (
         "add_aligned_section_view",
-        "Create an aligned section view passing through three points for revolute symmetrical parts.",
+        "Create an aligned section view (typical of flanges / revolved parts): the cutting line goes from point 1 to the "
+        "vertex (point 2, usually on the axis) and then to point 3 along an INCLINED leg, which SolidWorks rotates into the "
+        "cutting plane (the section shows the true length of both legs). Points are SHEET coordinates in mm (see "
+        "list_drawing_views for the parent view position); same as add_section_view(orientation='aligned') with points "
+        "relative to the view centre.",
         {
-            "x1": (N, "X coordinate of start cutting point on drawing sheet in mm (`unit`)"),
-            "y1": (N, "Y coordinate of start cutting point on drawing sheet in mm (`unit`)"),
-            "x2": (N, "X coordinate of vertex/pivot cutting point on sheet in mm (`unit`)"),
-            "y2": (N, "Y coordinate of vertex/pivot cutting point on sheet in mm (`unit`)"),
-            "x3": (N, "X coordinate of end cutting point on sheet in mm (`unit`)"),
-            "y3": (N, "Y coordinate of end cutting point on sheet in mm (`unit`)"),
-            "view_x": (N, "X position placement of section view in mm (`unit`, default 200.0)"),
-            "view_y": (N, "Y position placement of section view in mm (`unit`, default 150.0)"),
-            "parent_view": (S, "Optional parent drawing view name"),
-            "label": (S, "Section cut letter label (default 'A')"),
+            "x1": (N, "Start point X on the sheet, mm (`unit`), outside the part"),
+            "y1": (N, "Start point Y on the sheet, mm"),
+            "x2": (N, "Vertex X on the sheet, mm (usually the axis of the part)"),
+            "y2": (N, "Vertex Y on the sheet, mm"),
+            "x3": (N, "End point X on the sheet, mm, outside the part on the inclined leg"),
+            "y3": (N, "End point Y on the sheet, mm"),
+            "view_x": (N, "Section view position X on the sheet, mm (default: first free place aligned with the parent)"),
+            "view_y": (N, "Section view position Y on the sheet, mm"),
+            "parent_view": (S, "Parent drawing view (default: first view)"),
+            "label": (S, "Section label (default 'A')"),
             "unit": UNIT,
         },
         ["x1", "y1", "x2", "y2", "x3", "y3"],
@@ -146,33 +152,42 @@ TOOLS = {
     ),
     "add_ordinate_dimension": (
         "add_ordinate_dimension",
-        "Create ordinate dimensions running from a common 0.0 datum origin along horizontal or vertical direction.",
+        "Create a chain of ordinate dimensions in a drawing view: the first edge is the 0 datum, every other edge gets its "
+        "distance from it (read back from SolidWorks). Points pick EDGES of the view: [x, y, z] = a point on the edge in MODEL "
+        "coordinates (mm, projected through the view), or [x, y] = a point on the SHEET (mm). For 'horizontal' pick edges that "
+        "look vertical in the view, for 'vertical' edges that look horizontal.",
         {
-            "origin_point": (A, "2D origin point [x, y] on sheet in mm (`unit`) for the 0.0 datum"),
-            "dimension_points": (A, "List of 2D points [[x, y], ...] on sheet in mm (`unit`) to ordinate"),
-            "view_name": (S, "Optional drawing view name"),
-            "direction": (S, "Dimension direction: 'horizontal' (default) | 'vertical'"),
+            "origin_point": (A, "Point on the datum edge: [x, y, z] model mm or [x, y] sheet mm (`unit`)"),
+            "dimension_points": (A, "Points on the edges to dimension: [[x, y, z], ...] model mm or [[x, y], ...] sheet mm"),
+            "view_name": (S, "Drawing view (default: the first view of the sheet)"),
+            "direction": (S, "'horizontal' (default) | 'vertical'"),
+            "offset": (N, "Distance of the dimension line from the datum point on the sheet, mm (default 15)"),
             "unit": UNIT,
         },
         ["origin_point", "dimension_points"],
     ),
     "add_chamfer_dimension": (
         "add_chamfer_dimension",
-        "Add a standardized chamfer dimension note (distance x angle in degrees) on a chamfer edge.",
+        "Add a chamfer dimension (e.g. '5,00 X 45°') in a drawing view: it needs the chamfer edge and an adjacent edge as "
+        "reference. Points: [x, y, z] model mm (projected through the view) or [x, y] sheet mm. Returns the text read back.",
         {
-            "point_on_chamfer": (A, "2D point [x, y] on drawing sheet in mm (`unit`) on the chamfer line"),
-            "view_name": (S, "Optional drawing view name"),
+            "point_on_chamfer": (A, "Point on the chamfer edge: [x, y, z] model mm or [x, y] sheet mm (`unit`)"),
+            "reference_point": (A, "Point on the adjacent edge the chamfer is measured from (same formats)"),
+            "view_name": (S, "Drawing view (default: the first view of the sheet)"),
+            "x": (N, "Text position X on the sheet, mm (default: 15 mm up-right of the chamfer)"),
+            "y": (N, "Text position Y on the sheet, mm"),
             "unit": UNIT,
         },
-        ["point_on_chamfer"],
+        ["point_on_chamfer", "reference_point"],
     ),
     "hide_show_dimension": (
         "hide_show_dimension",
-        "Toggle visibility (hide or show) of a specific dimension in a drawing view without deleting it.",
+        "Hide or show a dimension of the drawing without deleting it (hidden dimensions are not listed by "
+        "list_drawing_dimensions; this tool finds them anyway). The visibility is read back.",
         {
-            "dimension_name": (S, "Name of dimension to hide or display (e.g. 'D1@Drawing View1')"),
-            "visible": (B, "True to display/show, False to hide (default true)"),
-            "view_name": (S, "Optional drawing view name"),
+            "dimension_name": (S, "Dimension name as listed by list_drawing_dimensions (e.g. 'RD1', 'D1@Sketch1' or the full name)"),
+            "visible": (B, "True to show, False to hide (default true)"),
+            "view_name": (S, "Drawing view to search (default: all views of the sheet)"),
         },
         ["dimension_name"],
     ),

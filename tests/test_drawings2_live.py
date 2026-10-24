@@ -15,6 +15,8 @@ from live_common import ROOT, OUT, PYTHON, SERVER, sw_pids, Client, cleanup, EXP
 PART = OUT / "test_drawings2_part.SLDPRT"
 SM_PART = OUT / "test_drawings2_sheetmetal.SLDPRT"
 HOLE_PART = OUT / "test_drawings2_hole.SLDPRT"
+CHAMFER_PART = OUT / "test_drawings2_smusso.SLDPRT"     # blocco 20x100x60 con smusso 5 mm (rifatto a ogni giro)
+FLANGE_PART = OUT / "test_drawings2_flangia.SLDPRT"     # disco D100 x 20, foro D30, 3 fori D10 a 120 gradi su r=35
 ASM = OUT / "test_drawings2_asm.SLDASM"
 PDF_LAYERS_OUT = OUT / "test_layers_live.pdf"
 EXPECT_BLUE = 120 * 256 + 215 * 65536  # COLORREF di RGB(0, 120, 215)
@@ -101,10 +103,6 @@ async def run():
                 ok_rf, _, _ = await c.call("reload_sheet_format")
                 record("reload_sheet_format", ok_rf)
 
-                # 2. Views: rifiuto dei tool non implementati
-                ok_nim, text_nim, _ = await c.call("add_relative_view", x=120.0, y=120.0)
-                record("add_relative_view: rifiutato perche' non implementato", (not ok_nim) and "non e' implementato" in text_nim, text_nim[:80])
-
                 # 4. View Operations: Rotate & Align (nomi letti da list_drawing_views)
                 ok_rot, _, d_rot = await c.call("rotate_drawing_view", view_name=names[0], angle_deg=90.0)
                 rot_read = d_rot.get("angle_read_deg", -1.0) if ok_rot else -1.0
@@ -158,6 +156,88 @@ async def run():
                 await c.call("create_drawing", model_path=str(HOLE_PART), paper_size="A3", add_views=True)
                 ok_cln, text_cln, _ = await c.call("add_centerlines")
                 record("add_centerlines: rifiutato perche' non implementato", (not ok_cln) and "non e' implementato" in text_cln, text_cln[:80])
+                await c.call("close_document", discard=True)
+
+                # 9. Quote ordinate, quota di smusso, quote nascoste, vista relativa (blocco con smusso).
+                # Il piano Front del modello di questo SolidWorks e' il piano YZ: il blocco va da x 0..20, y -50..50, z -30..30;
+                # nella vista frontale l'asse y del modello e' orizzontale e z verticale (punti in coordinate del modello).
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_rectangle", x1=-50, y1=-30, x2=50, y2=30, unit="mm")
+                await c.call("extrude_boss", depth=20)
+                _, _, dbb = await c.call("get_bounding_box")
+                ok_ch, text_ch, _ = await c.call("chamfer_edges", distance=5, edge_points=[[10, 50, 30]])
+                record("setup: blocco 20x100x60 con smusso 5 mm", ok_ch and dbb.get("size") == [20.0, 100.0, 60.0],
+                       f"ingombro {dbb.get('size')}; {text_ch[:50]}")
+                await c.call("save_document", filepath=str(CHAMFER_PART), overwrite=True)
+                await c.call("create_drawing", model_path=str(CHAMFER_PART), paper_size="A3", add_views=True)
+                _, _, dvc = await c.call("list_drawing_views")
+                v_front = dvc["views"][0]["name"]
+                ok_or, text_or, d_or = await c.call("add_ordinate_dimension", origin_point=[20, -50, 0], dimension_points=[[20, 50, 0]],
+                                                    view_name=v_front)
+                vals = [o["value_mm"] for o in (d_or or {}).get("ordinates", [])]
+                record("add_ordinate_dimension orizzontale: 0 e 100 mm (larghezza del blocco)", ok_or and vals == [0.0, 100.0],
+                       str(vals) if ok_or else text_or[:80])
+                ok_ov, text_ov, d_ov = await c.call("add_ordinate_dimension", origin_point=[20, 0, -30], dimension_points=[[20, 0, 30]],
+                                                    view_name=v_front, direction="vertical")
+                vals = [o["value_mm"] for o in (d_ov or {}).get("ordinates", [])]
+                record("add_ordinate_dimension verticale: 0 e 60 mm (altezza del blocco)", ok_ov and vals == [0.0, 60.0],
+                       str(vals) if ok_ov else text_ov[:80])
+                ok_op, text_op, _ = await c.call("add_ordinate_dimension", origin_point=[20, -50, 0], dimension_points=[[20, 0, 30]],
+                                                 view_name=v_front)
+                record("add_ordinate_dimension: spigolo parallelo alla direzione rifiutato", not ok_op, text_op[:80])
+                ok_cd, text_cd, d_cd = await c.call("add_chamfer_dimension", point_on_chamfer=[20, 47.5, 27.5], reference_point=[20, 0, 30],
+                                                    view_name=v_front)
+                ctext = (d_cd or {}).get("text", "")
+                record("add_chamfer_dimension: testo letto 5,00 X 45", ok_cd and ctext.replace(",", ".").startswith("5.00") and "45" in ctext,
+                       ctext if ok_cd else text_cd[:80])
+                ok_cn, text_cn, _ = await c.call("add_chamfer_dimension", point_on_chamfer=[20, 0, -30], reference_point=[20, -50, 0],
+                                                 view_name=v_front)
+                record("add_chamfer_dimension: spigolo senza smusso rifiutato", not ok_cn, text_cn[:80])
+                _, _, dl0 = await c.call("list_drawing_dimensions")
+                n0 = len(dl0.get("dimensions", []))
+                dname = dl0["dimensions"][0]["name"] if n0 else "?"
+                ok_hd, text_hd, _ = await c.call("hide_show_dimension", dimension_name=dname, visible=False)
+                _, _, dl1 = await c.call("list_drawing_dimensions")
+                ok_sh, text_sh, _ = await c.call("hide_show_dimension", dimension_name=dname, visible=True)
+                _, _, dl2 = await c.call("list_drawing_dimensions")
+                n1, n2 = len(dl1.get("dimensions", [])), len(dl2.get("dimensions", []))
+                record("hide_show_dimension: nascosta e rimostrata (quote elencate n -> n-1 -> n)",
+                       ok_hd and ok_sh and n1 == n0 - 1 and n2 == n0, f"{dname}: {n0} -> {n1} -> {n2}")
+                ok_hx, text_hx, _ = await c.call("hide_show_dimension", dimension_name="ZZ99", visible=False)
+                record("hide_show_dimension: quota inesistente rifiutata", not ok_hx, text_hx[:80])
+                ok_rv, text_rv, d_rv = await c.call("add_relative_view", front_face_point=[0, 10, 10], right_face_point=[10, 0, 30],
+                                                    x=330, y=120)
+                record("add_relative_view: faccia x=0 verso chi guarda, faccia z=30 a destra (normali proiettate)",
+                       ok_rv and (d_rv or {}).get("front_normal_in_view") == [0.0, 0.0, 1.0]
+                       and (d_rv or {}).get("right_normal_in_view") == [1.0, 0.0, 0.0],
+                       f"{(d_rv or {}).get('front_normal_in_view')} {(d_rv or {}).get('right_normal_in_view')}" if ok_rv else text_rv[:80])
+                ok_rc, text_rc, _ = await c.call("add_relative_view", front_face_point=[10, 47.5, 27.5], right_face_point=[10, 0, 30],
+                                                 x=330, y=60)
+                record("add_relative_view: facce non perpendicolari (smusso a 45 gradi) -> errore", not ok_rc, text_rc[:80])
+                await c.call("close_document", discard=True)
+
+                # 10. Sezione allineata su una flangia: il tratto inclinato (a 210 gradi) va RUOTATO nel piano di taglio, quindi
+                # la sezione e' lunga 50 + 50 = 100 mm (una sezione solo proiettata sarebbe 50 + 50 sin 30 = 75 mm).
+                await c.call("create_new_part")
+                await c.call("create_sketch", plane="Front")
+                await c.call("draw_circle", x=0, y=0, radius=50)
+                await c.call("draw_circle", x=0, y=0, radius=15)
+                for (hx, hy) in ((0, 35), (-30.311, -17.5), (30.311, -17.5)):
+                    await c.call("draw_circle", x=hx, y=hy, radius=5)
+                await c.call("extrude_boss", depth=20)
+                await c.call("save_document", filepath=str(FLANGE_PART), overwrite=True)
+                await c.call("create_drawing", model_path=str(FLANGE_PART), paper_size="A3", add_views=False)
+                _, _, dmv = await c.call("add_model_view", orientation="front", x=120, y=180)
+                ok_al, text_al, d_al = await c.call("add_aligned_section_view", x1=120, y1=240, x2=120, y2=180, x3=68, y3=150,
+                                                    parent_view=dmv.get("name"), label="A")
+                w, h = (d_al or {}).get("width_mm", 0), (d_al or {}).get("height_mm", 0)
+                length = h - (w - 20.0)       # il contorno della vista ha lo stesso margine sui due lati (spessore 20)
+                record("add_aligned_section_view: sezione lunga 100 mm (tratto inclinato ruotato)", ok_al and abs(length - 100.0) < 0.5,
+                       f"{length:.2f} mm (contorno {w} x {h})" if ok_al else text_al[:80])
+                ok_ab, text_ab, _ = await c.call("add_aligned_section_view", x1=180, y1=180, x2=120, y2=180, x3=120, y3=240,
+                                                 parent_view=dmv.get("name"), label="B")
+                record("add_aligned_section_view: tre punti senza tratto inclinato rifiutati", not ok_ab, text_ab[:80])
                 await c.call("close_document", discard=True)
 
     finally:

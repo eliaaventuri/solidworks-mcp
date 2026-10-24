@@ -838,7 +838,12 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     return self._result(False, "Impossibile tracciare la linea di sezione", SwErrors.swUnknownError)
                 doc.ClearSelection2(True)
                 seg.Select4(False, self._NULL)
-            sv = doc.CreateSectionViewAt5(vx, vy, 0, str(label), 0, self._NULL, 0)
+            # sezione allineata vera (il tratto inclinato ruotato nel piano di taglio) solo con l'opzione 2
+            # (swCreateSectionView_OffsetSection): con 0 il tratto inclinato era solo PROIETTATO (misurato 2026-10-24, flangia
+            # Ø100 con tagli a 90 e 210 gradi: vista alta 75 mm con 0, 100 mm con 2)
+            inclined = orient.startswith(("s", "a")) and any(
+                abs(poly[k + 1][0] - poly[k][0]) > 1e-9 and abs(poly[k + 1][1] - poly[k][1]) > 1e-9 for k in range(len(poly) - 1))
+            sv = doc.CreateSectionViewAt5(vx, vy, 0, str(label), 2 if inclined else 0, self._NULL, 0)
             # NB: creating the section already leaves sketch mode; toggling it again (InsertSketch)
             # re-enters edit mode and the section is drawn without hatch
             doc.ClearSelection2(True)
@@ -871,6 +876,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                                 (" - ATTENZIONE: nessuno spazio libero, la vista si sovrappone" if no_room else ""),
                                 SwErrors.swSuccess, {**self._view_info(sv), "placed_in_free_space": not no_room,
                                                      "flip_requested": bool(flip), "reversed_cut_direction": flipped,
+                                                     "aligned_rotated": bool(inclined),
                                                      "view_rotation": [round(float(t), 3) for t in sv.ModelToViewTransform.ArrayData[:9]]})
         except Exception as e:
             return self._fail("add_section_view", e)

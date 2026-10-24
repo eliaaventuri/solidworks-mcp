@@ -8,15 +8,10 @@ _WHY_FIXED = "il metodo restituisce valori fissi, non misurati da SolidWorks"
 
 NOT_IMPLEMENTED = {
     # disegni 2
-    "add_relative_view": _WHY_NO_COM,
-    "add_predefined_view": _WHY_NO_COM,
-    "add_aligned_section_view": _WHY_NO_COM,
-    "add_half_section_view": _WHY_NO_COM,
+    "add_predefined_view": "InsertModelInPredefinedView risponde True ma non crea viste: i formati di SolidWorks e del server non hanno viste predefinite (provato dal vivo 2026-10-24); usare add_model_view",
+    "add_half_section_view": "nessuna API per la semisezione delle tavole (solo l enum della freccia); un percorso a L come sezione a gradini mostra solo la meta sezionata, senza la meta in vista (provato dal vivo 2026-10-24)",
     "add_unfolded_view": _WHY_NO_COM,
     "add_alternate_position_view": _WHY_NO_COM,
-    "add_ordinate_dimension": _WHY_NO_COM,
-    "add_chamfer_dimension": _WHY_NO_COM,
-    "hide_show_dimension": _WHY_NO_COM,
     "add_weld_symbol": _WHY_NO_COM,
     "add_edge_chamfer_symbol": _WHY_NO_COM,
     "add_weldment_cut_list_table": _WHY_NO_COM,
