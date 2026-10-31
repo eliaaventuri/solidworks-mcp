@@ -476,6 +476,9 @@ class MokaOperations:
             wall = self._gp(fd, "GetWallThickness", fwd)
             if wall:
                 row["wall_thickness"] = L(wall)
+            ref = self._fd_end_reference(fd, ec, fwd, unit)
+            if ref is not None:
+                row["end_reference"] = ref
             out[key] = row
         out["both_directions"] = both
         out["reverse_direction"] = self._gp(fd, "ReverseDirection")
@@ -487,9 +490,61 @@ class MokaOperations:
         out["merge"] = self._gp(fd, "Merge")
         out["thin_wall_type"] = self._gp(fd, "ThinWallType")
         out["flip_side_to_cut"] = self._gp(fd, "FlipSideToCut")
-        out["feature_scope"] = self._gp(fd, "FeatureScope")
-        out["auto_select_bodies"] = self._gp(fd, "AutoSelect")
+        # ambito: corpi su cui agisce la feature (FeatureScopeBodies, leggibile con la definizione aperta da AccessSelections)
+        out.update(self._extrude_options(fd))
         out["unit"] = self._unit_name(unit)
+        return out
+
+    def _fd_end_reference(self, fd, ec, fwd: bool, unit):
+        """Entita' di riferimento della condizione di fine (fino alla superficie / al vertice / offset dalla superficie /
+        fino al corpo): tipo, corpo di appartenenza e punto o area. IExtrudeFeatureData2.GetFace(fwd) / GetVertex(fwd) /
+        GetEndConditionReference(fwd, out tipo) (la definizione deve essere aperta con AccessSelections). Se SolidWorks non
+        restituisce l'oggetto lo dichiara ("readable": false)."""
+        if ec not in (3, 4, 5, 7, 10):
+            return None
+        L = lambda v: round(self._from_m(float(v), unit), 4)
+        obj, how = None, None
+        if ec in (4, 5, 10):
+            obj, how = self._gp(fd, "GetFace", fwd), "face"
+        elif ec == 3:
+            obj, how = self._gp(fd, "GetVertex", fwd), "vertex"
+        if obj is None:
+            try:
+                obj = self._gp(fd, "GetEndConditionReference", fwd, win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                if isinstance(obj, (tuple, list)):
+                    obj = obj[0] if obj else None
+                how = how or ("vertex" if ec == 3 else ("body" if ec == 7 else "face"))
+            except Exception:
+                obj = None
+        if obj is None:
+            return {"readable": False, "note": "SolidWorks non restituisce l'entita' di riferimento di questa condizione di fine"}
+        out = {"readable": True, "kind": how}
+        try:
+            if how == "face":
+                surf = self._com(obj, "GetSurface")
+                stype = self._SURFACE_TYPES.get(int(self._com(surf, "Identity")), "other")
+                out["surface"] = stype
+                out["area"] = round(self._from_m(float(self._com(obj, "GetArea")) ** 0.5, unit) ** 2, 4)
+                out["params"] = self._surface_params(surf, stype, unit, obj)
+                box = self._com(obj, "GetBox")
+                c = [(box[k] + box[k + 3]) / 2.0 for k in range(3)]
+                q = obj.GetClosestPointOn(c[0], c[1], c[2])
+                out["point"] = [L(v) for v in list(q)[:3]]
+                try:
+                    out["body"] = str(self._com(self._com(obj, "GetBody"), "Name"))
+                except Exception:
+                    pass
+            elif how == "vertex":
+                pt = [float(v) for v in self._com(obj, "GetPoint")]
+                out["point"] = [L(v) for v in pt]
+                doc, _ = self.get_active_doc()
+                body = self._body_of_point(doc, pt, "m") if doc is not None else None
+                if body is not None:
+                    out["body"] = str(self._com(body, "Name"))
+            else:
+                out["body"] = str(self._com(obj, "Name"))
+        except Exception as ex:
+            out["note"] = f"riferimento letto solo in parte: {ex}"
         return out
 
     def _fd_revolve(self, fd, unit):

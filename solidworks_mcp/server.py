@@ -101,6 +101,30 @@ def _raw_all_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
+            name="try_on_copy",
+            description="Try a sequence of tools (same format as execute_tool_sequence) on a TEMPORARY COPY of the active part, "
+                        "leaving the original untouched: saves a copy to a temp folder, opens and activates it, runs the steps, "
+                        "optionally summarizes the result (bodies with volumes, rebuild errors, features), closes the copy WITHOUT "
+                        "saving, deletes the temp file and reactivates the original. data.original.unchanged confirms the original "
+                        "(volume, feature and body count) is identical. Parts only. Not allowed in steps: tools that save, close, open "
+                        "or switch documents, and the `document` argument.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "Ordered list of tool objects ({tool, arguments}) run on the copy",
+                        "items": {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}},
+                                  "required": ["tool"]}
+                    },
+                    "stop_on_error": {"type": "boolean", "default": True, "description": "Stop at the first failing step (default true)"},
+                    "summary": {"type": "boolean", "default": True,
+                                "description": "Add a final summary of the copy: bodies with volumes, rebuild errors (default true)"}
+                },
+                "required": ["steps"]
+            }
+        ),
+        Tool(
             name="execute_tool_sequence",
             description="Execute an ordered sequence of MCP tools in a single batch on the SolidWorks COM thread. Reduces IPC latency for multi-step workflows. Stops on the first error by default.",
             inputSchema={
@@ -386,8 +410,14 @@ def _raw_all_tools() -> list[Tool]:
         ),
         Tool(
             name="list_features",
-            description="List all features in the model.",
-            inputSchema={"type": "object", "properties": {}, "required": []}
+            description="List the features of the active document, one compact line each: \"name (type)\" plus \" [soppressa]\" when "
+                        "suppressed. System tree folders (Favorites, History, Selection Sets, Sensors, Design Binder, Annotations, "
+                        "Markups, Lights and Cameras, Solid/Surface Bodies, Comments, Equations, Material) are hidden by default "
+                        "(recognized by type, so it works in any UI language).",
+            inputSchema={"type": "object", "properties": {
+                "include_system": {"type": "boolean", "description": "true = also list the system folders (default false)"},
+                "detail": {"type": "boolean", "description": "true = list of {name, type, suppressed} objects instead of text lines"}
+            }, "required": []}
         ),
         
         # Sketch Management Tools
@@ -843,90 +873,6 @@ def _execute_python_fixed(code: str) -> Dict:
 
 
 # ============================================================================
-# FIXED: list_features
-# ============================================================================
-
-def _list_features_fixed() -> Dict:
-    """
-    List all features in the active document.
-    FIXED v4.1: Property access for SW 2025 (FirstFeature, GetNextFeature, GetTypeName2).
-    """
-    try:
-        doc, err = sw_automation.get_active_doc()
-        if err:
-            return err
-        
-        features = []
-        
-        # FIXED: FirstFeature is a property in SW 2025 COM, not a method
-        try:
-            feat = doc.FirstFeature
-        except AttributeError:
-            feat = doc.FirstFeature()
-        
-        while feat is not None:
-            try:
-                name = ""
-                feat_type = ""
-                suppressed = False
-                
-                try:
-                    name = feat.Name
-                except:
-                    name = "<unknown>"
-                
-                # FIXED: GetTypeName2 is a property in SW 2025 COM
-                try:
-                    feat_type = sw_automation._com(feat, "GetTypeName2")
-                except:
-                    try:
-                        feat_type = feat.GetTypeName()
-                    except:
-                        feat_type = "<unknown>"
-                
-                try:
-                    suppressed = feat.IsSuppressed()
-                except:
-                    suppressed = False
-                
-                features.append({
-                    "name": name,
-                    "type": feat_type,
-                    "suppressed": bool(suppressed)
-                })
-                
-            except Exception as e:
-                features.append({
-                    "name": "<error>",
-                    "type": str(e),
-                    "suppressed": False
-                })
-            
-            # FIXED: GetNextFeature is a property in SW 2025 COM
-            try:
-                feat = sw_automation._com(feat, "GetNextFeature")
-            except:
-                break
-        
-        return {
-            "success": True,
-            "message": f"{len(features)} features found",
-            "error_code": 0,
-            "error_name": "swSuccess",
-            "data": {"features": features, "count": len(features)}
-        }
-        
-    except Exception as e:
-        logger.error(f"List features error: {e}\n{traceback.format_exc()}")
-        return {
-            "success": False,
-            "message": f"Error: {e}",
-            "error_code": 999,
-            "error_name": "swUnknownError",
-            "data": {}
-        }
-
-# ============================================================================
 # NEW: close_sketch handler
 # ============================================================================
 
@@ -1131,8 +1077,8 @@ def _execute_tool_sequence_handler(arguments: dict) -> Dict:
                 break
             continue
 
-        if tool_name == "execute_tool_sequence":
-            err_msg = f"Step {i + 1}: nested 'execute_tool_sequence' is not allowed"
+        if tool_name in ("execute_tool_sequence", "try_on_copy"):
+            err_msg = f"Step {i + 1}: nested '{tool_name}' is not allowed"
             results.append({"step": i + 1, "tool": tool_name, "success": False, "message": err_msg})
             if stop_on_error:
                 stopped_on_error = True
@@ -1197,6 +1143,14 @@ def _execute_tool_sequence_handler(arguments: dict) -> Dict:
     )
 
 
+def _try_on_copy_handler(arguments: dict) -> Dict:
+    """try_on_copy: i passi girano con lo stesso esecutore di execute_tool_sequence, ma su una copia temporanea del pezzo."""
+    def runner(steps, stop_on_error):
+        return _execute_tool_sequence_handler({"steps": steps, "stop_on_error": stop_on_error})
+    return sw_automation.try_on_copy(steps=arguments.get("steps"), stop_on_error=arguments.get("stop_on_error", True),
+                                     summary=arguments.get("summary", True), runner=runner)
+
+
 # tool base che chiamano un metodo di SolidWorksAutomation: nome -> (metodo, parametri ammessi); i default sono quelli del metodo
 BASE_DISPATCH = {
     "connect_solidworks": ("connect", set()),
@@ -1206,6 +1160,7 @@ BASE_DISPATCH = {
     "save_document": ("save_document", {"filepath", "overwrite"}),
     "close_document": ("close_document", {"save", "discard", "document"}),
     "get_document_info": ("get_document_info", set()),
+    "list_features": ("list_features", {"include_system", "detail"}),
     "list_open_documents": ("list_open_documents", set()),
     "create_sketch": ("create_sketch", {"plane"}),
     "create_sketch_on_face": ("create_sketch_on_face", {"x", "y", "z", "unit"}),
@@ -1298,8 +1253,8 @@ def _search_tools_handler(arguments: dict) -> Dict:
 SPECIAL_HANDLERS = {
     "get_solidworks_info": _solidworks_info_handler,
     "execute_tool_sequence": _execute_tool_sequence_handler,
+    "try_on_copy": _try_on_copy_handler,
     "search_tools": _search_tools_handler,
-    "list_features": lambda arguments: _list_features_fixed(),
     "close_sketch": lambda arguments: _close_sketch_handler(),
     "get_sketch_status": lambda arguments: _get_sketch_status_handler(),
     "set_units": _set_units_handler,

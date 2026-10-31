@@ -218,7 +218,7 @@ class Assembly2Operations:
             doc, err = self._asm()
             if err:
                 return err
-            asm_path = doc.GetPathName() or ""
+            asm_path = self._com(doc, "GetPathName") or ""
             target = zip_filepath or output_folder or os.path.dirname(asm_path) or "."
             out_file = None
             if zip_filepath:
@@ -230,7 +230,7 @@ class Assembly2Operations:
                     False, f"pack_and_go: '{out_file}' esiste gia' (overwrite=false); nulla e' stato scritto.",
                     SwErrors.swFileAlreadyExists, {"target": target}
                 )
-            pg = doc.Extension.GetPackAndGo()
+            pg = self._com(doc.Extension, "GetPackAndGo")
             if not pg:
                 return self._result(False, "Impossibile ottenere l'interfaccia Pack and Go.", SwErrors.swGenericError)
             pg.IncludeDrawings = bool(include_drawings)

@@ -8,7 +8,7 @@ import logging
 import traceback
 from typing import Dict
 
-from ..constants import SwErrors
+from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 from .modeling_base import null_variant
 
 logger = logging.getLogger(__name__)
@@ -241,7 +241,7 @@ class Features3Operations:
             if err:
                 return err
             bodies = doc.GetBodies2(0, True) or []
-            folder = output_folder or os.path.dirname(doc.GetPathName() or "") or "."
+            folder = output_folder or os.path.dirname(self._com(doc, "GetPathName") or "") or "."
             os.makedirs(folder, exist_ok=True)
             saved = []
             for i, b in enumerate(bodies):
@@ -324,35 +324,44 @@ class Features3Operations:
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
 
     def set_rollback_bar(self, target_feature: str = None, position: str = "before") -> Dict:
-        """Muove la barra di rollback prima o dopo una determinata feature."""
+        """Muove la barra di rollback: before|after la feature `target_feature`, start (prima della prima feature di
+        modellazione) o end. Rilegge la posizione (IFeature.IsRolledBack). Codici di IFeatureManager.EditRollback misurati:
+        1 = fine, 3 = prima della feature, 4 = dopo la feature (0 e 2 non servono)."""
         try:
             doc, err = self._part()
             if err:
                 return err
+            self._exit_sketch(doc)
             fm = doc.FeatureManager
             pos = str(position).lower().strip()
             name = str(target_feature or "").strip()
             if pos == "start":
-                ok = fm.EditRollback(1, "")
+                first = next((n for n, t, f in self._features(doc)
+                              if t not in SYSTEM_FOLDER_TYPES and t not in ("RefPlane", "OriginProfileFeature")), None)
+                if first is None:
+                    return self._result(False, "set_rollback_bar: il modello non ha feature di modellazione", SwErrors.swFeatureError)
+                ok = fm.EditRollback(3, first)
             elif pos == "end":
-                ok = fm.EditRollback(2, "")
-            elif pos == "before":
+                ok = fm.EditRollback(1, "")
+            elif pos in ("before", "after"):
                 if not name:
-                    return self._result(False, "set_rollback_bar: serve target_feature per position 'before'",
+                    return self._result(False, f"set_rollback_bar: serve target_feature per position '{pos}'",
                                         SwErrors.swInvalidInput)
-                if not doc.Extension.SelectByID2(name, "BODYFEATURE", 0, 0, 0, False, 0, null_variant(), 0):
+                if self._find_feature(doc, name) is None:
                     return self._result(False, f"set_rollback_bar: feature '{name}' non trovata", SwErrors.swSelectionError)
-                ok = fm.EditRollback(0, name)
+                ok = fm.EditRollback(3 if pos == "before" else 4, name)
             else:
                 return self._result(False, f"set_rollback_bar: position '{position}' non gestito "
-                                           f"(start|end|before)", SwErrors.swInvalidInput)
+                                           f"(start|end|before|after)", SwErrors.swInvalidInput)
             if not ok:
                 return self._result(False, f"set_rollback_bar: SolidWorks non ha spostato la barra ({position})",
                                     SwErrors.swFeatureError)
-            return self._result(
-                True, f"Barra di rollback posizionata ({position} {target_feature or ''}).",
-                SwErrors.swSuccess, {"target_feature": target_feature, "position": position}
-            )
+            rb = self._rollback_state(doc)
+            msg = f"Barra di rollback posizionata ({pos} {target_feature or ''})."
+            if rb["in_rollback"]:
+                msg += f" Modello in rollback dopo '{rb['rollback_after']}'."
+            return self._result(True, msg, SwErrors.swSuccess,
+                                {"target_feature": target_feature, "position": position, "rollback": rb})
         except Exception as e:
             logger.error(f"set_rollback_bar: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
@@ -366,14 +375,14 @@ class Features3Operations:
             doc, err = self.get_active_doc()
             if err:
                 return err
-            feat = doc.FirstFeature
+            feat = self._com(doc, "FirstFeature")
             tree = []
             error_count = 0
             warning_count = 0
 
             while feat:
                 fname = str(self._com(feat, "Name") or "")
-                ftype = str(feat.GetTypeName2() if hasattr(feat, "GetTypeName2") else "")
+                ftype = str(self._com(feat, "GetTypeName2") or "")
                 suppressed = bool(feat.IsSuppressed2(1, None)[0]) if hasattr(feat, "IsSuppressed2") else False
 
                 err_code = 0
@@ -393,11 +402,11 @@ class Features3Operations:
 
                 if include_suppressed or not suppressed:
                     sub_sketches = []
-                    sub_f = feat.GetFirstSubFeature() if hasattr(feat, "GetFirstSubFeature") else None
+                    sub_f = self._com(feat, "GetFirstSubFeature")
                     while sub_f:
                         if include_sketches:
                             sname = str(self._com(sub_f, "Name") or "")
-                            stype = str(sub_f.GetTypeName2() if hasattr(sub_f, "GetTypeName2") else "")
+                            stype = str(self._com(sub_f, "GetTypeName2") or "")
                             scode = 0
                             swarn = False
                             if hasattr(sub_f, "GetErrorCode2"):
@@ -418,7 +427,7 @@ class Features3Operations:
                                 "error_code": scode,
                                 "warning": swarn
                             })
-                        sub_f = sub_f.GetNextSubFeature() if hasattr(sub_f, "GetNextSubFeature") else None
+                        sub_f = self._com(sub_f, "GetNextSubFeature")
 
                     tree.append({
                         "name": fname,
@@ -428,7 +437,7 @@ class Features3Operations:
                         "warning": warn,
                         "sub_features": sub_sketches
                     })
-                feat = feat.GetNextFeature() if hasattr(feat, "GetNextFeature") else None
+                feat = self._com(feat, "GetNextFeature")
 
             msg = f"Feature tree extracted: {len(tree)} features ({error_count} errors, {warning_count} warnings)."
             return self._result(

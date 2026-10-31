@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from solidworks_mcp.not_implemented import NOT_IMPLEMENTED  # noqa: E402
 
-# tool esposti con execute_python attivo: 556 registrati meno quelli nascosti perche' non implementati (revisione 2026-10-23)
-EXPECTED_TOOLS = 556 - len(NOT_IMPLEMENTED)
+# tool esposti con execute_python attivo: 558 registrati meno quelli nascosti perche' non implementati (revisione 2026-10-23)
+EXPECTED_TOOLS = 558 - len(NOT_IMPLEMENTED)
 OUT = ROOT / "test_output"
 OUT.mkdir(exist_ok=True)
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"

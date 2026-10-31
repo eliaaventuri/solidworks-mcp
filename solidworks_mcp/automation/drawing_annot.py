@@ -29,7 +29,7 @@ class DrawingAnnotMixin:
         proj, dirp, s = self._dm_proj(v)
         out: Dict[Tuple, Dict] = {}
         for b in (m.GetBodies2(0, True) or ()):
-            for f in (b.GetFaces() or ()):
+            for f in (self._com(b, "GetFaces") or ()):
                 try:
                     sf = f.GetSurface
                     if not sf.IsCylinder:
@@ -159,7 +159,7 @@ class DrawingAnnotMixin:
             return segs, circs
         proj, dirp, sc = self._dm_proj(v)
         for b in (m.GetBodies2(0, True) or ()):
-            for e in (b.GetEdges() or ()):
+            for e in (self._com(b, "GetEdges") or ()):
                 try:
                     cv = e.GetCurve
                     if cv is None:

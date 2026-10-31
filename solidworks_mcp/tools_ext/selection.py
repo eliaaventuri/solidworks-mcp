@@ -34,7 +34,7 @@ TOOLS = {
     ),
     "query_topology_by_criteria": (
         "query_topology_by_criteria",
-        "Filter and query B-Rep topology (faces, edges, vertices) by geometric properties with centroid coordinates.",
+        "Filter and query B-Rep topology (faces, edges, vertices) by geometric properties with centroid coordinates. Every entity reports the name of the body it belongs to (`body`).",
         {
             "entity_type": (S, "Entity type: 'face' (default) | 'edge' | 'vertex'"),
             "surface_type": (S, "Filter by surface type: 'plane' | 'cylinder' | 'cone' | 'sphere' | 'torus' | 'bspline'"),

@@ -513,7 +513,7 @@ class Features2Operations:
             if abs(sum(a * b for a, b in zip(tan, rot))) > 1e-6:
                 return self._result(False, "axis e bend_axis devono essere perpendicolari.", SwErrors.swInvalidInput)
             rad = _cross(tan, rot)
-            box0 = [float(x) for x in bd.GetBodyBox()]
+            box0 = [float(x) for x in self._com(bd, "GetBodyBox")]
             xs = [(box0[0], box0[3]), (box0[1], box0[4]), (box0[2], box0[5])]
             allpts = [[a, b, c] for a in xs[0] for b in xs[1] for c in xs[2]]
             if pivot is None:
@@ -551,7 +551,7 @@ class Features2Operations:
             box1 = None
             try:
                 if bd2:
-                    box1 = [float(x) for x in bd2[0].GetBodyBox()]
+                    box1 = [float(x) for x in self._com(bd2[0], "GetBodyBox")]
             except Exception:
                 box1 = None
             extra = {"mode": mode, "amount": amount, "pivot": [round(self._from_m(c, unit), 5) for c in piv],

@@ -135,7 +135,17 @@ class SelectionOperations:
             kind = {"faces": "face", "edges": "edge", "vertices": "vertex"}.get(
                 str(entity_type or "face").lower().strip(), str(entity_type or "face").lower().strip()
             )
-            entities = self._body_entities(doc, kind)
+            entities, owners = [], []                   # entita' e nome del corpo a cui appartiene (stesso ordine)
+            getter = {"face": "GetFaces", "edge": "GetEdges"}.get(kind, "GetVertices")
+            for body in self._bodies(doc):
+                try:
+                    items = self._com(body, getter)
+                    bname = str(self._com(body, "Name"))
+                except Exception:
+                    continue
+                for it in (items or []):
+                    entities.append(it)
+                    owners.append(bname)
             matches = []
             errors = 0
 
@@ -172,6 +182,7 @@ class SelectionOperations:
                         pt = [round(self._from_m(v, unit), 4) for v in list(q)[:3]]
                         matches.append({
                             "index": idx,
+                            "body": owners[idx],
                             "type": stype,
                             "point": pt,
                             "area": round(area_u2, 4),
@@ -199,6 +210,7 @@ class SelectionOperations:
                                 pt = [round(self._from_m(v, unit), 4) for v in list(mid)[:3]]
                         matches.append({
                             "index": idx,
+                            "body": owners[idx],
                             "type": ctype,
                             "point": pt,
                             "params": cparams,
@@ -208,6 +220,7 @@ class SelectionOperations:
                         pt = [round(self._from_m(v, unit), 4) for v in p] if p is not None else None
                         matches.append({
                             "index": idx,
+                            "body": owners[idx],
                             "point": pt,
                         })
                 except Exception:
@@ -272,7 +285,7 @@ class SelectionOperations:
                 try:
                     obj = sm.GetSelectedObject6(i, -1)
                     if obj is not None and hasattr(obj, "GetName2"):
-                        name = str(obj.GetName2() or "")
+                        name = str(self._com(obj, "GetName2") or "")
                 except Exception:
                     pass
                 items.append({

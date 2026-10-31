@@ -24,7 +24,7 @@ def record(name, ok, note=""):
 
 
 async def feats(c):
-    ok, _, d = await c.call("list_features")
+    ok, _, d = await c.call("list_features", detail=True)
     return d.get("features", []) if ok else []
 
 

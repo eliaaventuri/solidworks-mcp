@@ -436,6 +436,165 @@ class DocumentOperations:
             logger.error(f"Close error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
 
+    # ------------------------------------------------------------------ prove su una copia
+    # strumenti che non hanno senso (o sono pericolosi) dentro una prova su copia: cambiano/salvano/chiudono documenti
+    TRIAL_BLOCKED_TOOLS = frozenset({
+        "save_document", "save_drawing", "close_document", "open_document", "create_new_part", "create_new_assembly",
+        "activate_document", "execute_python", "execute_tool_sequence", "try_on_copy", "connect_solidworks",
+        "open_component", "edit_part_in_context", "mirror_components", "pack_and_go", "insert_part",
+    })
+
+    def _trial_snapshot(self, doc) -> Dict:
+        """Stato di un documento per confrontare prima/dopo: volume (mm3), numero di feature e di corpi, flag di modifica."""
+        snap = {}
+        try:
+            snap["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 6)
+        except Exception:
+            snap["volume_mm3"] = None
+        try:
+            snap["features"] = len(self._names(doc))
+            snap["bodies"] = len(self._bodies(doc))
+        except Exception:
+            pass
+        try:
+            snap["modified_flag"] = bool(self._com(doc, "GetSaveFlag"))
+        except Exception:
+            pass
+        return snap
+
+    def try_on_copy(self, steps: list = None, stop_on_error: bool = True, summary: bool = True, runner=None) -> Dict:
+        """Prova una sequenza di passi (stesso formato di execute_tool_sequence) su una COPIA del PEZZO attivo, senza toccarlo.
+        Salva una copia in una cartella temporanea (Extension.SaveAs con Silent|Copy = 3: l'originale resta attivo e
+        invariato), la apre, esegue i passi (`runner(steps, stop_on_error)` -> risultato di execute_tool_sequence), raccoglie
+        un riepilogo (corpi con volumi, errori di ricostruzione, feature), chiude la copia SENZA salvare, cancella il file
+        temporaneo e riattiva l'originale. Verifica che l'originale sia identico (volume, numero di feature e di corpi,
+        flag di modifica) e lo dichiara in data.original. Solo pezzi: un assieme rimanderebbe ai file dei componenti."""
+        import shutil
+        import tempfile
+        try:
+            if not isinstance(steps, list) or not steps:
+                return self._result(False, "steps: lista non vuota di {tool, arguments}.", SwErrors.swInvalidInput)
+            if runner is None:
+                return self._result(False, "try_on_copy: nessun esecutore di passi.", SwErrors.swInvalidInput)
+            for i, st in enumerate(steps):
+                tool = (st or {}).get("tool") or (st or {}).get("name") if isinstance(st, dict) else None
+                args = (st or {}).get("arguments") or {} if isinstance(st, dict) else {}
+                if not tool:
+                    return self._result(False, f"Passo {i + 1}: manca 'tool'.", SwErrors.swInvalidInput)
+                if tool in self.TRIAL_BLOCKED_TOOLS:
+                    return self._result(False, f"Passo {i + 1} ({tool}): non ammesso in una prova su copia (salva, chiude, "
+                                        "apre o cambia documento).", SwErrors.swInvalidInput)
+                if isinstance(args, dict) and args.get("document"):
+                    return self._result(False, f"Passo {i + 1} ({tool}): l'argomento 'document' non e' ammesso (agirebbe "
+                                        "su un altro documento).", SwErrors.swInvalidInput)
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            if int(self._com(doc, "GetType")) != 1:
+                return self._result(False, "try_on_copy lavora solo su un PEZZO attivo (un assieme punterebbe ai file "
+                                    "originali dei componenti).", SwErrors.swInvalidInput)
+            self._exit_sketch(doc)
+            orig_title = str(self._get_doc_title(doc))
+            orig_path = str(self._get_doc_path(doc) or "")
+            before = self._trial_snapshot(doc)
+            tmp = tempfile.mkdtemp(prefix="swmcp_prova_")
+            copy_path = os.path.join(tmp, "copia_prova.SLDPRT")
+            data = {"original": {"title": orig_title, "path": orig_path or None, "before": before}}
+            copy_title = None
+            steps_res = None
+            summ = None
+            notes = []
+            try:
+                e = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+                w = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+                ok = doc.Extension.SaveAs(copy_path, 0, 1 | 2, win32com.client.VARIANT(pythoncom.VT_DISPATCH, None), e, w)
+                if not os.path.exists(copy_path):
+                    return self._result(False, f"Copia non creata (SaveAs ok={ok}, errori {e.value}).", SwErrors.swFileSaveError, data)
+                e2 = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+                w2 = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+                cdoc = self._sw_app.OpenDoc6(copy_path, 1, 1, "", e2, w2)
+                if cdoc is None:
+                    return self._result(False, f"Copia non aperta (errore {e2.value}).", SwErrors.swFileLoadError, data)
+                copy_title = str(self._get_doc_title(cdoc))
+                act = self._sw_app.ActivateDoc3(copy_title, False, 0, win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                if act is None:
+                    return self._result(False, f"Copia '{copy_title}' non attivabile.", SwErrors.swNoActiveDocument, data)
+                data["copy"] = {"title": copy_title, "snapshot_before": self._trial_snapshot(cdoc)}
+                steps_res = runner(steps, bool(stop_on_error))
+                cur = self.get_active_doc()[0]
+                if cur is not None and str(self._get_doc_title(cur)) != copy_title:
+                    notes.append(f"un passo ha cambiato il documento attivo ('{self._get_doc_title(cur)}'): il riepilogo e' della copia")
+                if summary:
+                    summ = {}
+                    try:
+                        cdoc = self._find_open_doc(copy_path)[0] or cdoc
+                        self._sw_app.ActivateDoc3(copy_title, False, 0, win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                        summ["snapshot_after"] = self._trial_snapshot(cdoc)
+                        lb = self.list_bodies()
+                        if lb.get("success"):
+                            summ["bodies"] = [{"name": b.get("name"), "volume_mm3": b.get("volume_mm3")}
+                                              for b in (lb.get("data") or {}).get("bodies", [])]
+                        rb = self.get_rebuild_errors()
+                        rd = rb.get("data") or {}
+                        summ["rebuild"] = {"ok": bool(rd.get("rebuild_ok")), "errors": rd.get("error_count"),
+                                           "warnings": rd.get("warning_count"),
+                                           "features_with_errors": [x.get("name") for x in (rd.get("errors") or [])]}
+                        summ["rollback"] = self._rollback_state(cdoc)
+                    except Exception as ex:
+                        summ["error"] = str(ex)
+            finally:
+                closed = deleted = False
+                if copy_title:
+                    try:
+                        self._sw_app.CloseDoc(copy_path)                 # senza salvare
+                    except Exception as ex:
+                        notes.append(f"chiusura copia: {ex}")
+                    closed = not any(os.path.normcase(pp) == os.path.normcase(copy_path) for t, pp, d in self._open_docs())
+                try:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    deleted = not os.path.exists(tmp)
+                except Exception as ex:
+                    notes.append(f"cancellazione temporanei: {ex}")
+                data["copy_closed"] = closed if copy_title else None
+                data["temp_deleted"] = deleted
+                reactivated = None
+                try:
+                    r_doc = self._sw_app.ActivateDoc3(orig_path or orig_title, False, 0,
+                                                      win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                    if r_doc is None:
+                        r_doc = self._sw_app.ActivateDoc3(orig_title, False, 0,
+                                                          win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0))
+                    reactivated = r_doc is not None
+                    orig_doc = r_doc
+                except Exception as ex:
+                    notes.append(f"riattivazione originale: {ex}")
+                    orig_doc = None
+                data["original"]["reactivated"] = reactivated
+                if orig_doc is None:
+                    orig_doc = self.get_active_doc()[0]
+            after = self._trial_snapshot(orig_doc) if orig_doc is not None else {}
+            same = bool(after) and all(after.get(k) == before.get(k) for k in ("features", "bodies", "modified_flag")) and (
+                before.get("volume_mm3") is None or after.get("volume_mm3") is None
+                or abs(after["volume_mm3"] - before["volume_mm3"]) <= 1e-6 * max(1.0, abs(before["volume_mm3"])))
+            data["original"]["after"] = after
+            data["original"]["unchanged"] = same
+            if steps_res is not None:
+                data["steps"] = (steps_res.get("data") or {})
+                data["steps_success"] = bool(steps_res.get("success"))
+            if summ is not None:
+                data["summary"] = summ
+            if notes:
+                data["notes"] = notes
+            steps_ok = bool(steps_res and steps_res.get("success"))
+            clean = same and data.get("copy_closed") is not False and data.get("temp_deleted") and data["original"].get("reactivated")
+            ok_all = steps_ok and bool(clean)
+            msg = (steps_res or {}).get("message", "") if steps_res else "passi non eseguiti"
+            msg += f" [prova su copia: originale '{orig_title}' {'IDENTICO' if same else 'CAMBIATO (!)'}, copia chiusa senza salvare e cancellata]"
+            return self._result(ok_all, msg, SwErrors.swSuccess if ok_all else SwErrors.swFeatureError, data)
+        except Exception as ex:
+            logger.error(f"try_on_copy: {ex}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {ex}", SwErrors.swFileSaveError)
+
     def get_document_info(self) -> Dict:
         """
         Get information about the active document
@@ -466,8 +625,16 @@ class DocumentOperations:
                 "type_code": doc_type,
             }
             
-            return self._result(True, f"{title} ({info['type']})",
-                              SwErrors.swSuccess, info)
+            msg = f"{title} ({info['type']})"
+            if doc_type in (1, 2):
+                try:
+                    rb = self._rollback_state(doc)
+                    info["rollback"] = rb
+                    if rb["in_rollback"]:
+                        msg += f" - IN ROLLBACK dopo '{rb['rollback_after']}' ({len(rb['rolled_back_features'])} feature non calcolate)"
+                except Exception as ex:
+                    logger.debug(f"rollback non letto: {ex}")
+            return self._result(True, msg, SwErrors.swSuccess, info)
             
         except Exception as e:
             logger.error(f"Get info error: {e}\n{traceback.format_exc()}")

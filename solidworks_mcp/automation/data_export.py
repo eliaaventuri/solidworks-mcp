@@ -452,7 +452,7 @@ class DataExportOperations:
         hi = [-1e9, -1e9, -1e9]
         for c in (comps or ()):
             try:
-                if c.IsSuppressed():
+                if self._com(c, "IsSuppressed"):
                     continue
             except Exception:
                 pass
@@ -1725,7 +1725,11 @@ class DataExportOperations:
             if ext not in (".png", ".jpg", ".jpeg", ".bmp"):
                 return self._result(False, "Estensione: .png | .jpg | .bmp", SwErrors.swInvalidInput)
             filepath = os.path.abspath(filepath)
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            try:
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)       # la cartella di destinazione viene creata se manca
+            except OSError as ex:
+                return self._result(False, f"Cartella di destinazione non creabile ({os.path.dirname(filepath)}): {ex}",
+                                    SwErrors.swInvalidInput)
             if os.path.exists(filepath):
                 os.remove(filepath)
             app = self._sw_app

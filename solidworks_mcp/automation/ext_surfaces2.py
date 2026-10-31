@@ -86,9 +86,9 @@ class Surfaces2Operations:
             bodies = doc.GetBodies2(1, True) or []  # 1 = surface bodies
             open_edges_count = 0
             for b in bodies:
-                edges = b.GetEdges() or []
+                edges = self._com(b, "GetEdges") or []
                 for e in edges:
-                    faces = e.GetTwoAdjacentFaces2()
+                    faces = self._com(e, "GetTwoAdjacentFaces2")
                     if not faces or len(faces) < 2 or any(f is None for f in faces):
                         open_edges_count += 1
             return self._result(
@@ -109,8 +109,8 @@ class Surfaces2Operations:
             bodies = doc.GetBodies2(1, True) or []
             open_edges = 0
             for b in bodies:
-                for e in (b.GetEdges() or []):
-                    faces = e.GetTwoAdjacentFaces2()
+                for e in (self._com(b, "GetEdges") or []):
+                    faces = self._com(e, "GetTwoAdjacentFaces2")
                     if not faces or len(faces) < 2 or any(f is None for f in faces):
                         open_edges += 1
             is_watertight = (open_edges == 0 and len(bodies) > 0)

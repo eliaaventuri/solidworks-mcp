@@ -611,7 +611,7 @@ class Sketch5Operations:
             sm = doc.SketchManager
             bdefs = ()
             try:
-                bdefs = sm.GetSketchBlockDefinitions() or ()
+                bdefs = self._com(sm, "GetSketchBlockDefinitions") or ()
             except Exception:
                 pass
 
@@ -619,7 +619,7 @@ class Sketch5Operations:
             if bdefs:
                 for b in bdefs:
                     try:
-                        feat = b.GetFeature()
+                        feat = self._com(b, "GetFeature")
                         if feat and feat.Name.lower() == block_name.lower():
                             target_bdef = b
                             break

@@ -100,7 +100,7 @@ def decorate_tools(tools: List[Tool]) -> List[Tool]:
 
 def check_call(name: str, arguments: dict) -> Optional[str]:
     """Messaggio di rifiuto se la chiamata sovrascriverebbe un file esistente senza overwrite=true, altrimenti None."""
-    if name == "execute_tool_sequence":
+    if name in ("execute_tool_sequence", "try_on_copy"):
         for idx, step in enumerate((arguments or {}).get("steps", [])):
             if not isinstance(step, dict):
                 continue

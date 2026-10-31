@@ -20,7 +20,7 @@ from typing import Optional, Dict
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors
+from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -529,49 +529,55 @@ class FeatureOperations:
     # List Features (FIXED: properties not methods)
     # ========================================================================
     
-    def list_features(self) -> Dict:
+    def list_features(self, include_system: bool = False, detail: bool = False) -> Dict:
         """
-        List all features in the active document
-        FIXED v4.0: Uses properties (FirstFeature, GetNextFeature, GetTypeName2)
-        instead of method calls for SW 2025 compatibility.
+        Elenco delle feature del documento attivo. Di default NON include le cartelle di sistema dell'albero (Preferiti,
+        Cronologia, Impostazioni selezione, Sensori, Design Binder, Annotazioni, Markup, Luci e videocamere, Corpi solidi/di
+        superficie, Commenti, Equazioni, Materiale), riconosciute per TIPO (GetTypeName2, uguale in italiano e in inglese).
+        Output compatto: una riga per feature, "nome (tipo)" + " [soppressa]" se soppressa. detail=true restituisce invece
+        dizionari {name, type, suppressed}. include_system=true aggiunge le cartelle di sistema.
         """
         try:
             doc, err = self.get_active_doc()
             if err:
                 return err
-            
-            features = []
-            
-            # FIXED: Use property access, not method calls
-            feat = doc.FirstFeature
-            
-            while feat is not None:
+            rows = []
+            skipped = 0
+            feat = self._com(doc, "FirstFeature")
+            n_guard = 0
+            while feat is not None and n_guard < 20000:
+                n_guard += 1
                 try:
-                    name = feat.Name
-                    # FIXED: GetTypeName2 is a property in SW 2025
-                    feat_type = feat.GetTypeName2
-                    
-                    features.append({
-                        "name": name,
-                        "type": feat_type,
-                    })
-                except:
+                    name = str(self._com(feat, "Name"))
+                    ftype = str(self._com(feat, "GetTypeName2"))
+                    if ftype in SYSTEM_FOLDER_TYPES and not include_system:
+                        skipped += 1
+                    else:
+                        try:
+                            sup = feat.IsSuppressed2(1, None)
+                            sup = bool(sup[0] if isinstance(sup, (tuple, list)) else sup)
+                        except Exception:
+                            sup = False
+                        rows.append((name, ftype, sup))
+                except Exception:
                     pass
-                
-                # FIXED: GetNextFeature is a property in SW 2025
                 try:
-                    feat = feat.GetNextFeature
-                except:
+                    feat = self._com(feat, "GetNextFeature")
+                except Exception:
                     break
-            
-            return self._result(True, f"{len(features)} features found",
-                              SwErrors.swSuccess,
-                              {"features": features, "count": len(features)})
-            
+            if detail:
+                items = [{"name": n, "type": t, "suppressed": sp} for n, t, sp in rows]
+            else:
+                items = [f"{n} ({t})" + (" [soppressa]" if sp else "") for n, t, sp in rows]
+            data = {"features": items, "count": len(items)}
+            if skipped:
+                data["system_folders_hidden"] = skipped
+            return self._result(True, f"{len(items)} features found", SwErrors.swSuccess, data)
+
         except Exception as e:
             logger.error(f"List features error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swUnknownError)
-    
+
     # ========================================================================
     # Edge Selection Helper
     # ========================================================================

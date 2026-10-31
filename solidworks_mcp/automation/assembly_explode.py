@@ -347,7 +347,7 @@ class AssemblyExplodeMixin:
         except Exception:
             return out
         for b in (comp.GetBodies2(0) or ()):
-            for f in (b.GetFaces() or ()):
+            for f in (self._com(b, "GetFaces") or ()):
                 try:
                     sf = f.GetSurface
                     if not sf.IsCylinder:

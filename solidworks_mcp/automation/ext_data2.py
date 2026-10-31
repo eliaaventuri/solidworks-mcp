@@ -238,7 +238,7 @@ class Data2Operations:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             try:
-                dt = doc.GetDesignTable()
+                dt = self._com(doc, "GetDesignTable")
                 if dt:
                     dt.SaveAs(path)
             except Exception:

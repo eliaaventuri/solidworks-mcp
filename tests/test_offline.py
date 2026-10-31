@@ -80,7 +80,7 @@ if not STUBBED:
                                                                         SwErrors.swConnectionError)
 
 RESULTS = []
-EXPECTED_TOOLS = 555                       # 556 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 557                       # 558 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
 from solidworks_mcp.not_implemented import NOT_IMPLEMENTED
 EXPOSED_TOOLS = EXPECTED_TOOLS - len(NOT_IMPLEMENTED)   # i tool non implementati (revisione 2026-10-23) restano nascosti
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
@@ -1455,6 +1455,39 @@ def test_diagnostics_and_search():
     record("get_feature_tree: include contatori error_count e warning_count",
            tree_res["success"] and "error_count" in td and "warning_count" in td and "features" in td)
 
+    # 6b. Mock FEDELE al late binding: i membri senza argomenti (Name, GetTypeName2, GetNextFeature, GetFirstSubFeature,
+    #     GetNextSubFeature, FirstFeature) sono PROPRIETA' (valori, non metodi): chiamarli darebbe "'str' object is not callable".
+    class _PFeat:
+        def __init__(self, name, typ, code=0):
+            self.Name, self.GetTypeName2, self._code = name, typ, code
+            self.GetNextFeature = self.GetFirstSubFeature = self.GetNextSubFeature = None
+
+        def IsSuppressed2(self, opt, cfgs):
+            return (False,)
+
+        def GetErrorCode2(self, bf):
+            bf.value = False
+            return self._code
+
+    pf = [_PFeat("Boss-Extrude1", "Extrusion"), _PFeat("Cut-Extrude2", "Cut", code=7), _PFeat("Sketch1", "ProfileFeature")]
+    for a, b in zip(pf, pf[1:]):
+        a.GetNextFeature = b
+    pf[0].GetFirstSubFeature = pf[2]          # sotto-feature (schizzo) della prima feature
+
+    class _PDoc(_MockDoc):
+        def __init__(self):
+            super().__init__()
+            self.FirstFeature = pf[0]
+    sw.get_active_doc = lambda: (_PDoc(), None)
+    tree_p = sw.get_feature_tree(include_sketches=True)
+    names_p = [f["name"] for f in tree_p.get("data", {}).get("features", [])]
+    record("get_feature_tree: mock fedele (membri come proprieta') elenca le feature e i codici di errore",
+           tree_p["success"] and names_p == ["Boss-Extrude1", "Cut-Extrude2", "Sketch1"] and tree_p["data"]["error_count"] == 1
+           and tree_p["data"]["features"][0]["sub_features"][0]["name"] == "Sketch1", str(tree_p)[:200])
+    reb_p = sw.get_rebuild_errors()
+    record("get_rebuild_errors: mock fedele (membri come proprieta') riporta la feature con errore",
+           reb_p["success"] and reb_p["data"]["error_count"] == 1 and reb_p["data"]["errors"][0]["name"] == "Cut-Extrude2", str(reb_p)[:200])
+
 
 
 
@@ -2795,6 +2828,335 @@ def test_simulation2_tools(tmp):
 
 
 
+# ============================================================================ correzioni dal rapporto d'uso reale
+def test_report_fix_tools():
+    """Mock FEDELI al late binding: i membri senza argomenti (Name, GetTypeName2, GetNextFeature, FirstFeature, IsRolledBack,
+    FeatureScopeBodies...) sono PROPRIETA', non metodi. Copre: list_features, rollback, query_topology (corpo), verifica delle
+    ripetizioni, spiegazione dei fallimenti, edit_extrude_options, try_on_copy, riferimenti di fine."""
+    sw = SolidWorksAutomation()
+
+    # ---- list_features: cartelle di sistema nascoste per TIPO, output compatto
+    class _F:
+        def __init__(self, name, typ, rolled=False, sup=False):
+            self.Name, self.GetTypeName2, self.IsRolledBack, self._sup = name, typ, rolled, sup
+            self.GetNextFeature = None
+
+        def IsSuppressed2(self, o, c):
+            return (self._sup,)
+
+    def chain(items):
+        fs = [_F(*i) if isinstance(i, tuple) else i for i in items]
+        for a, b in zip(fs, fs[1:]):
+            a.GetNextFeature = b
+        return fs
+
+    fs = chain([("Annotazioni", "DetailCabinet"), ("Materiale", "MaterialFolder"), ("Piano frontale", "RefPlane"),
+                ("Origine", "OriginProfileFeature"), ("Schizzo1", "ProfileFeature"), ("Estrusione1", "Extrusion"),
+                ("Taglio1", "ICE", True, True)])
+    doc_f = types.SimpleNamespace(FirstFeature=fs[0], GetType=1)
+    sw.get_active_doc = lambda: (doc_f, None)
+    r = sw.list_features()
+    names = r["data"]["features"]
+    record("list_features: cartelle di sistema nascoste, una riga per feature",
+           r["success"] and names == ["Piano frontale (RefPlane)", "Origine (OriginProfileFeature)", "Schizzo1 (ProfileFeature)",
+                                      "Estrusione1 (Extrusion)", "Taglio1 (ICE) [soppressa]"] and r["data"]["system_folders_hidden"] == 2,
+           str(names))
+    r = sw.list_features(include_system=True)
+    record("list_features: include_system=true aggiunge le cartelle", r["data"]["count"] == 7)
+    r = sw.list_features(detail=True)
+    record("list_features: detail=true restituisce dizionari", r["data"]["features"][-1] == {"name": "Taglio1", "type": "ICE", "suppressed": True})
+
+    # ---- barra di rollback
+    rb = sw._rollback_state(doc_f)
+    record("rollback: feature sotto la barra e feature sopra la barra", rb == {"in_rollback": True, "rollback_after": "Estrusione1",
+           "rolled_back_features": ["Taglio1"]}, str(rb))
+    fs_ok = chain([("Schizzo1", "ProfileFeature"), ("Estrusione1", "Extrusion")])
+    rb2 = sw._rollback_state(types.SimpleNamespace(FirstFeature=fs_ok[0]))
+    record("rollback: modello non in rollback", rb2 == {"in_rollback": False, "rollback_after": None, "rolled_back_features": []})
+    sw._part = lambda: (doc_f, None)
+    sw._exit_sketch = lambda d: None
+    sw._sketch_dimensions = lambda d, n: []
+    lm = sw.list_model_features()
+    rows = {x["name"]: x for x in lm["data"]["features"]}
+    record("list_model_features: marca le feature sotto la barra e riporta il rollback",
+           lm["success"] and rows["Taglio1"].get("rolled_back") is True and "rolled_back" not in rows["Estrusione1"]
+           and lm["data"]["rollback"]["rollback_after"] == "Estrusione1" and "ROLLBACK" in lm["message"], lm["message"])
+    doc_info = types.SimpleNamespace(FirstFeature=fs[0], GetType=1, GetTitle="Parte1", GetPathName="")
+    sw.get_active_doc = lambda: (doc_info, None)
+    gi = sw.get_document_info()
+    record("get_document_info: riporta il rollback", gi["success"] and gi["data"]["rollback"]["rollback_after"] == "Estrusione1"
+           and "ROLLBACK" in gi["message"], gi["message"])
+
+    # ---- query_topology_by_criteria: nome del corpo
+    class _V:
+        def __init__(self, p):
+            self.GetPoint = p
+
+    class _B:
+        def __init__(self, name, pts):
+            self.Name, self._pts = name, pts
+
+        @property
+        def GetVertices(self):
+            return tuple(_V(p) for p in self._pts)
+
+    bodies = [_B("Corpo-A", [(0.0, 0.0, 0.0)]), _B("Corpo-B", [(0.01, 0.0, 0.0), (0.02, 0.0, 0.0)])]
+    doc_t = types.SimpleNamespace(GetBodies2=lambda t, v: bodies, GetType=1)
+    sw.get_active_doc = lambda: (doc_t, None)
+    q = sw.query_topology_by_criteria(entity_type="vertex")
+    record("query_topology_by_criteria: ogni entita' riporta il corpo di appartenenza",
+           q["success"] and [e["body"] for e in q["data"]["entities"]] == ["Corpo-A", "Corpo-B", "Corpo-B"], str(q)[:200])
+
+    # ---- _verify_pattern: sovrapposizione accettata, istanza mancante rifiutata
+    class _World:
+        """Volume simulato: ogni istanza presente toglie `unit` meno la sovrapposizione col seme."""
+        def __init__(self):
+            self.vol = 100.0 * 1e-9
+            self.feats = ["F1"]
+            self.deleted = []
+
+    w = _World()
+    sw._volume_m3 = lambda d: w.vol
+    sw._names = lambda d: list(w.feats)
+    sw._new_features = lambda d, before: [{"name": n, "type": "LPattern"} for n in w.feats if n not in before]
+    def _del(d, names):
+        for n in names:
+            if n in w.feats:
+                w.feats.remove(n)
+                w.deleted.append(n)
+    sw._delete_features = _del
+    seed = 10.0 * 1e-9
+    v0 = 100.0 * 1e-9
+    # (a) volume come atteso: nessuna ricostruzione
+    w.feats = ["F1", "P1"]
+    w.vol = v0 - seed * 4
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 5, ["F1"], (5,), lambda c: None, lambda: "X")
+    record("_verify_pattern: volume atteso -> ok senza ricostruire", ok and rebuilt is None and info["instances_check"] == "volume")
+    # (b) istanze sovrapposte: effetto 3.5 invece di 4 semi; l'ultima istanza incide ancora (0.9 seme)
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 3.5
+    asked = []
+    def measure_ok(cnts):
+        asked.append(cnts)
+        return seed * 2.6
+    def rebuild_ok():
+        w.feats.append("P2")
+        w.vol = v0 - seed * 3.5
+        return "FEAT"
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 5, ["F1"], (5,), measure_ok, rebuild_ok)
+    record("_verify_pattern: istanze sovrapposte (effetto < n-1 semi) accettate e ripetizione ricreata",
+           ok and rebuilt == "FEAT" and w.vol == v0 - seed * 3.5 and info["last_instance_effect_mm3"][0] > 0 and "P1" in w.deleted
+           and asked == [(4,)], str(info))
+    # (c) istanza mancante: l'ultima istanza non cambia il volume
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 3.0
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 5, ["F1"], (5,), lambda c: seed * 3.0, lambda: "FEAT")
+    record("_verify_pattern: istanza mancante (l'ultima non cambia il volume) rifiutata, ripetizione eliminata",
+           (not ok) and rebuilt is None and "P1" in w.deleted and info["last_instance_effect_mm3"] == [0.0], str(info))
+    # (d) seme non misurabile: niente da verificare
+    ok, info, _ = sw._verify_pattern(None, v0, 0.0, 5, [], (5,), lambda c: None, lambda: None)
+    record("_verify_pattern: seme senza effetto sul volume -> non verificabile ma non bloccante", ok)
+    # (e) n=2 con sovrapposizione: il riferimento e' il solo seme (nessuna misura da fare)
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 0.6
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 2, ["F1"], (2,), lambda c: 1 / 0, lambda: w.feats.append("P2") or "FEAT")
+    record("_verify_pattern: n=2 con sovrapposizione, riferimento = solo seme", ok and rebuilt == "FEAT", str(info))
+    # (f) griglia 2x2 con l'istanza d'angolo mancante (3 istanze su 4): rifiutata anche se ogni direzione incide
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 2.0
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 4, ["F1"], (2, 2), lambda c: seed * 1.0, lambda: "FEAT")
+    record("_verify_pattern: griglia 2x2 senza l'istanza d'angolo rifiutata (inclusione-esclusione = 0)",
+           (not ok) and rebuilt is None and info["corner_instance_effect_mm3"] == 0.0 and all(m > 0 for m in info["last_instance_effect_mm3"]),
+           str(info))
+    # (g) griglia 2x2 completa ma con volume fuori tolleranza per sovrapposizione col bordo: l'angolo incide -> accettata
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 2.9
+    meas = {(1, 2): seed * 0.95, (2, 1): seed * 0.95}
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 4, ["F1"], (2, 2), lambda c: meas[c], lambda: w.feats.append("P2") or "FEAT")
+    record("_verify_pattern: griglia 2x2 con angolo che incide accettata", ok and rebuilt == "FEAT" and info["corner_instance_effect_mm3"] > 0, str(info))
+
+    # (h) strict: con volume diverso dall'atteso non misura, non elimina, rifiuta (si preferisce la direzione esatta)
+    w.feats, w.deleted = ["F1", "P1"], []
+    w.vol = v0 - seed * 3.5
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 5, ["F1"], (5,), lambda c: 1 / 0, lambda: "FEAT", strict=True)
+    record("_verify_pattern: strict rifiuta senza misure ne' eliminazioni (lo fa il chiamante)", (not ok) and rebuilt is None and w.deleted == [])
+    w.vol = v0 - seed * 4
+    ok, info, rebuilt = sw._verify_pattern(None, v0, seed, 5, ["F1"], (5,), lambda c: 1 / 0, lambda: "FEAT", strict=True)
+    record("_verify_pattern: strict accetta il volume esatto", ok and info["instances_check"] == "volume")
+
+    # ---- spiegazione quando la ripetizione di feature non viene creata
+    sw._find_feature = lambda d, n: types.SimpleNamespace(name=n)
+    infos = {"Fonde": {"merge": True, "feature_scope": True, "auto_select_bodies": False, "scope_bodies": ["A", "B"]},
+             "Separato": {"merge": False, "feature_scope": True, "auto_select_bodies": False, "scope_bodies": ["A"]},
+             "Normale": {"merge": True, "feature_scope": False, "auto_select_bodies": True, "scope_bodies": []}}
+    sw._extrude_info = lambda d, f: infos.get(f.name)
+    t1 = sw._explain_pattern_failure(None, ["Fonde"], -1e-6)
+    record("spiegazione: Merge=true con ambito su piu' corpi -> procedura con edit_extrude_options, bodies, combine_bodies",
+           all(k in t1 for k in ("Merge=true", "A, B", "edit_extrude_options", "bodies", "combine_bodies", "merge=false")), t1[:120])
+    t2 = sw._explain_pattern_failure(None, ["Separato"], -1e-6)
+    record("spiegazione: seme con Merge=false (corpo separato) -> usa bodies", "SEPARATO" in t2 and "`bodies`" in t2 and "combine_bodies" in t2)
+    t3 = sw._explain_pattern_failure(None, ["Normale"], -1e-6)
+    record("spiegazione: estrusione normale -> nessuna causa riconosciuta", t3 == "")
+    t4 = sw._explain_pattern_failure(None, ["Separato"], +1e-6)
+    record("spiegazione: taglio (rimuove materiale) con Merge=false non e' un corpo separato", t4 == "")
+
+    # ---- circular_pattern / linear_pattern: nessuna feature creata -> messaggio sul fatto (non sul volume)
+    class _FM:
+        def __init__(self):
+            self.calls = 0
+            self.result = None
+
+        def FeatureCircularPattern5(self, *a):
+            self.calls += 1
+            return self.result
+
+        def FeatureLinearPattern5(self, *a):
+            self.calls += 1
+            return self.result
+
+    fm = _FM()
+    doc_p = types.SimpleNamespace(FeatureManager=fm, ClearSelection2=lambda x: None, GetType=1)
+    sw._part = lambda: (doc_p, None)
+    sw._bodies = lambda d: [object()]
+    sw._seed_effect = lambda d, f: -1e-6
+    sw._select_features_mark = lambda *a, **k: None
+    sw._select_edge_or_axis = lambda *a, **k: (True, "")
+    w.feats, w.deleted, w.vol = ["Fonde"], [], 1e-6
+    r = sw.circular_pattern(features=["Fonde"], axis={"axis": "Asse1"}, count=6)
+    record("circular_pattern: SolidWorks non crea nessuna feature -> lo dice e propone la procedura (non parla di volume)",
+           (not r["success"]) and "nessuna feature" in r["message"] and "edit_extrude_options" in r["message"]
+           and "volume non corrisponde" not in r["message"], r["message"][:140])
+    r = sw.linear_pattern(features=["Fonde"], direction1={"edge": [0, 0, 0]}, count1=3, spacing1=10)
+    record("linear_pattern: SolidWorks non crea nessuna feature -> stesso messaggio con la procedura",
+           (not r["success"]) and "nessuna feature" in r["message"] and "combine_bodies" in r["message"], r["message"][:140])
+    # feature creata ma istanze mancanti: errore e ripetizione eliminata
+    def _make_missing(*a):
+        w.feats.append("RipCirc1")
+        w.vol = 1e-6 - 3e-7                    # effetto 0.3 contro 5 semi attesi (6 istanze, seme 1e-6 -> 5e-6)
+        return types.SimpleNamespace(Name="RipCirc1")
+    fm.FeatureCircularPattern5 = _make_missing
+    sw._seed_effect = lambda d, f: 1e-7
+    sw._volume_m3 = lambda d: w.vol
+    w.vol = 1e-6
+    w.feats, w.deleted = ["Fonde"], []
+    sw._pattern_features = lambda d, before: [n for n in w.feats if n not in before]
+    r = sw.circular_pattern(features=["Fonde"], axis={"axis": "Asse1"}, count=6)
+    record("circular_pattern: istanze mancanti -> errore, ripetizione eliminata (coerente con linear_pattern)",
+           (not r["success"]) and "eliminata" in r["message"] and "RipCirc1" in w.deleted and "RipCirc1" not in w.feats, r["message"][:140])
+    del sw._pattern_features
+
+    # ---- edit_extrude_options: lettura/scrittura della definizione e rilettura
+    class _FD:
+        def __init__(self):
+            self.Merge, self.FeatureScope, self.AutoSelect, self.FeatureScopeBodies = True, True, False, ()
+            self.ReverseDirection, self.BothDirections = False, False
+            self._ec, self._d = {True: 0, False: 0}, {True: 0.010, False: 0.0}
+
+        def AccessSelections(self, doc, comp):
+            return True
+
+        def ReleaseSelectionAccess(self):
+            pass
+
+        def GetEndCondition(self, fwd):
+            return self._ec[fwd]
+
+        def SetEndCondition(self, fwd, v):
+            self._ec[fwd] = v
+
+        def GetDepth(self, fwd):
+            return self._d[fwd]
+
+        def SetDepth(self, fwd, v):
+            self._d[fwd] = v
+
+    class _Boss:
+        def __init__(self, fd, honest=True):
+            self.Name, self.GetTypeName2, self.GetDefinition, self.honest, self.modified = "Estrusione4", "Extrusion", fd, honest, 0
+
+        def ModifyDefinition(self, fd, doc, nul):
+            self.modified += 1
+            if not self.honest:
+                fd.Merge = True                # SolidWorks "ignora" la modifica: la rilettura deve accorgersene
+            return True
+
+        def GetErrorCode2(self, bf):
+            bf.value = False
+            return 0
+
+    fd = _FD()
+    boss = _Boss(fd)
+    doc_e = types.SimpleNamespace(FeatureByName=lambda n: boss if n == "Estrusione4" else None, ForceRebuild3=lambda t: True, GetType=1)
+    sw._part = lambda: (doc_e, None)
+    sw._find_feature = lambda d, n: boss if n == "Estrusione4" else None
+    sw._volume_m3 = lambda d: 1e-6
+    sw._names = lambda d: ["Estrusione4"]
+    sw._bodies = lambda d: []
+    r = sw.edit_extrude_options(feature="Estrusione4", merge=False, end_condition="through_all", depth=25)
+    record("edit_extrude_options: merge, condizione di fine e profondita' scritti e riletti",
+           r["success"] and fd.Merge is False and fd._ec[True] == 1 and abs(fd._d[True] - 0.025) < 1e-9 and r["data"]["mismatch"] == {}
+           and r["data"]["readback"]["merge"] is False and r["data"]["readback"]["direction1"] == {"end_condition": "through_all", "depth": 25.0}
+           and boss.modified == 1, str(r)[:200])
+    r = sw.edit_extrude_options(feature="Estrusione4")
+    record("edit_extrude_options: senza opzioni -> errore chiaro", not r["success"] and "Nessuna opzione" in r["message"])
+    r = sw.edit_extrude_options(feature="Estrusione4", end_condition="up_to_surface")
+    record("edit_extrude_options: condizioni con riferimento rifiutate", not r["success"] and "up_to_next" in r["message"])
+    r = sw.edit_extrude_options(feature="Estrusione4", end_condition2="blind", depth2=5)
+    record("edit_extrude_options: direzione 2 su estrusione a una direzione -> errore", not r["success"] and "una sola direzione" in r["message"])
+    r = sw.edit_extrude_options(feature="NonEsiste", merge=True)
+    record("edit_extrude_options: feature inesistente -> errore", not r["success"] and "non trovata" in r["message"])
+    boss.honest = False
+    fd.Merge = True
+    r = sw.edit_extrude_options(feature="Estrusione4", merge=False)
+    record("edit_extrude_options: se la rilettura non coincide non e' un successo",
+           (not r["success"]) and "merge" in r["data"]["mismatch"] and r["data"]["mismatch"]["merge"] == {"requested": False, "readback": True},
+           r["message"][:140])
+    # scope_bodies: risoluzione per nome / punto
+    ba, bb = types.SimpleNamespace(Name="Corpo-A"), types.SimpleNamespace(Name="Corpo-B")
+    sw._bodies = lambda d: [ba, bb]
+    sw._body_of_point = lambda d, pt, unit=None: bb if list(pt) == [1, 2, 3] else None
+    got, names, e = sw._resolve_scope_bodies(None, ["Corpo-A", [1, 2, 3], "Corpo-A"], None)
+    record("edit_extrude_options: ambito risolto per nome e per punto, senza duplicati", names == ["Corpo-A", "Corpo-B"] and e is None)
+    got, names, e = sw._resolve_scope_bodies(None, ["Corpo-X"], None)
+    record("edit_extrude_options: corpo dell'ambito inesistente -> errore", got is None and "non trovato" in e)
+    n_mod = boss.modified
+    r = sw.edit_extrude_options(feature="Estrusione4", scope_bodies=["Corpo-X"])
+    record("edit_extrude_options: scope_bodies con un nome sbagliato non modifica nulla",
+           (not r["success"]) and "non trovato" in r["message"] and boss.modified == n_mod, r["message"][:100])
+    # lettura delle opzioni/ambito (get_feature_definition) e riferimento di fine illeggibile
+    fd2 = _FD()
+    fd2.FeatureScopeBodies = (ba, bb)
+    opt = sw._extrude_options(fd2)
+    record("get_feature_definition: corpi dell'ambito con i nomi", opt["scope_bodies"] == ["Corpo-A", "Corpo-B"] and opt["merge"] is True
+           and opt["feature_scope"] is True)
+    fd2.GetFace = lambda fwd: None
+    fd2.GetVertex = lambda fwd: None
+    fd2.GetEndConditionReference = lambda fwd, t: None
+    ref = sw._fd_end_reference(fd2, 4, True, None)
+    record("get_feature_definition: riferimento di fine non leggibile dichiarato", ref and ref["readable"] is False and "note" in ref)
+    fd2.GetEndConditionReference = lambda fwd, t: bb
+    ref = sw._fd_end_reference(fd2, 7, True, None)
+    record("get_feature_definition: fino al corpo -> nome del corpo di riferimento", ref == {"readable": True, "kind": "body", "body": "Corpo-B"}, str(ref))
+    record("get_feature_definition: condizione senza riferimento (blind) -> nessun end_reference", sw._fd_end_reference(fd2, 0, True, None) is None)
+
+    # ---- try_on_copy: registrazione, rifiuti e inoltro dell'esecutore
+    tools = {t.name: t for t in asyncio.run(srv.list_tools())}
+    record("try_on_copy: registrato con schema (steps obbligatorio)", "try_on_copy" in tools
+           and tools["try_on_copy"].inputSchema["required"] == ["steps"] and "edit_extrude_options" in tools)
+    r = sw.try_on_copy(steps=[{"tool": "save_document", "arguments": {}}], runner=lambda s, e: {"success": True})
+    record("try_on_copy: save_document non ammesso nei passi", not r["success"] and "non ammesso" in r["message"])
+    r = sw.try_on_copy(steps=[{"tool": "draw_line", "arguments": {"document": "Altro"}}], runner=lambda s, e: {"success": True})
+    record("try_on_copy: argomento 'document' non ammesso", not r["success"] and "document" in r["message"])
+    r = sw.try_on_copy(steps=[], runner=lambda s, e: {"success": True})
+    record("try_on_copy: steps vuoti -> errore", not r["success"])
+    doc_asm = types.SimpleNamespace(GetType=2)
+    sw.get_active_doc = lambda: (doc_asm, None)
+    r = sw.try_on_copy(steps=[{"tool": "draw_line"}], runner=lambda s, e: {"success": True})
+    record("try_on_copy: un assieme viene rifiutato (solo pezzi)", not r["success"] and "PEZZO" in r["message"])
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": [{"tool": "try_on_copy", "arguments": {"steps": []}}]}))
+    record("execute_tool_sequence: try_on_copy annidato non ammesso", "nested 'try_on_copy'" in res[0].text)
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -2810,7 +3172,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp))):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp)), ("correzioni dal rapporto", test_report_fix_tools)):
             try:
                 fn()
             except Exception as e:

@@ -206,3 +206,12 @@ class Defaults:
     CONNECTION_TIMEOUT = 120  # seconds
     RETRY_INTERVAL = 5  # seconds
     MAX_RETRIES = 3
+
+
+# Cartelle di sistema dell'albero (GetTypeName2, uguali in ogni lingua di SolidWorks): Commenti, Preferiti, Cronologia,
+# Impostazioni selezione, Sensori, Design Binder, Annotazioni, Corpi di superficie/solidi, Luci e videocamere,
+# Annotazioni (markup), Equazioni, Materiale. Non sono feature di modellazione.
+SYSTEM_FOLDER_TYPES = frozenset({
+    "CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder", "SensorFolder", "DocsFolder",
+    "DetailCabinet", "SurfaceBodyFolder", "SolidBodyFolder", "EnvFolder", "InkMarkupFolder", "EqnFolder", "MaterialFolder",
+})

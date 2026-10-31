@@ -53,7 +53,7 @@ class DrawingPosMixin:
         out = []
         try:
             for b in (m.GetBodies2(0, True) or ()):
-                for f in (b.GetFaces() or ()):
+                for f in (self._com(b, "GetFaces") or ()):
                     try:
                         sf = f.GetSurface
                         if not sf.IsCylinder or not bool(self._com(f, "FaceInSurfaceSense")):

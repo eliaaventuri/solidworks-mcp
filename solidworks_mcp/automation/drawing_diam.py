@@ -36,7 +36,7 @@ class DrawingDiamMixin:
 
         cands = []
         for b in (m.GetBodies2(0, True) or ()):
-            for f in (b.GetFaces() or ()):
+            for f in (self._com(b, "GetFaces") or ()):
                 try:
                     sf = f.GetSurface
                     if not sf.IsCylinder:
@@ -336,7 +336,7 @@ class DrawingDiamMixin:
         proj, dirp, s = self._dm_proj(v)
         circles: Dict[int, Dict] = {}
         for b in (m.GetBodies2(0, True) or ()):
-            for f in (b.GetFaces() or ()):
+            for f in (self._com(b, "GetFaces") or ()):
                 try:
                     sf = f.GetSurface
                     if not sf.IsCylinder:

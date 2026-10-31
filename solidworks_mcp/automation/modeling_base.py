@@ -18,7 +18,7 @@ from typing import Optional, Dict, List, Tuple, Any
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors
+from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 from ..utils.sw_lang import std_plane_index
 
 logger = logging.getLogger(__name__)
@@ -162,6 +162,24 @@ class ModelingBase:
                 pass
             feat = self._com(feat, "GetNextFeature")
         return out
+
+    def _rollback_state(self, doc) -> Dict:
+        """Posizione della barra di rollback. {"in_rollback": bool, "rollback_after": nome dell'ultima feature SOPRA la barra
+        (None se il modello non e' in rollback), "rolled_back_features": [nomi sotto la barra, non calcolati]}.
+        Si legge IFeature.IsRolledBack di ogni feature (le cartelle di sistema sono escluse)."""
+        last_ok, rolled = None, []
+        for n, t, f in self._features(doc):
+            if t in SYSTEM_FOLDER_TYPES:
+                continue
+            try:
+                rb = bool(self._com(f, "IsRolledBack"))
+            except Exception:
+                rb = False
+            if rb:
+                rolled.append(n)
+            else:
+                last_ok = n
+        return {"in_rollback": bool(rolled), "rollback_after": last_ok if rolled else None, "rolled_back_features": rolled}
 
     def _find_feature(self, doc, name: str):
         if not name:

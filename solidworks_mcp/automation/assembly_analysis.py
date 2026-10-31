@@ -76,7 +76,7 @@ class AssemblyAnalysisMixin:
         Rm, t = xf[:9], xf[9:12]
         others = [k for k in range(3) if k != dir_idx]
         for b in (comp.GetBodies2(0) or ()):
-            for f in (b.GetFaces() or ()):
+            for f in (self._com(b, "GetFaces") or ()):
                 try:
                     sf = f.GetSurface
                     if not sf.IsCylinder:

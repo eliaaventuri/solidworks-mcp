@@ -2126,7 +2126,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     is_dangling = False
                     try:
                         if callable(getattr(dd, "IsDangling", None)):
-                            is_dangling = bool(dd.IsDangling())
+                            is_dangling = bool(self._com(dd, "IsDangling"))
                         elif hasattr(dd, "IsDangling"):
                             is_dangling = bool(dd.IsDangling)
                     except Exception:
@@ -2137,7 +2137,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                             if callable(getattr(dd, "GetDimension2", None)):
                                 dim = dd.GetDimension2(0)
                             elif callable(getattr(dd, "GetDimension", None)):
-                                dim = dd.GetDimension()
+                                dim = self._com(dd, "GetDimension")
                             else:
                                 dim = getattr(dd, "GetDimension", None)
                             if dim:

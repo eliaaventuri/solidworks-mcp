@@ -91,7 +91,7 @@ class Drawings2Operations:
                 return self._result(False, f"reload_sheet_format: template '{template_path}' non trovato", SwErrors.swFileNotFoundError)
             sheet = None
             try:
-                sheet = doc.GetCurrentSheet()
+                sheet = self._com(doc, "GetCurrentSheet")
             except Exception:
                 pass
             if template_path:

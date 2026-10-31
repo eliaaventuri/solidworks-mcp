@@ -22,10 +22,13 @@ Trappole API scoperte (SW 2026, late binding, vedi STATO_STORICO.md):
 import math
 import logging
 import traceback
+
+import pythoncom
+import win32com.client
 from typing import Optional, Dict, List, Any
 
 
-from ..constants import SwErrors
+from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 from .modeling_base import ModelingBase, r8_array, null_variant
 from .sketch_constraints import SketchConstraintOperations
 from ..utils.sw_lang import lang_folders
@@ -1079,6 +1082,198 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.error(f"chamfer_at_points: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
+    # ------------------------------------------------------------------ opzioni di un'estrusione esistente
+    _EDIT_END_CONDITIONS = ("blind", "through_all", "through_all_both", "up_to_next", "mid_plane")
+
+    def _resolve_scope_bodies(self, doc, items, unit):
+        """Corpi dell'ambito indicati per NOME o con un punto [x,y,z] SU una loro faccia. -> (corpi, nomi, errore)."""
+        allb = self._bodies(doc)
+        by_name = {str(self._com(b, "Name")): b for b in allb}
+        out, names = [], []
+        for it in items:
+            if isinstance(it, (list, tuple)) and len(it) == 3:
+                b = self._body_of_point(doc, it, unit)
+                if b is None:
+                    return None, None, f"Nessun corpo ha una faccia nel punto {list(it)} (punto SU una faccia del corpo)."
+            else:
+                b = by_name.get(str(it))
+                if b is None:
+                    return None, None, f"Corpo '{it}' non trovato. Corpi: {sorted(by_name)}"
+            n = str(self._com(b, "Name"))
+            if n not in names:
+                names.append(n)
+                out.append(b)
+        return out, names, None
+
+    def _extrude_readback(self, doc, feat, unit=None) -> Optional[Dict]:
+        """Opzioni correnti di un'estrusione/taglio riletta da una definizione NUOVA: merge, ambito (con nomi dei corpi),
+        selezione automatica, reverse, condizione di fine e profondita' (unit) delle direzioni."""
+        fd = self._com(feat, "GetDefinition")
+        if fd is None:
+            return None
+        acc = False
+        try:
+            acc = bool(fd.AccessSelections(doc, null_variant()))
+        except Exception:
+            acc = False
+        try:
+            out = self._extrude_options(fd)
+            out["reverse"] = self._gp(fd, "ReverseDirection")
+            out["both_directions"] = self._gp(fd, "BothDirections")
+            inv = {v: k for k, v in END_CONDITIONS.items() if k not in ("symmetric",)}
+            for fwd, key in ((True, "direction1"), (False, "direction2")):
+                if not fwd and not out["both_directions"]:
+                    continue
+                ec = self._gp(fd, "GetEndCondition", fwd)
+                dp = self._gp(fd, "GetDepth", fwd)
+                out[key] = {"end_condition": inv.get(ec, ec),
+                            "depth": None if dp is None else round(self._from_m(float(dp), unit), 5)}
+            return out
+        finally:
+            if acc:
+                try:
+                    fd.ReleaseSelectionAccess()
+                except Exception:
+                    pass
+
+    def edit_extrude_options(self, feature: str = None, merge: bool = None, feature_scope: bool = None,
+                             scope_bodies: list = None, auto_select_bodies: bool = None, end_condition: str = None,
+                             depth: float = None, end_condition2: str = None, depth2: float = None,
+                             reverse: bool = None, unit: str = None) -> Dict:
+        """Modifica le opzioni di un'estrusione/taglio ESISTENTE (normale o sottile), senza ridisegnarla:
+        merge (unisci il risultato), feature_scope (true = agisce solo sui corpi dell'ambito) con scope_bodies (nomi dei corpi
+        o punti [x,y,z] SU una loro faccia; da solo imposta anche feature_scope=true e auto_select_bodies=false),
+        auto_select_bodies, end_condition + depth (direzione 1; anche end_condition2/depth2 se l'estrusione e' in due
+        direzioni; condizioni senza riferimenti: blind | through_all | through_all_both | up_to_next | mid_plane), reverse.
+        GetDefinition -> AccessSelections -> modifica -> ModifyDefinition(def, doc, nullo). La definizione viene RILETTA:
+        il risultato e' un successo solo se i valori riletti coincidono con quelli richiesti (data.readback, data.mismatch)."""
+        try:
+            doc, err = self._part()
+            if err:
+                return err
+            self._exit_sketch(doc)
+            if not feature:
+                return self._result(False, "Serve il nome della feature (list_model_features).", SwErrors.swInvalidInput)
+            asked = {k: v for k, v in (("merge", merge), ("feature_scope", feature_scope), ("scope_bodies", scope_bodies),
+                                       ("auto_select_bodies", auto_select_bodies), ("end_condition", end_condition),
+                                       ("depth", depth), ("end_condition2", end_condition2), ("depth2", depth2),
+                                       ("reverse", reverse)) if v is not None}
+            if not asked:
+                return self._result(False, "Nessuna opzione da modificare (merge, feature_scope, scope_bodies, "
+                                    "auto_select_bodies, end_condition, depth, end_condition2, depth2, reverse).",
+                                    SwErrors.swInvalidInput)
+            for k in ("end_condition", "end_condition2"):
+                if asked.get(k) is not None and str(asked[k]).lower() not in self._EDIT_END_CONDITIONS:
+                    return self._result(False, f"{k}: {self._EDIT_END_CONDITIONS} (le condizioni con riferimento "
+                                        "— fino alla superficie, al vertice — non si cambiano qui).", SwErrors.swInvalidInput)
+            if scope_bodies is not None and (not isinstance(scope_bodies, (list, tuple)) or not scope_bodies):
+                return self._result(False, "scope_bodies: lista non vuota di nomi o punti [x,y,z].", SwErrors.swInvalidInput)
+            feat = self._find_feature(doc, feature)
+            if feat is None:
+                return self._result(False, f"Feature '{feature}' non trovata. Feature: {self._names(doc)}",
+                                    SwErrors.swSelectionError)
+            fd = self._com(feat, "GetDefinition")
+            try:
+                getattr(fd, "GetEndCondition")
+                getattr(fd, "FeatureScope")
+            except Exception:
+                return self._result(False, f"'{feature}' non e' un'estrusione/taglio (tipo {self._com(feat, 'GetTypeName2')}).",
+                                    SwErrors.swInvalidInput)
+            v0 = self._volume_m3(doc)
+            nb0, nf0 = len(self._bodies(doc)), len(self._names(doc))
+            before = self._extrude_readback(doc, feat, unit)
+            if (end_condition2 is not None or depth2 is not None) and not before.get("both_directions"):
+                return self._result(False, "end_condition2/depth2: l'estrusione ha una sola direzione.", SwErrors.swInvalidInput)
+            want = {}
+            acc = False
+            ok_mod = False
+            try:
+                acc = bool(fd.AccessSelections(doc, null_variant()))
+                if scope_bodies is not None:
+                    bodies, names, e = self._resolve_scope_bodies(doc, scope_bodies, unit)
+                    if e:
+                        return self._result(False, e, SwErrors.swSelectionError)
+                    if feature_scope is None:
+                        feature_scope = True
+                    if auto_select_bodies is None:
+                        auto_select_bodies = False
+                    want["scope_bodies"] = names
+                    fd.FeatureScopeBodies = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_DISPATCH, bodies)
+                if merge is not None:
+                    fd.Merge = bool(merge)
+                    want["merge"] = bool(merge)
+                if feature_scope is not None:
+                    fd.FeatureScope = bool(feature_scope)
+                    want["feature_scope"] = bool(feature_scope)
+                if auto_select_bodies is not None:
+                    fd.AutoSelect = bool(auto_select_bodies)
+                    want["auto_select_bodies"] = bool(auto_select_bodies)
+                if reverse is not None:
+                    fd.ReverseDirection = bool(reverse)
+                    want["reverse"] = bool(reverse)
+                for fwd, ec, dp, key in ((True, end_condition, depth, "direction1"), (False, end_condition2, depth2, "direction2")):
+                    if ec is None and dp is None:
+                        continue
+                    want[key] = {}
+                    if ec is not None:
+                        fd.SetEndCondition(fwd, END_CONDITIONS[str(ec).lower()])
+                        want[key]["end_condition"] = str(ec).lower()
+                    if dp is not None:
+                        fd.SetDepth(fwd, self._mmu(float(dp), unit))
+                        want[key]["depth"] = round(float(dp), 5)
+                ok_mod = bool(feat.ModifyDefinition(fd, doc, null_variant()))
+            finally:
+                if acc:
+                    try:
+                        fd.ReleaseSelectionAccess()
+                    except Exception:
+                        pass
+            if not ok_mod:
+                return self._result(False, f"SolidWorks ha rifiutato la modifica di '{feature}' (ModifyDefinition).",
+                                    SwErrors.swFeatureError, {"requested": want, "before": before})
+            doc.ForceRebuild3(False)
+            feat = self._find_feature(doc, feature) or feat
+            after = self._extrude_readback(doc, feat, unit)
+            mismatch = {}
+            for k, v in want.items():
+                got = after.get(k)
+                if k == "scope_bodies":
+                    if sorted(got or []) != sorted(v):
+                        mismatch[k] = {"requested": v, "readback": got}
+                elif isinstance(v, dict):
+                    for kk, vv in v.items():
+                        g = (got or {}).get(kk)
+                        same = (abs(float(g) - float(vv)) < 1e-4) if kk == "depth" and g is not None else g == vv
+                        if not same:
+                            mismatch[f"{k}.{kk}"] = {"requested": vv, "readback": g}
+                elif bool(got) != bool(v):
+                    mismatch[k] = {"requested": v, "readback": got}
+            vol = self._volume_m3(doc)
+            data = {"feature": feature, "requested": want, "before": before, "readback": after, "mismatch": mismatch,
+                    "volume_mm3": round(vol * 1e9, 3), "volume_before_mm3": round(v0 * 1e9, 3),
+                    "bodies_before": nb0, "bodies_after": len(self._bodies(doc)), "features_before": nf0,
+                    "features_after": len(self._names(doc)), "unit": self._unit_name(unit)}
+            err_code = None
+            try:
+                bf = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, None)
+                err_code = int(feat.GetErrorCode2(bf))
+            except Exception:
+                pass
+            if err_code:
+                data["rebuild_error_code"] = err_code
+            if mismatch:
+                return self._result(False, f"'{feature}': le opzioni rilette non coincidono con quelle richieste: {mismatch}",
+                                    SwErrors.swFeatureError, data)
+            if err_code:
+                return self._result(False, f"'{feature}' modificata ma la ricostruzione ha dato errore {err_code}.",
+                                    SwErrors.swFeatureError, data)
+            return self._result(True, f"'{feature}' modificata e riletta: " + ", ".join(sorted(want)) +
+                                f" (corpi {nb0} -> {data['bodies_after']}, volume {v0 * 1e9:.1f} -> {vol * 1e9:.1f} mm3)",
+                                SwErrors.swSuccess, data)
+        except Exception as e:
+            logger.error(f"edit_extrude_options: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
+
     # ------------------------------------------------------------------ ripetizioni / specchiatura
     def _select_features_mark(self, doc, names: List[str], mark: int, append: bool = False) -> Optional[str]:
         for i, n in enumerate(names):
@@ -1094,6 +1289,16 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if any(f is None for f in feats):
                 return 0.0
             v_on = self._volume_m3(doc)
+            # stato di soppressione di TUTTE le feature: sopprimere il seme sopprime anche le feature figlie (altre ripetizioni
+            # del seme...) e riattivare il seme NON le riattiva: vanno rimesse com'erano
+            active = []
+            for _n, _t, _f in self._features(doc):
+                try:
+                    sup = _f.IsSuppressed2(1, None)
+                    if not bool(sup[0] if isinstance(sup, (tuple, list)) else sup):
+                        active.append(_f)
+                except Exception:
+                    pass
             try:
                 for f in feats:
                     f.SetSuppression2(0, 1, None)
@@ -1102,6 +1307,13 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 for f in feats:
                     try:
                         f.SetSuppression2(1, 1, None)
+                    except Exception:
+                        pass
+                for f in active:
+                    try:
+                        sup = f.IsSuppressed2(1, None)
+                        if bool(sup[0] if isinstance(sup, (tuple, list)) else sup):
+                            f.SetSuppression2(1, 1, None)
                     except Exception:
                         pass
                 self._volume_m3(doc)
@@ -1123,13 +1335,158 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             seen.append(body)
         return True, None, len(seen)
 
-    def _pattern_ok(self, doc, v0: float, seed: float, n_instances: int) -> bool:
-        """True se il volume e' cambiato come atteso per n_instances-1 copie (tolleranza 1%)."""
-        if abs(seed) < 1e-15 or n_instances <= 1:
-            return True
-        delta_cut = v0 - self._volume_m3(doc)
-        expected = seed * (n_instances - 1)
-        return abs(delta_cut - expected) <= 0.01 * abs(expected) + 1e-15
+    def _pattern_features(self, doc, before: List[str]) -> List[str]:
+        """Nomi delle feature create dopo `before` (schizzi esclusi)."""
+        return [x["name"] for x in self._new_features(doc, before) if x["type"] != "ProfileFeature"]
+
+    def _verify_pattern(self, doc, v0: float, seed: float, n_tot: int, before: List[str], counts: tuple, measure, rebuild,
+                        strict: bool = False):
+        """Verifica che la ripetizione appena creata abbia prodotto TUTTE le istanze (SolidWorks salta in silenzio
+        quelle che non toccano il corpo). -> (ok, info, feature_ricreata | None).
+         1. Volume: effetto = seme * (n-1) entro l'1 %  ->  ok (caso normale, nessuna ricostruzione).
+         2. Effetto minore: o mancano istanze, o le istanze si SOVRAPPONGONO tra loro (razze che partono dal centro dell'asse):
+            dal volume totale non si distingue. Si misura allora l'effetto dell'ULTIMA istanza di ogni direzione ricreando la
+            ripetizione con un'istanza in meno in quella direzione (`measure(conteggi)` costruisce, misura l'effetto sul
+            volume e cancella; None se non riesce): un'istanza mancante non cambia il volume (differenza ~0), una sovrapposta
+            si' (anche se meno del seme). Con 2 direzioni (griglia) si controlla anche l'istanza d'angolo (l'ultima di entrambe)
+            con l'inclusione-esclusione  d(n1,n2) - d(n1-1,n2) - d(n1,n2-1) + d(n1-1,n2-1)  (zero se l'angolo manca).
+            Se tutto incide la ripetizione completa viene ricreata con `rebuild()`.
+        strict=True ferma la verifica al punto 1 (senza misure ne' eliminazioni: la ripetizione va eliminata da chi chiama);
+        serve a preferire, tra piu' direzioni, quella che da' esattamente il volume atteso (istanze parzialmente fuori dal
+        corpo hanno un effetto parziale e passerebbero il controllo del punto 2).
+        Se la verifica fallisce la ripetizione e' gia' stata eliminata (come in linear_pattern)."""
+        if abs(seed) < 1e-15 or n_tot <= 1:
+            return True, {"instances_check": "non verificabile (il seme non cambia il volume)"}, None
+        delta = v0 - self._volume_m3(doc)
+        expected = seed * (n_tot - 1)
+        info = {"instances_check": "volume", "pattern_effect_mm3": round(delta * 1e9, 3),
+                "pattern_effect_no_overlap_mm3": round(expected * 1e9, 3)}
+        if abs(delta - expected) <= 0.01 * abs(expected) + 1e-15:
+            return True, info, None
+        if strict or delta * seed <= 0 or abs(delta) > abs(expected) * 1.01:
+            return False, info, None                       # effetto di segno opposto o maggiore del possibile
+        self._delete_features(doc, self._pattern_features(doc, before))
+        thr = max(1e-3 * abs(seed), 1e-13)
+        sign = 1.0 if seed > 0 else -1.0
+        cache = {}
+
+        def d_of(cnts):
+            """Effetto sul volume con `cnts` istanze per direzione (0 = solo il seme); None se non misurabile."""
+            n = 1
+            for x in cnts:
+                n *= x
+            if n <= 1:
+                return 0.0
+            if cnts not in cache:
+                cache[cnts] = measure(cnts)
+            return cache[cnts]
+
+        margins, ok = [], True
+        active = [k for k, x in enumerate(counts) if x > 1]
+        for k in active:
+            red = tuple(x - 1 if j == k else x for j, x in enumerate(counts))
+            dr = d_of(red)
+            if dr is None:
+                ok = False
+                margins.append(None)
+                continue
+            m = (delta - dr) * sign
+            margins.append(round(m * 1e9, 3))
+            if m <= thr:
+                ok = False
+        if len(active) == 2:
+            r1 = tuple(x - 1 if j == 0 else x for j, x in enumerate(counts))
+            r2 = tuple(x - 1 if j == 1 else x for j, x in enumerate(counts))
+            r12 = tuple(x - 1 for x in counts)
+            ds = [d_of(r1), d_of(r2), d_of(r12)]
+            if None in ds:
+                ok = False
+                info["corner_instance_effect_mm3"] = None
+            else:
+                mc = (delta - ds[0] - ds[1] + ds[2]) * sign
+                info["corner_instance_effect_mm3"] = round(mc * 1e9, 3)
+                if mc <= thr:
+                    ok = False
+        info["instances_check"] = "ultima istanza (istanze sovrapposte)"
+        info["last_instance_effect_mm3"] = margins
+        info["seed_effect_mm3"] = round(abs(seed) * 1e9, 3)
+        if not ok:
+            return False, info, None
+        feat = rebuild()
+        if not self._pattern_features(doc, before):
+            info["instances_check"] = "ricostruzione della ripetizione non riuscita"
+            return False, info, None
+        return True, info, feat
+
+    def _extrude_options(self, fd) -> Dict:
+        """Opzioni di una estrusione/taglio dalla definizione GIA' aperta con AccessSelections: Merge, ambito delle
+        feature (FeatureScope), selezione automatica dei corpi e NOMI dei corpi dell'ambito."""
+        out = {"merge": self._gp(fd, "Merge"), "feature_scope": self._gp(fd, "FeatureScope"),
+               "auto_select_bodies": self._gp(fd, "AutoSelect")}
+        names = []
+        try:
+            sb = self._gp(fd, "FeatureScopeBodies")
+            for b in (list(sb) if sb is not None else []):
+                try:
+                    names.append(str(self._com(b, "Name")))
+                except Exception:
+                    names.append("?")
+        except Exception:
+            pass
+        out["scope_bodies"] = names
+        return out
+
+    def _extrude_info(self, doc, feat) -> Optional[Dict]:
+        """Opzioni (vedi _extrude_options) di una feature che sia un'estrusione/taglio; None negli altri casi."""
+        try:
+            fd = self._com(feat, "GetDefinition")
+            if fd is None:
+                return None
+            getattr(fd, "GetEndCondition")
+            getattr(fd, "FeatureScope")
+        except Exception:
+            return None
+        acc = False
+        try:
+            acc = bool(fd.AccessSelections(doc, null_variant()))
+        except Exception:
+            acc = False
+        try:
+            return self._extrude_options(fd)
+        except Exception:
+            return None
+        finally:
+            if acc:
+                try:
+                    fd.ReleaseSelectionAccess()
+                except Exception:
+                    pass
+
+    def _explain_pattern_failure(self, doc, features: List[str], seed: float = 0.0) -> str:
+        """Perche' SolidWorks non ha creato la ripetizione di FEATURE: analizza le feature seme e suggerisce la causa
+        riconoscibile (testo vuoto se non ne riconosce nessuna).
+         - Estrusione con Merge=True e ambito (FeatureScope) su PIU' corpi: fonde quei corpi in uno solo e le istanze
+           cercano corpi che dopo il seme non esistono piu': la ripetizione di feature fallisce sempre.
+         - Seme che crea un corpo SEPARATO (Merge=False): va ripetuto come CORPO, non come feature."""
+        tips = []
+        proc = ("Procedura verificata: (1) edit_extrude_options sulla feature con merge=false; (2) ripetizione dei CORPI "
+                "(opzione `bodies` di circular_pattern/linear_pattern: un punto su una faccia del corpo creato dal seme); "
+                "(3) combine_bodies (operation add) dei corpi originali piu' le istanze. Mettere l'ambito su 'tutti i "
+                "corpi' funziona ma fonde anche corpi che non c'entrano.")
+        for name in features or []:
+            f = self._find_feature(doc, name)
+            info = self._extrude_info(doc, f) if f is not None else None
+            if not info:
+                continue
+            scope = info.get("scope_bodies") or []
+            if info.get("merge") and info.get("feature_scope") and len(scope) >= 2:
+                tips.append(f"Causa probabile: '{name}' ha Merge=true con ambito (FeatureScope) su {len(scope)} corpi "
+                            f"({', '.join(scope)}) e li fonde in uno solo: la ripetizione di FEATURE fallisce sempre perche' "
+                            f"le istanze cercano corpi che dopo il seme non esistono piu'. " + proc)
+            elif info.get("merge") is False and seed < 0:
+                tips.append(f"Causa probabile: '{name}' crea un corpo SEPARATO (Merge=false): le feature che creano un "
+                            f"corpo separato vanno ripetute come CORPI (opzione `bodies`), non come feature. " + proc)
+        return " ".join(tips)
 
     def linear_pattern(self, features: list = None, direction1=None, count1: int = 2, spacing1: float = 10,
                        direction2=None, count2: int = 1, spacing2: float = 0, reverse1: bool = False,
@@ -1137,7 +1494,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                        bodies: list = None) -> Dict:
         """Ripetizione lineare di feature (nomi) e/o di CORPI (`bodies` = [[x,y,z],...], un punto SU una faccia di ciascun
         corpo) in 1 o 2 direzioni. direction = {"edge":[x,y,z]} (spigolo parallelo alla direzione) oppure
-        {"face":[x,y,z]} (faccia piana: direzione = normale) oppure nome di asse."""
+        {"face":[x,y,z]} (faccia piana: direzione = normale) oppure nome di asse.
+        Le istanze mancanti (fuori dal corpo) si riconoscono anche quando le istanze si sovrappongono (vedi _verify_pattern);
+        se mancano, la ripetizione viene ELIMINATA e si riprova con le direzioni invertite. Se SolidWorks non crea nessuna
+        feature il messaggio ne analizza le cause riconoscibili (vedi _explain_pattern_failure)."""
         try:
             doc, err = self._part()
             if err:
@@ -1153,59 +1513,102 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             n_bodies0 = len(self._bodies(doc))
             before = self._names(doc)
             two = direction2 is not None and count2 and count2 > 1
+            c1, c2 = int(count1), (int(count2) if two else 1)
             combos = [(bool(reverse1), bool(reverse2))]
             for c in ((not reverse1, bool(reverse2)), (bool(reverse1), not reverse2), (not reverse1, not reverse2)):
                 if c not in combos and (two or c[1] == bool(reverse2)):
                     combos.append(c)
-            feat = None
-            used = None
             fm = doc.FeatureManager
             seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
-            n_tot = int(count1) * (int(count2) if two else 1)
-            n_sel = 0
-            for (r1, r2) in combos:
+            n_tot = c1 * c2
+            state = {"n_sel": 0}
+
+            def make(n1, n2, r1, r2):
+                """Crea la ripetizione con n1 x n2 istanze. -> (feature | None, errore di selezione | None)."""
+                active = [(direction1, n1, spacing1, r1, "Direzione 1")]
+                if two:
+                    active.append((direction2, n2, spacing2, r2, "Direzione 2"))
+                active = [a for a in active if a[1] > 1]
+                if not active:
+                    return None, None
                 doc.ClearSelection2(True)
                 e = self._select_features_mark(doc, features, 4)
                 if e:
-                    return self._result(False, e, SwErrors.swSelectionError)
+                    return None, e
                 if bodies:
-                    okb, eb, n_sel = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
+                    okb, eb, state["n_sel"] = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
                     if not okb:
-                        return self._result(False, eb, SwErrors.swSelectionError)
-                ok, msg = self._select_edge_or_axis(doc, direction1, unit, mark=1, append=True)
-                if not ok:
-                    return self._result(False, f"Direzione 1: {msg}", SwErrors.swSelectionError)
-                if two:
-                    ok, msg = self._select_edge_or_axis(doc, direction2, unit, mark=2, append=True)
+                        return None, eb
+                for k, (dr, _n, _sp, _r, label) in enumerate(active):
+                    ok, msg = self._select_edge_or_axis(doc, dr, unit, mark=k + 1, append=True)
                     if not ok:
-                        return self._result(False, f"Direzione 2: {msg}", SwErrors.swSelectionError)
+                        return None, f"{label}: {msg}"
+                a1 = active[0]
+                a2 = active[1] if len(active) > 1 else None
                 try:
-                    feat = fm.FeatureLinearPattern5(int(count1), self._mmu(spacing1, unit), int(count2) if two else 1,
-                                                    self._mmu(spacing2, unit) if two else 0.0, r1, r2,
-                                                    "", "", bool(geometry_pattern), False, False, False, False, False,
-                                                    False, False, False, False, 0.0, 0.0, False, False)
+                    f = fm.FeatureLinearPattern5(a1[1], self._mmu(a1[2], unit), a2[1] if a2 else 1,
+                                                 self._mmu(a2[2], unit) if a2 else 0.0, a1[3], a2[3] if a2 else False,
+                                                 "", "", bool(geometry_pattern), False, False, False, False, False,
+                                                 False, False, False, False, 0.0, 0.0, False, False)
                 except Exception as ex:
-                    return self._result(False, f"Ripetizione lineare fallita: {ex}", SwErrors.swFeatureError)
+                    return None, f"Ripetizione lineare fallita: {ex}"
+                doc.ClearSelection2(True)
+                return f, None
+
+            feat = None
+            used = None
+            info_v = {}
+            created_any = False
+            # 1a passata: solo il volume ESATTO (sceglie la direzione giusta); 2a passata: controllo anche con istanze sovrapposte
+            for strict, (r1, r2) in [(True, cb) for cb in combos] + [(False, cb) for cb in combos]:
+                if used is not None:
+                    break
+                if not strict and (not features or not created_any):
+                    break
+                feat, e = make(c1, c2, r1, r2)
+                if e:
+                    return self._result(False, e, SwErrors.swFeatureError if e.startswith("Ripetizione") else SwErrors.swSelectionError)
                 if feat is not None or self._new_features(doc, before):
+                    created_any = True
                     if bodies and not features:
                         ok_inst = len(self._bodies(doc)) > n_bodies0
                     else:
-                        ok_inst = self._pattern_ok(doc, v0, seed, n_tot)
+                        def measure(cnts, r1=r1, r2=r2):
+                            """Effetto sul volume della ripetizione con cnts = (n1[, n2]) istanze; la elimina subito."""
+                            b2 = self._names(doc)
+                            make(cnts[0], cnts[1] if len(cnts) > 1 else 1, r1, r2)
+                            if not self._pattern_features(doc, b2):
+                                return None
+                            d_ = v0 - self._volume_m3(doc)
+                            self._delete_features(doc, self._pattern_features(doc, b2))
+                            return d_
+                        counts = (c1, c2) if two else (c1,)
+                        ok_inst, info_v, rebuilt = self._verify_pattern(doc, v0, seed, n_tot, before, counts, measure,
+                                                                         lambda r1=r1, r2=r2: make(c1, c2, r1, r2)[0], strict=strict)
+                        if rebuilt is not None:
+                            feat = rebuilt
                     if ok_inst:
                         used = (r1, r2)
                         break
                     # istanze mancanti (direzione sbagliata): elimina e riprova con le direzioni invertite
                     doc.ClearSelection2(True)
-                    self._delete_features(doc, [x["name"] for x in self._new_features(doc, before)
-                                                if x["type"] != "ProfileFeature"])
+                    self._delete_features(doc, self._pattern_features(doc, before))
                     feat = None
+            n_sel = state["n_sel"]
             if used is None:
-                return self._result(False, "Ripetizione lineare fallita (anche invertendo le direzioni): le istanze "
-                                    "devono cadere sul corpo e non sovrapporsi.", SwErrors.swFeatureError)
+                if not created_any:
+                    why = self._explain_pattern_failure(doc, features, seed)
+                    return self._result(False, "Ripetizione lineare non creata: SolidWorks non ha creato nessuna feature."
+                                        + (" " + why if why else " Controlla direzioni, spaziatura e che le istanze cadano sul corpo."),
+                                        SwErrors.swFeatureError)
+                return self._result(False, "Ripetizione lineare fallita (anche invertendo le direzioni): alcune istanze non "
+                                    "cadono sul corpo (SolidWorks le salta); la ripetizione e' stata eliminata.",
+                                    SwErrors.swFeatureError, info_v or None)
             doc.ClearSelection2(True)
             extra = {"count1": count1, "spacing1": spacing1, "count2": count2 if two else 1,
                      "spacing2": spacing2 if two else 0, "unit": self._unit_name(unit),
                      "reversed": {"dir1": used[0], "dir2": used[1]}}
+            extra.update(info_v)
             if bodies:
                 nb = len(self._bodies(doc))
                 extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
@@ -1220,7 +1623,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                          unit: str = None, bodies: list = None) -> Dict:
         """Ripetizione circolare di feature (nomi) e/o di CORPI (`bodies` = [[x,y,z],...], un punto SU una faccia di ciascun
         corpo) attorno a un asse: {"edge":[x,y,z]} (spigolo circolare/lineare), {"face":[x,y,z]}
-        (faccia cilindrica), nome di asse di riferimento ("Asse1") o asse temporaneo."""
+        (faccia cilindrica), nome di asse di riferimento ("Asse1") o asse temporaneo.
+        Come linear_pattern: se SolidWorks non crea nessuna feature il messaggio lo dice e ne analizza le cause; se la feature
+        c'e' ma mancano istanze (fuori dal corpo; verifica anche con istanze sovrapposte, vedi _verify_pattern) la ripetizione
+        viene ELIMINATA e il risultato e' un errore (nessuna feature a meta' resta nel modello)."""
         try:
             doc, err = self._part()
             if err:
@@ -1237,33 +1643,76 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             before = self._names(doc)
             doc.ClearSelection2(True)
             seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
-            e = self._select_features_mark(doc, features, 4)
-            if e:
-                return self._result(False, e, SwErrors.swSelectionError)
-            n_sel = 0
-            if bodies:
-                okb, eb, n_sel = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
-                if not okb:
-                    return self._result(False, eb, SwErrors.swSelectionError)
-            ok, msg = self._select_edge_or_axis(doc, axis, unit, mark=1, append=True)
-            if not ok:
-                return self._result(False, f"Asse: {msg}", SwErrors.swSelectionError)
             fm = doc.FeatureManager
-            try:
-                feat = fm.FeatureCircularPattern5(int(count), math.radians(angle), bool(reverse), "",
-                                                  bool(geometry_pattern), bool(equal_spacing), False, False, False,
-                                                  False, 1, 0.0, "", False)
-            except Exception as ex:
-                return self._result(False, f"Ripetizione circolare fallita: {ex}", SwErrors.swFeatureError)
+            n = int(count)
+            state = {"n_sel": 0}
+
+            def make(num, spacing_deg, equal):
+                """Crea la ripetizione con `num` istanze. -> (feature | None, errore | None)."""
+                if num <= 1:
+                    return None, None
+                doc.ClearSelection2(True)
+                e = self._select_features_mark(doc, features, 4)
+                if e:
+                    return None, e
+                if bodies:
+                    okb, eb, state["n_sel"] = self._select_bodies(doc, bodies, unit, 256, append=bool(features))
+                    if not okb:
+                        return None, eb
+                ok, msg = self._select_edge_or_axis(doc, axis, unit, mark=1, append=True)
+                if not ok:
+                    return None, f"Asse: {msg}"
+                try:
+                    f = fm.FeatureCircularPattern5(int(num), math.radians(spacing_deg), bool(reverse), "",
+                                                   bool(geometry_pattern), bool(equal), False, False, False,
+                                                   False, 1, 0.0, "", False)
+                except Exception as ex:
+                    return None, f"Ripetizione circolare fallita: {ex}"
+                doc.ClearSelection2(True)
+                return f, None
+
+            feat, e = make(n, angle, equal_spacing)
+            if e:
+                return self._result(False, e, SwErrors.swFeatureError if e.startswith("Ripetizione") else SwErrors.swSelectionError)
+            new_feats = self._new_features(doc, before)
+            if feat is None and not new_feats:
+                why = self._explain_pattern_failure(doc, features, seed)
+                return self._result(False, "Ripetizione circolare non creata: SolidWorks non ha creato nessuna feature."
+                                    + (" " + why if why else " Controlla asse, numero di istanze e che le istanze cadano sul corpo."),
+                                    SwErrors.swFeatureError)
+            info_v = {}
+            if features and seed:
+                # riferimento con un'istanza in meno e STESSO passo angolare (spaziatura fissa)
+                if equal_spacing:
+                    step = angle / n if abs(angle - 360.0) < 1e-9 else angle / max(n - 1, 1)
+                else:
+                    step = angle
+                def measure(cnts):
+                    """Effetto sul volume con cnts[0] istanze a passo fisso; la ripetizione viene eliminata subito."""
+                    b2 = self._names(doc)
+                    make(cnts[0], step, False)
+                    if not self._pattern_features(doc, b2):
+                        return None
+                    d_ = v0 - self._volume_m3(doc)
+                    self._delete_features(doc, self._pattern_features(doc, b2))
+                    return d_
+                ok_inst, info_v, rebuilt = self._verify_pattern(doc, v0, seed, n, before, (n,), measure,
+                                                                lambda: make(n, angle, equal_spacing)[0])
+                if not ok_inst:
+                    doc.ClearSelection2(True)
+                    self._delete_features(doc, self._pattern_features(doc, before))
+                    return self._result(False, f"Ripetizione circolare: mancano istanze (il volume non corrisponde a {n} istanze: "
+                                        "alcune cadono fuori dal corpo?); la ripetizione e' stata eliminata.",
+                                        SwErrors.swFeatureError, info_v)
+                if rebuilt is not None:
+                    feat = rebuilt
             doc.ClearSelection2(True)
-            if seed and not self._pattern_ok(doc, v0, seed, int(count)):
-                return self._result(False, f"Ripetizione circolare: il volume non corrisponde a {count} istanze "
-                                    "(alcune cadono fuori dal corpo?).", SwErrors.swFeatureError)
             extra = {"count": count, "angle": angle, "equal_spacing": equal_spacing}
+            extra.update(info_v)
             if bodies:
                 nb = len(self._bodies(doc))
                 extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
-                              "bodies_expected_if_separate": n_bodies0 + (int(count) - 1) * n_sel})
+                              "bodies_expected_if_separate": n_bodies0 + (n - 1) * state["n_sel"]})
                 if nb <= n_bodies0 and not features:
                     return self._result(False, "Ripetizione di corpi: il numero di corpi non e' aumentato (istanze fuse o "
                                         "fuori posto?).", SwErrors.swFeatureError, extra)
@@ -2027,12 +2476,14 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             if err:
                 return err
             rows = []
+            rb = self._rollback_state(doc)
+            under_bar = set(rb["rolled_back_features"])
             for n, t, f in self._features(doc):
-                if t in ("CommentsFolder", "FavoriteFolder", "HistoryFolder", "SelectionSetFolder", "SensorFolder",
-                         "DocsFolder", "DetailCabinet", "SurfaceBodyFolder", "SolidBodyFolder", "EnvFolder",
-                         "InkMarkupFolder", "EqnFolder", "MaterialFolder", "OriginProfileFeature"):
+                if t in SYSTEM_FOLDER_TYPES or t == "OriginProfileFeature":
                     continue
                 row = {"name": n, "type": t}
+                if n in under_bar:
+                    row["rolled_back"] = True          # sotto la barra di rollback: non calcolata
                 try:
                     row["suppressed"] = bool(f.IsSuppressed2(1, None)[0] if isinstance(f.IsSuppressed2(1, None), tuple)
                                              else f.IsSuppressed2(1, None))
@@ -2051,7 +2502,12 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 if include_dimensions:
                     row["dimensions"] = self._sketch_dimensions(doc, n)
                 rows.append(row)
-            return self._result(True, f"{len(rows)} feature", SwErrors.swSuccess, {"features": rows, "count": len(rows)})
+            data = {"features": rows, "count": len(rows), "rollback": rb}
+            msg = f"{len(rows)} feature"
+            if rb["in_rollback"]:
+                msg += (f" - modello IN ROLLBACK: barra dopo '{rb['rollback_after']}', {len(under_bar)} feature sotto la barra "
+                        f"non calcolate (rolled_back=true)")
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 

@@ -63,7 +63,7 @@ class ManageOperations:
             bodies = []
             for b in self._all_bodies(doc):
                 try:
-                    dfc = int(b.Check2())
+                    dfc = int(self._com(b, "Check2"))
                 except Exception:
                     dfc = -1
                 bodies.append({"name": str(self._com(b, "Name")), "defects": dfc})
@@ -347,14 +347,14 @@ class ManageOperations:
             features_with_errors = []
             features_with_warnings = []
             try:
-                feat = doc.FirstFeature
+                feat = self._com(doc, "FirstFeature")
                 n_feat = 0
                 while feat:
                     n_feat += 1
                     if n_feat > 10000:
                         return self._result(False, "get_rebuild_errors: scansione interrotta, oltre 10000 feature", SwErrors.swGenericError)
                     fname = str(self._com(feat, "Name") or "")
-                    ftype = str(feat.GetTypeName2() if hasattr(feat, "GetTypeName2") else "")
+                    ftype = str(self._com(feat, "GetTypeName2") or "")
 
                     code = 0
                     warn = False
@@ -375,8 +375,8 @@ class ManageOperations:
                             features_with_errors.append(item)
 
                     # Controlla sub-features
-                    if hasattr(feat, "GetFirstSubFeature"):
-                        sub_f = feat.GetFirstSubFeature()
+                    if True:
+                        sub_f = self._com(feat, "GetFirstSubFeature")
                         n_sub = 0
                         while sub_f:
                             n_sub += 1
@@ -384,7 +384,7 @@ class ManageOperations:
                                 return self._result(False, f"get_rebuild_errors: scansione di '{fname}' interrotta, oltre 10000 sotto-feature",
                                                     SwErrors.swGenericError)
                             sname = str(self._com(sub_f, "Name") or "")
-                            stype = str(sub_f.GetTypeName2() if hasattr(sub_f, "GetTypeName2") else "")
+                            stype = str(self._com(sub_f, "GetTypeName2") or "")
                             scode = 0
                             swarn = False
                             if hasattr(sub_f, "GetErrorCode2"):
@@ -401,9 +401,9 @@ class ManageOperations:
                                     features_with_warnings.append(sitem)
                                 else:
                                     features_with_errors.append(sitem)
-                            sub_f = sub_f.GetNextSubFeature() if hasattr(sub_f, "GetNextSubFeature") else None
+                            sub_f = self._com(sub_f, "GetNextSubFeature")
 
-                    feat = feat.GetNextFeature() if hasattr(feat, "GetNextFeature") else None
+                    feat = self._com(feat, "GetNextFeature")
             except Exception as ex:
                 return self._result(False, f"get_rebuild_errors: scansione delle feature non riuscita: {ex}", SwErrors.swGenericError)
 
@@ -430,6 +430,7 @@ class ManageOperations:
 
             data = {
                 "rebuild_ok": rebuild_ok,
+                "features_scanned": n_feat,
                 "has_errors": has_errors,
                 "has_warnings": has_warnings,
                 "error_count": total_errs,

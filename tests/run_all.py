@@ -31,7 +31,7 @@ ORDER = ["offline", "modeling", "modeling_extra", "assembly", "assembly_extra", 
          # lotti dal 19/10 in poi (prima non erano nella regressione completa)
          "ext_moka1", "ext_moka2", "ext_sketch2", "ext_curves", "ext_ext1", "ext_bodies2", "ext_features2", "ext_analysis",
          "ext_manage", "ext_sheetmetal", "ext_weldments", "ext_mold", "ext_surfaces1", "ext_added_tools", "sketch4", "sketch5",
-         "assembly3", "drawings2", "features4", "data2", "simulation2", "audit_collision"]
+         "assembly3", "drawings2", "features4", "data2", "simulation2", "audit_collision", "report_fix"]
 TEST_TIMEOUT_S = 2400
 PASS_RE = re.compile(r"(\d+)/(\d+) PASS")
 

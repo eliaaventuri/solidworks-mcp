@@ -204,6 +204,25 @@ _TOOLS = {
          "start_from": (S, "sketch_plane (default) | offset | surface | vertex"),
          "start_ref": (None, "surface: {\"face\":[x,y,z]}, vertex: {\"vertex\":[x,y,z]} (`unit`, point ON the face/vertex)"),
          **_THIN}, []),
+    "edit_extrude_options": ("edit_extrude_options",
+        "Change the options of an EXISTING extrude boss/cut (normal or thin) without redrawing it: merge result, feature scope "
+        "(scope_bodies = body names or points [x,y,z] ON a face of each body; implies feature_scope=true and "
+        "auto_select_bodies=false), auto_select_bodies, end condition + depth (direction 1, and direction 2 if the feature has two "
+        "directions), reverse. Re-reads the definition: success only if the re-read values equal the requested ones "
+        "(data.readback, data.mismatch). Typical use: merge=false on a feature that fused several bodies so it can be patterned "
+        "as BODIES (circular_pattern/linear_pattern with `bodies`) and then joined with combine_bodies. "
+        "Example: {\"feature\":\"Boss-Extrude4\",\"merge\":false}; {\"feature\":\"Boss-Extrude4\",\"scope_bodies\":[\"Boss-Extrude1\",[0,45,10]]}.",
+        {"feature": (S, "Name of the extrude boss/cut feature (list_model_features)"),
+         "merge": (B, "Merge the result with the bodies in scope (false = separate body)"),
+         "feature_scope": (B, "true = act only on the bodies of the scope"),
+         "scope_bodies": (A, "Bodies of the scope: names or points [x,y,z] (`unit`) ON a face of each body"),
+         "auto_select_bodies": (B, "Select the bodies of the scope automatically"),
+         "end_condition": (S, "Direction 1: blind | through_all | through_all_both | up_to_next | mid_plane"),
+         "depth": (N, "Direction 1 depth (`unit`)"),
+         "end_condition2": (S, "Direction 2 end condition (as end_condition)"),
+         "depth2": (N, "Direction 2 depth (`unit`)"),
+         "reverse": (B, "Reverse the extrusion direction"), "unit": _UNIT},
+        ["feature"]),
     "revolve_boss": ("revolve_boss",
         "Revolve about the sketch centerline (or `axis`). thin_thickness makes a thin-wall feature. `axis` can be the id of "
         "a sketch segment, the name of a reference axis (e.g. \"Axis1\" or {\"axis\":\"Axis1\"}), a straight model edge "

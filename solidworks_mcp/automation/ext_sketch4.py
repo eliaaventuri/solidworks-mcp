@@ -753,8 +753,8 @@ class Sketch4Operations:
                 rels = self._com(sk, "GetSketchRelations") or ()
                 for r in rels:
                     try:
-                        rtype = int(r.GetRelationType())
-                        pent = r.GetEntities() or ()
+                        rtype = int(self._com(r, "GetRelationType"))
+                        pent = self._com(r, "GetEntities") or ()
                         names = [str(self._com(e, "GetName") or "") for e in pent]
                         r_info = {"type": rtype, "entities": names}
                         valid_rels.append(r_info)
