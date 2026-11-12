@@ -1254,6 +1254,20 @@ def test_resources_and_prompts():
         unknown_p_failed = True
     record("get_prompt con nome sconosciuto -> ValueError", unknown_p_failed)
 
+    # 6. ogni tool citato nel testo dei prompt deve esistere fra quelli esposti (un nome inventato manda il modello fuori strada)
+    exposed = {t.name for t in asyncio.run(srv.list_tools())}
+    params_ok = {"paper_size", "min_value", "max_value"}          # parametri citati nei testi, non tool
+    for p_name, p_args in (("create-part", {"description": "x"}), ("create-part", {"description": "x", "material": "y"}),
+                           ("create-drawing", {"part_name": "x"}), ("create-drawing", {"part_name": "x", "export_pdf": "false"}),
+                           ("run-simulation", {"load_description": "x"}), ("run-simulation", {"load_description": "x", "material": "y"}),
+                           ("create-assembly", {"components": "x"}),
+                           ("export-model", {"format": "step", "filepath": "out.step"}),
+                           ("export-model", {"format": "step", "filepath": "out.step", "configuration": "c"})):
+        text = asyncio.run(srv.get_prompt(p_name, p_args)).messages[0].content.text
+        cited = set(re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", text))
+        unknown = sorted(cited - exposed - params_ok)
+        record(f"prompt {p_name} {sorted(p_args)}: ogni tool citato esiste fra quelli esposti", not unknown, str(unknown))
+
 
 
 

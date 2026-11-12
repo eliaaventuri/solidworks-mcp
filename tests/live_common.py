@@ -112,7 +112,10 @@ class Client:
 
 def cleanup(my_pid, elia_pids):
     import time
-    if my_pid and my_pid in sw_pids():
+    # mai chiudere un'istanza che c'era gia' prima del test (puo' essere quella di Elia), anche se il server l'ha restituita
+    if my_pid and my_pid in elia_pids:
+        print(f"PID {my_pid} era gia' aperto prima del test: NON viene chiuso.")
+    elif my_pid and my_pid in sw_pids():
         subprocess.run(["taskkill", "/PID", str(my_pid), "/F"], capture_output=True)
     time.sleep(3)
     left = sw_pids() - elia_pids

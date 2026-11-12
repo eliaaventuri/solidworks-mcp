@@ -175,13 +175,14 @@ async def e1_sottile(c):
         if d:
             close(label + ": volume", d["volume_delta_mm3"], expected)
 
-    tube("E1 tubo (parete verso l'esterno 2)", PI * ((R + T) ** 2 - R ** 2) * H, thin_thickness=T)
-    tube("E1 tubo (verso l'interno 2)", PI * (R ** 2 - (R - T) ** 2) * H, thin_thickness=T, thin_type="opposite_direction")
-    tube("E1 tubo (mezzeria 2)", PI * ((R + T / 2) ** 2 - (R - T / 2) ** 2) * H, thin_thickness=T, thin_type="mid_plane")
-    tube("E1 tubo (due direzioni 2 fuori + 1 dentro)", PI * ((R + T) ** 2 - (R - 1) ** 2) * H, thin_thickness=T,
-         thin_type="two_directions", thin_thickness2=1.0)
-    tube("E1 tubo con tappi (spessore 1,5)", PI * ((R + T) ** 2 - R ** 2) * H + 2 * PI * R ** 2 * 1.5, thin_thickness=T,
-         cap_ends=True, cap_thickness=1.5)
+    # (fino al 2026-11-12 queste chiamate erano senza await: le coroutine non partivano e i 5 controlli non esistevano)
+    await tube("E1 tubo (parete verso l'esterno 2)", PI * ((R + T) ** 2 - R ** 2) * H, thin_thickness=T)
+    await tube("E1 tubo (verso l'interno 2)", PI * (R ** 2 - (R - T) ** 2) * H, thin_thickness=T, thin_type="opposite_direction")
+    await tube("E1 tubo (mezzeria 2)", PI * ((R + T / 2) ** 2 - (R - T / 2) ** 2) * H, thin_thickness=T, thin_type="mid_plane")
+    await tube("E1 tubo (due direzioni 2 fuori + 1 dentro)", PI * ((R + T) ** 2 - (R - 1) ** 2) * H, thin_thickness=T,
+               thin_type="two_directions", thin_thickness2=1.0)
+    await tube("E1 tubo con tappi (spessore 1,5)", PI * ((R + T) ** 2 - R ** 2) * H + 2 * PI * R ** 2 * 1.5, thin_thickness=T,
+               cap_ends=True, cap_thickness=1.5)
     await new_part(c)
     await c.call("create_sketch", plane="Top")
     await c.call("draw_circle", x=0, y=0, radius=R)

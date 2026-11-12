@@ -110,7 +110,7 @@ _TOOLS = {
         "screw (pitch). Distance in mm (distance), angle in degrees (angle); limit with min_value/max_value; align: closest | aligned | "
         "anti_aligned; flip reverses. Between two reference axes concentric becomes coincident. Entities may also be assembly planes "
         "such as 'Piano destro'. Width and screw mates are created from mate data (AddMate5 rejects them). Move limits with edit_mate(value). WARNING: lock, gear and screw are created and read back correctly, but the "
-        "SolidWorks solver does not enforce them via API (SetTransformAndSolve2/DragOperator): see LIMITI.md C5. "
+        "SolidWorks solver does not enforce them via API (SetTransformAndSolve2/DragOperator). "
         "Example: {\"mate_type\":\"concentric\",\"entity1\":\"Assi1@perno-1\",\"entity2\":\"Assi1@staffa-1\"}",
         {"mate_type": (S, "coincident|parallel|perpendicular|tangent|concentric|distance|angle|lock|symmetric|width|gear|screw"),
          "entity1": _ENT, "entity2": _ENT, "entity3": _ENT, "align": (S, "closest | aligned | anti_aligned"),

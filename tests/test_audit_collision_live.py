@@ -112,6 +112,11 @@ async def run():
                 )
                 record("detect_collisions (dynamic trajectory)", ok_dyn and data_dyn.get("mode") == "dynamic",
                        f"Collision detected: {data_dyn.get('collision_detected')}, step: {data_dyn.get('first_collision_step')}")
+                # perno lungo 80 da z=100 scende di 100 in 10 passi: la collisione col cilindro alto 50 (z 0..50, stesso asse)
+                # deve comparire; il numero di passo dipende dall'asse di estrusione, quindi si controlla solo che ci sia
+                record("detect_collisions: collisione rilevata lungo la corsa",
+                       data_dyn.get("collision_detected") is True and data_dyn.get("first_collision_step") is not None,
+                       f"collision_detected={data_dyn.get('collision_detected')} step={data_dyn.get('first_collision_step')}")
                 record("detect_collisions: initial pose restored", data_dyn.get("initial_pose_restored") is True)
 
                 # Chiudi assieme

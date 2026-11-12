@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-8.4.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-558-green)
+![tools](https://img.shields.io/badge/MCP%20tools-473-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,26 +23,26 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **558 tools** (555 without `execute_python`). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **473 tools** (474 with `execute_python` enabled). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
-Every tool has been tested against a live SOLIDWORKS session. The tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. A tool only counts as done when those numbers match.
+The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 400 of the 473 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
+
+Another 84 tools are registered in the code but **hidden**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one has its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition).
 
 ## Features
 
-The server provides complete, exhaustive coverage of the entire automation surface exposed by the official SOLIDWORKS COM API. Every entity, 2D/3D sketch constraint, 3D modeling feature, assembly mate, drawing annotation, export standard, and FEA configuration that the API makes programmatically accessible is implemented and exposed as a dedicated MCP tool.
-
-| Area | Tools | What it can do |
-|---|:---:|---|
-| 🧱 **Core & Documents** | 27 | Connect to live or dedicated instance; batch tool sequence execution; tool search & discovery; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
-| ✏️ **2D & 3D Sketching** | 106 | Complete 2D & 3D sketching; rebuild diagnostics & error inspection; lines, centerlines, circles, perimeter circles, 3-point/centerpoint/tangent arcs, center/corner/3-point/parallelogram slots, ellipses, parabolas, conics, polygons; style splines, equation-driven curves, curvature combs & inflection analysis; geometric relations & dimensions; dynamic mirror, offset entities, offset on surface, geodesic sketch chains, power trim, corner trim, extend, sketch fillets and chamfers; linear & circular sketch patterns; blocks (make, insert, explode, file I/O); sketch text, intersection curves, silhouette entities, face curve projection, split sketch entities |
-| 🏗️ **3D Feature Modeling** | 106 | Boss/cut extrusions & revolves (thin feature, multi-direction, draft); sweeps (solid tool body, bi-directional, guide curves, twist along path); lofts (boss & cut) with guide curves & centerline; boundary features (curvature G2); ribs, domes, wraps (emboss/deboss/scribe), flex (bending/twisting/stretching), deform; cosmetic & modeled threads (Stud Wizard); constant/variable/face/full-round fillets with G2 curvature continuity & setback corners; angle-distance & vertex chamfers; multibody combine (add/subtract/common), split, intersect, body move/rotate, body delete/keep, scale; linear, circular, curve, sketch, table, and fill patterns; feature mirror; core/cavity tooling separation; cosmetic weld beads; mesh B-Rep converter & deviation analysis |
-| 🌀 **Curves & Surfaces** | 21 | Standard & variable-pitch helices, spirals, projected & composite curves, split lines; planar surface from sketch, surface extrude, revolve, sweep, loft, offset, knit, extend, untrim, ruled surface |
-| 📄 **Drawings** | 65 | ISO sheets (first-angle projection, A4–A0 portrait/landscape); sheet format reload and in-place editing; automatic layout & scaling; standard, projected, section, half-section, detail, auxiliary, broken, crop, aligned, and relative views; sheet metal flat pattern & alternate position views; clean automatic dimensioning; ordinate & chamfer dimensions, tolerances, GD&T, surface finish, ISO 13715 edge symbols, welding symbols; hole tables, BOM, revision tables, cut lists, balloons; layered multi-level PDF, DXF, DWG export |
-| ⚙️ **Assemblies** | 87 | Component insertion (floating/fixed); standard, advanced & limit mates; mechanical mates (gear, rack & pinion, cam-follower, slot, hinge, screw, linear coupler, universal joint); component patterns (linear, circular, feature-driven, chain); mirroring with opposite-hand parts; copy with mates; exploded views (linear, entity-aligned, radial); mate controller; belt & chain features; hole alignment checks; measured degrees of freedom; in-context virtual parts & assembly promotion; envelope components; cavity & join bodies; SpeedPak; smart components; component isolation; Pack & Go |
-| 🏭 **Sheet Metal & Weldments** | 17 | Base flanges, edge flanges, hems, sketched bends, swept flanges, normal cuts, forming tools, corner relief / trim, flat pattern unfolding & 1:1 DXF export; structural members, weldment profiles, trim/extend, end caps, cut lists |
-| 🔍 **Selection & Inspection** | 16 | SelectByID2, 3D raycasting selection, B-Rep topology query by geometric criteria, active selection management; viewport orientation, zoom to fit, labeled viewport image badge export; bounding boxes, center of mass, mate references, draft & thickness analysis, undercut analysis, geometry check |
-| 📦 **Data & Export** | 55 | Materials (including custom libraries with full mechanical constants); mass properties & inertia tensors (model origin, CG, or user coordinate system); configuration-specific & summary custom properties; synchronized equation text files; design tables via CSV/JSON & derived configurations; projected area & clearance envelope; advanced exports (AP242 with PMI, flat pattern DXF, JT, IFC, glTF, 3D PDF, STEP, IGES, Parasolid, STL, 3MF) with integrity checks; 3D MBD / DimXpert PMI tolerances; photorealistic appearances & backgrounds |
-| 🔬 **Simulation (FEA)** | 55 | Static, frequency, buckling, thermal (steady/transient), drop test, fatigue (S-N), topology optimization, and linear dynamic harmonic studies; fixtures, elastic supports, prescribed displacements, cylindrical restraints, centrifugal loads, thermal shrinkage, forces, torques, pressure, gravity, temperatures, bearing & remote loads; mechanical connectors (bolt, pin, spring, spot weld); convection, radiation, and heat power loads; contacts (bonded, shrink-fit interference, virtual walls); orthotropic materials, 2D shell and 1D beam formulations; curvature-based meshing with local controls and quality diagnostics; FFEPlus & Direct Sparse solver options; results (von Mises, displacements, strains, heat flux, mode shapes, buckling load factors, FOS location, reaction force vectors, spatial probing); color plots & automated HTML calculation reports |
+| Area | What it can do |
+|---|---|
+| 🧱 **Core & Documents** | Connect to the user's or a dedicated hidden instance; batch tool sequences; try a sequence on a temporary copy; tool search; new/open/save/close; units; basic sketches; primitive extrusions, cuts, fillets and chamfers |
+| ✏️ **2D & 3D Sketching** | Lines, centerlines, circles, 3-point/centerpoint/tangent arcs, slots, rectangles, parallelograms, ellipses, parabolas, conics, polygons; splines and equation-driven curves, curvature combs; geometric relations and dimensions; offset, mirror, trim, extend, sketch fillets and chamfers; linear and circular sketch patterns; blocks (make, insert, explode); sketch text; 3D sketches |
+| 🏗️ **3D Feature Modeling** | Boss/cut extrusions and revolves (thin feature, two directions, draft, start and end conditions); sweeps with guide curves and twist; lofts (boss and cut) with guides and centerline; boundary features; ribs, domes, wraps, flex; cosmetic and modeled threads; Hole Wizard holes M3–M70; constant, variable and face fillets; distance-angle and vertex chamfers; shells with multiple thickness; multibody combine, split, intersect, move, scale; linear, circular, curve, sketch, table and fill patterns; mirrors; move faces |
+| 🌀 **Curves & Surfaces** | Constant and variable-pitch helices, projected and composite curves, curves through points, split lines; planar, extruded, revolved, swept, lofted, ruled, boundary and fill surfaces; thicken |
+| 📄 **Drawings** | ISO sheets A4–A0 portrait/landscape, first or third angle; sheet format editing; automatic layout and scale; standard, projected, section (also stepped and aligned), detail, auxiliary, broken, broken-out, crop and relative views; sheet-metal flat pattern views; model dimensions tidied per ISO 129; ordinate and chamfer dimensions, tolerances, GD&T, datums, surface finish; hole tables, BOM, revision and general tables, balloons; drawing audit; PDF (also layered), DXF, DWG, PNG export |
+| ⚙️ **Assemblies** | Component insertion (fixed/floating); standard, advanced and limit mates; gear, screw, hinge, linear coupler and universal joint mates; mate redundancy check; component patterns and mirrors; exploded views (linear, entity-aligned, radial) with explode lines; measured degrees of freedom; interference, clearance and collision detection; configurations; sub-assemblies; isolation; SpeedPak; cavity and join |
+| 🏭 **Sheet Metal & Weldments** | Base and edge flanges, hems, sketched bends, conversion to sheet metal, flat pattern and 1:1 DXF export; structural members, weldment profiles, trim/extend, end caps, cut lists |
+| 🔍 **Selection & Inspection** | Selection by point, by ID and by ray; B-Rep topology queries by geometric criteria; measurements; bounding boxes, center of mass, mate references; draft, thickness and undercut analysis; geometry check; rebuild errors; labeled viewport images |
+| 📦 **Data & Export** | Library materials and appearances; mass properties and inertia tensors (origin, center of mass or user coordinate system); custom properties per configuration; equations and global variables; configurations from CSV/JSON tables; STEP (AP203/214), IGES, Parasolid, SAT, STL, 3MF, glTF, IFC, 3D PDF, eDrawings exports, each re-read and verified |
+| 🔬 **Simulation (FEA)** | Static, frequency, buckling, steady-state thermal, drop test, fatigue and linear dynamic studies; fixtures, elastic supports, cylindrical restraints; forces, pressure, torque, gravity, remote, bearing and centrifugal loads, temperatures, convection, radiation, heat power; bolt, pin, spring and spot-weld connectors; bonded, no-penetration, shrink-fit and virtual-wall contacts; orthotropic materials, shell and beam formulations; curvature-based meshing with local controls and quality metrics; results with location of the extremes, stresses on chosen faces, reaction forces and moments, plots and HTML reports |
 
 ### Things you can ask
 
@@ -148,7 +148,7 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 554 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 473 tools |
 | `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
 
 ## Safety
@@ -180,15 +180,14 @@ Any edge case or limitation encountered during automation is reported directly i
 ## Tests
 
 ```bash
-python tests/test_offline.py                            # no SOLIDWORKS needed (runs on Linux and CI on every push: 255/255 PASS)
-.venv\Scripts\python.exe tests\run_total_regression.py   # master total regression covering all 5 functional areas live
-.venv\Scripts\python.exe tests\run_all.py               # comprehensive regression suite across targeted modules
+python tests/test_offline.py                            # no SOLIDWORKS needed (runs on Linux and in CI on every push)
+.venv\Scripts\python.exe tests\run_all.py               # full live regression: 35 test files on a dedicated hidden instance
 ```
 
-The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. All tests in the regression suite (255 offline checks + 171 targeted live checks across all 5 functional areas) pass with 100% green status on a dedicated instance with zero orphan processes.
+The live tests build parts **only through the MCP tools** and compare the measured numbers with expected values. The last full regression (2026-10-31) passed 2782/2782 checks in 35 files, with zero orphan SOLIDWORKS processes.
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 558 tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 473 working tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.

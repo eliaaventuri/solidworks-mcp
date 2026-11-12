@@ -120,7 +120,7 @@ def _prompt_create_part(args: Dict[str, str]) -> str:
     desc = args.get("description", "Parametric 3D part")
     mat = args.get("material")
     unit = args.get("unit", "mm")
-    mat_step = f"6. Apply material '{mat}' using apply_material." if mat else "6. (Optional) Assign an appropriate material using apply_material."
+    mat_step = f"8. Apply material '{mat}' using assign_material." if mat else "8. (Optional) Assign an appropriate material using assign_material."
     return f"""Please model the following part in SolidWorks:
 
 Part requirements:
@@ -128,20 +128,20 @@ Part requirements:
 Target unit: {unit}
 
 Follow this step-by-step workflow:
-1. Ensure connection to SolidWorks and set default unit to '{unit}' via set_units.
+1. Ensure connection to SolidWorks (connect_solidworks) and set the default unit to '{unit}' via set_units.
 2. Create a new part document using create_new_part.
 3. Select an appropriate standard reference plane (Front, Top, or Right) and start a sketch using create_sketch.
 4. Draw the base profile geometry (draw_line, draw_rectangle, draw_circle, draw_arc, etc.).
-5. Add sketch dimensions (add_sketch_dimension) and relations to fully define the sketch.
-6. Create the base feature (create_extrusion, create_revolve, etc.).
+5. Add sketch dimensions (add_sketch_dimension) and relations (add_sketch_relation) to fully define the sketch.
+6. Create the base feature (extrude_boss, revolve_boss, etc.).
 7. Add subsequent features as required:
-   - Holes via create_hole (select standard or Hole Wizard dimensions)
-   - Cuts via cut_extrude or cut_revolve
-   - Fillets and chamfers via create_fillet and create_chamfer
-   - Patterns (linear, circular, etc.) if symmetric features exist
+   - Holes via create_hole (Hole Wizard sizes, placed by coordinates)
+   - Cuts via extrude_cut or revolve_cut (sketch on a body face with create_sketch_on_face)
+   - Fillets and chamfers via fillet_at_points and chamfer_at_points
+   - Patterns via linear_pattern, circular_pattern or mirror_feature if repeated features exist
 {mat_step}
-8. Verify the result using get_part_mass_properties to report volume, mass, and center of gravity.
-9. Zoom to fit and generate a preview badge or image using export_model_image if requested.
+9. Verify the result using get_part_mass_properties (volume, mass, center of mass) and get_rebuild_errors (clean rebuild).
+10. Generate a preview image using export_model_image if requested.
 """
 
 
@@ -149,19 +149,21 @@ def _prompt_create_drawing(args: Dict[str, str]) -> str:
     part_name = args.get("part_name", "active model")
     fmt = args.get("sheet_format", "A3").upper()
     export_pdf = args.get("export_pdf", "true").lower() in ("true", "1", "yes")
-    pdf_step = "6. Export the finalized drawing sheet to PDF using export_drawing." if export_pdf else "6. Save the drawing document using save_drawing."
+    pdf_step = ("6. Export the finalized drawing sheet to PDF using export_drawing." if export_pdf
+                else "6. Save the drawing document using save_drawing (the file path is required).")
     return f"""Please generate a complete ISO manufacturing drawing for {part_name}:
 
 Target sheet format: ISO {fmt} (first-angle projection)
 
 Follow this step-by-step workflow:
-1. Create a new drawing document using create_drawing(format='{fmt}').
-2. Add standard layout views using auto_layout_views or add_standard_views (Front, Top, Right, and Isometric).
-3. Insert model driving dimensions using insert_model_dimensions, or dimension specific critical features.
+1. Create a new drawing document using create_drawing(paper_size='{fmt}') (the model must be saved).
+2. Add the standard views with automatic placement and scale using add_standard_views (front, top, right, and isometric).
+3. Insert model driving dimensions using insert_model_dimensions, then tidy them with arrange_drawing_dimensions.
 4. Add section views (add_section_view) or detail views (add_detail_view) for internal or small geometry if needed.
-5. Apply geometric tolerances (add_geometric_tolerance), datum references (add_datum), and surface roughness notes (add_surface_finish) as appropriate.
+5. Apply geometric tolerances (add_geometric_tolerance), datum references (add_datum), and surface roughness symbols (add_surface_finish) as appropriate.
 {pdf_step}
-7. Verify that no dimensions or labels overlap and report the drawing status.
+7. Run audit_drawing (title block, dangling dimensions, annotations outside the sheet), export a PNG with export_drawing to check
+   visually that no dimensions or labels overlap, and report the drawing status.
 """
 
 
@@ -169,7 +171,8 @@ def _prompt_run_simulation(args: Dict[str, str]) -> str:
     loads = args.get("load_description", "")
     study_type = args.get("study_type", "static").lower()
     mat = args.get("material")
-    mat_step = f"2. Ensure material '{mat}' is assigned to the model using apply_material." if mat else "2. Ensure the active part has a valid material assigned (check via get_part_mass_properties or apply_material)."
+    mat_step = (f"2. Ensure material '{mat}' is assigned to the model using assign_material." if mat
+                else "2. Ensure the active part has a valid material assigned (check via get_part_mass_properties, assign with assign_material).")
     return f"""Please setup and execute an FEA simulation in SolidWorks Simulation:
 
 Study type: {study_type}
@@ -177,12 +180,13 @@ Boundary conditions and loads:
 {loads}
 
 Follow this step-by-step workflow:
-1. Verify the active part document.
+1. Verify the active part document and save it with save_document (a study needs a saved file).
 {mat_step}
-3. Create the study using create_static_study(name='{study_type.capitalize()}_Study', analysis='{study_type}').
-4. Apply fixtures:
-   - For fixed constraints: use add_fixed_fixture.
-   - For roller/slider or reference constraints: apply appropriate fixture tools.
+3. Create the study using create_static_study(name='{study_type.capitalize()}_Study', analysis='{study_type}')
+   (analysis: static, frequency, buckling or thermal; for other study types look them up with search_tools).
+4. Apply fixtures with add_restraint (faces picked by a point ON each face):
+   - For fixed constraints: kind='fixed'.
+   - For roller/slider, hinge or symmetry constraints: kind='roller', 'hinge' or 'symmetry'.
 5. Apply external loads according to the specifications:
    - For forces: add_force
    - For pressure: add_pressure
@@ -210,16 +214,16 @@ Components and assembly intent:
 
 Follow this step-by-step workflow:
 1. Create a new assembly document using create_new_assembly.
-2. Insert the first base component using insert_component (keep it fixed at the origin).
-3. Insert subsequent components using insert_component(fixed=false).
+2. Insert the first base component using insert_component(fixed=true) at the origin (component files must be saved).
+3. Insert subsequent components using insert_component(fixed=false), roughly near their final position.
 4. Apply mating relationships using add_mate:
-   - Standard mates: coincident, concentric, parallel, perpendicular, distance, angle.
-   - Advanced/limit mates: limit distance, limit angle, width, symmetric.
-   - Mechanical mates: gear, screw, rack-and-pinion.
-5. Verify the assembly kinematics:
-   - Measure remaining degrees of freedom using get_assembly_degrees_of_freedom.
+   - Standard mates: coincident, concentric, parallel, perpendicular, tangent, distance, angle.
+   - Advanced mates: distance or angle limits (min_value / max_value), width, symmetric.
+   - Mechanical mates: gear and screw (add_mate), hinge (add_hinge_mate).
+5. Verify the assembly:
+   - Constraint status and remaining degrees of freedom using get_assembly_status.
    - Test movement using move_component.
-   - Check for interference using check_assembly_interference.
+   - Check for interference using check_interference.
 6. (Optional) Create an exploded view using create_exploded_view.
 7. Save the assembly using save_document.
 """
@@ -236,8 +240,8 @@ Target path: {filepath}
 {cfg_note}
 
 Follow this step-by-step workflow:
-1. Verify the active model and ensure all features are rebuilt (rebuild_model).
-2. If a specific configuration is requested, activate it using set_active_configuration.
+1. Verify the active model and make sure it rebuilds without errors (get_rebuild_errors).
+2. If a specific configuration is requested, pass it as the configuration argument of export_model (no need to activate it first).
 3. Export the file using export_model(filepath='{filepath}', format='{fmt}'{f", configuration='{cfg}'" if cfg else ""}).
 4. Verify the export file integrity using inspect_export_file:
    - Check for manifold solid geometry
