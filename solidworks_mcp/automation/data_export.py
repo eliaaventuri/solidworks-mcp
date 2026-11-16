@@ -59,6 +59,7 @@ import pythoncom
 
 from ..constants import SwErrors
 from .modeling_base import null_variant
+from ..utils.keep_file import keeps_old_file, set_aside
 from ..utils.pdf3d import inspect_pdf3d
 from ..utils.edrawings import inspect_edrawings
 from ..utils.sw_lang import lang_folders
@@ -1517,6 +1518,7 @@ class DataExportOperations:
         except Exception as e:
             return self._dx_fail("inspect_export_file", e)
 
+    @keeps_old_file
     def export_model(self, filepath: str, format: str = None, configuration: str = None, quality: str = "fine",
                      deviation: float = None, angle: float = None, binary: bool = True, step_ap: int = 214,
                      units: str = "mm", iges_representation: str = "surfaces", one_file: bool = True,
@@ -1548,8 +1550,7 @@ class DataExportOperations:
                                     f"sovrascritto. Usa direttamente quel nome (con overwrite=true se voluto).",
                                     SwErrors.swFileSaveError, {"refused": "file_exists", "filepath": filepath})
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            set_aside(self, filepath)        # il file vecchio torna al suo posto se l'export non riesce
             app = self._sw_app
             prev_cfg = None
             unit_ids = {"mm": 0, "cm": 1, "m": 2, "inch": 3, "in": 3, "ft": 4}
@@ -1697,6 +1698,7 @@ class DataExportOperations:
                 pass
         doc.ClearSelection2(True)
 
+    @keeps_old_file
     def export_model_image(self, filepath: str, view: str = "isometric", style: str = "shaded_edges", width: int = None,
                            height: int = None, hide_reference: bool = True, white_background: bool = False,
                            zoom_to_fit: bool = True, perspective: bool = False) -> Dict:
@@ -1730,8 +1732,7 @@ class DataExportOperations:
             except OSError as ex:
                 return self._result(False, f"Cartella di destinazione non creabile ({os.path.dirname(filepath)}): {ex}",
                                     SwErrors.swInvalidInput)
-            if os.path.exists(filepath):
-                os.remove(filepath)
+            set_aside(self, filepath)        # il file vecchio torna al suo posto se la cattura non riesce
             app = self._sw_app
             mv = doc.ActiveView
             notes = []

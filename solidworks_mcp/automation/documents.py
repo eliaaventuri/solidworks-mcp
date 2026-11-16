@@ -395,9 +395,11 @@ class DocumentOperations:
                 if err:
                     docs = self._open_docs()
                     if docs:
-                        doc = docs[0][2]
-                    else:
-                        return self._result(True, "No document to close")
+                        # mai scegliere da soli quale documento chiudere (con discard si perderebbe lavoro altrui)
+                        names = ", ".join(str(d[0]) for d in docs)
+                        return self._result(False, "Nessun documento attivo: indica quale chiudere con `document`. "
+                                            f"Documenti aperti: {names}", SwErrors.swInvalidInput, {"open_documents": names})
+                    return self._result(True, "No document to close")
             title = self._get_doc_title(doc)
             path = self._get_doc_path(doc)
             reasons = self._unsaved_work(doc)
@@ -442,6 +444,7 @@ class DocumentOperations:
         "save_document", "save_drawing", "close_document", "open_document", "create_new_part", "create_new_assembly",
         "activate_document", "execute_python", "execute_tool_sequence", "try_on_copy", "connect_solidworks",
         "open_component", "edit_part_in_context", "mirror_components", "pack_and_go", "insert_part",
+        "create_drawing", "import_model", "split_body",     # aprono, creano o chiudono altri documenti
     })
 
     def _trial_snapshot(self, doc) -> Dict:

@@ -10,7 +10,6 @@ import json
 import base64
 import asyncio
 import logging
-import subprocess
 import time
 import traceback
 import concurrent.futures
@@ -597,7 +596,10 @@ def _format_tool_response(name: str, arguments: dict, result: Dict) -> list[Unio
 async def call_tool(name: str, arguments: dict) -> list[Union[TextContent, ImageContent]]:
     """Handle MCP tool calls"""
     try:
-        logger.info(f"Tool: {name}, Args: {arguments}")
+        # il codice di execute_python non va scritto nel log (puo' contenere dati dell'utente): solo la sua lunghezza
+        shown = ({k: (f"<{len(str(v))} caratteri>" if k == "code" else v) for k, v in arguments.items()}
+                 if name == "execute_python" and isinstance(arguments, dict) else arguments)
+        logger.info(f"Tool: {name}, Args: {shown}")
 
         blocked = _tool_blocked_reason(name)            # tool disattivato (execute_python) o gruppo non scelto in SW_MCP_TOOLSETS
         if blocked:
@@ -675,15 +677,11 @@ def _dedicated_lost() -> bool:
 def _timeout_message(name: str, timeout: float) -> str:
     if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
         pid = sw_automation._dedicated_pid
-        try:
-            killed = subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True).returncode == 0
-        except OSError:                                  # taskkill assente (test offline su Linux): istanza non chiusa
-            killed = False
-        if killed:
-            sw_automation._sw_app = None
-            sw_automation._connected = False
-            return (f"il tool '{name}' ha superato {timeout:.0f} s. L'istanza dedicata di SolidWorks (PID {pid}) e' stata chiusa "
-                    "perche' bloccata; i documenti non salvati sono persi. "
+        state = sw_automation.kill_dedicated()            # solo il processo lanciato dal server, mai un PID per numero
+        if state in ("killed", "already_exited"):
+            how = "e' stata chiusa perche' bloccata" if state == "killed" else "non era piu' in esecuzione"
+            return (f"il tool '{name}' ha superato {timeout:.0f} s. L'istanza dedicata di SolidWorks (PID {pid}) {how}; "
+                    "i documenti non salvati sono persi. "
                     + ("Il prossimo tool la rilancia (SW_MCP_AUTORESTART=1)." if sw_automation.autorestart_enabled()
                        else "Per riprendere: riavviare il server MCP, oppure impostare SW_MCP_AUTORESTART=1."))
         return (f"il tool '{name}' ha superato {timeout:.0f} s e l'istanza dedicata (PID {pid}) non si e' chiusa: "
@@ -720,7 +718,15 @@ def _dispatch_single_tool(name: str, arguments: dict) -> Dict:
         if name in table:
             method, allowed = table[name]
             kwargs = {k: v for k, v in arguments.items() if k in allowed}
-            return getattr(sw_automation, method)(**kwargs)
+            result = getattr(sw_automation, method)(**kwargs)
+            # un argomento con il nome sbagliato non deve sparire in silenzio (il tool userebbe il default e direbbe "fatto")
+            ignored = sorted(k for k in arguments if k not in allowed and k != "overwrite")
+            if ignored and isinstance(result, dict):
+                result["message"] = (f"{result.get('message', '')} ATTENZIONE: argomenti non riconosciuti e ignorati: "
+                                     f"{', '.join(ignored)} (ammessi: {', '.join(sorted(allowed))}).")
+                if isinstance(result.get("data"), dict):
+                    result["data"]["ignored_arguments"] = ignored
+            return result
     return sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
 
 
@@ -1377,7 +1383,10 @@ async def main():
         try:
             await asyncio.wait_for(asyncio.wrap_future(_SW_EXECUTOR.submit(_close_dedicated_on_exit)), timeout=60)
         except Exception as e:
-            logger.warning(f"chiusura dell'istanza dedicata: {e}")
+            # thread COM occupato da un tool bloccato: l'istanza nascosta resterebbe accesa senza nessuno che la guidi.
+            # Si chiude dal processo lanciato dal server (mai per numero di PID).
+            state = sw_automation.kill_dedicated() if sw_automation.is_dedicated_mode() else "none"
+            logger.warning(f"chiusura dell'istanza dedicata: {e!r}; processo: {state}")
         _SW_EXECUTOR.shutdown(wait=False)
 
 

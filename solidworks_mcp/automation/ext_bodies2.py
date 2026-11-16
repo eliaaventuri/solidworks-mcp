@@ -248,6 +248,13 @@ class Bodies2Operations:
                 doc.ClearSelection2(True)
                 return self._result(False, "Lo strumento non divide nessun corpo (non attraversa il corpo?).",
                                     SwErrors.swFeatureError, {"pieces": len(pieces)})
+            if save_path:
+                # i file di destinazione si controllano PRIMA di dividere (prima: divisione fatta e poi rifiuto del salvataggio)
+                busy = [t for t in (f"{base}_{k + 1}{ext}" for k in range(len(pieces))) if os.path.exists(t)]
+                if busy:
+                    doc.ClearSelection2(True)
+                    return self._result(False, f"File gia' esistenti: {busy}. Scegli un altro save_path (nulla e' stato diviso).",
+                                        SwErrors.swFileSaveError, {"refused": "file_exists", "existing": busy})
             feat = fm.PostSplitBody2(_vt_disp(pieces), False, _vt_disp(pieces), _vt_str([""] * len(pieces)), "")
             doc.ClearSelection2(True)
             created = [x for x in self._new_features(doc, before) if x["type"] != "ProfileFeature"]
@@ -277,11 +284,26 @@ class Bodies2Operations:
                 sv = fm.CreateSaveBodyFeature(_vt_disp(order), _vt_str(targets_paths), "", False, False)
                 doc.ClearSelection2(True)
                 # la feature apre i pezzi salvati e crea un assieme senza nome: si richiudono (i file sono gia' su disco)
-                closed = []
-                for t in self._bd2_open_titles():
-                    if t not in titles0:
+                # si chiudono SOLO i documenti di questa operazione: i pezzi appena salvati e l'assieme senza file che li
+                # raccoglie. Un documento comparso nel frattempo per altri motivi (aperto dall'utente) non si tocca.
+                closed, left = [], []
+                mine = {os.path.abspath(t).lower() for t in targets_paths}
+                stems = {os.path.splitext(os.path.basename(t))[0].lower() for t in targets_paths}
+                for t, p, d in self._open_docs():
+                    if t in titles0:
+                        continue
+                    is_piece = (bool(p) and os.path.abspath(str(p)).lower() in mine) or os.path.splitext(str(t))[0].lower() in stems
+                    try:
+                        unnamed_asm = (not p) and int(self._com(d, "GetType")) == 2
+                    except Exception:
+                        unnamed_asm = False
+                    if is_piece or unnamed_asm:
                         self.close_document(discard=True, document=t)
                         closed.append(t)
+                    else:
+                        left.append(t)
+                if left:
+                    data["documents_left_open"] = left
                 if closed:
                     self.activate_document(title_doc)
                     data["closed_temporary_documents"] = closed

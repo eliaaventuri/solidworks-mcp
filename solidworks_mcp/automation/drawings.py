@@ -24,6 +24,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.keep_file import keeps_old_file, set_aside
 from .drawing_dims import DrawingDimsMixin
 from .drawing_diam import DrawingDiamMixin
 from .drawing_annot import DrawingAnnotMixin
@@ -1951,6 +1952,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             doc.ActivateSheet(current)
         return found
 
+    @keeps_old_file
     def export_drawing(self, filepath: str, format: str = None) -> Dict:
         """Export the active sheet/drawing: pdf, dwg, dxf, png, jpg (from the extension or `format`)."""
         try:
@@ -1978,8 +1980,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                         "SolidWorks. Esporta in PDF o elimina la vista interrotta.",
                         SwErrors.swExportError)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            if os.path.exists(path):
-                os.remove(path)
+            set_aside(self, path)            # il file vecchio torna al suo posto se l'export non riesce
             self._fit_title_number(doc)
             ok, e, w = self._save_as(doc, path)
             size = os.path.getsize(path) if os.path.exists(path) else 0

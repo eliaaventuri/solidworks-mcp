@@ -14,6 +14,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.safe_math import safe_eval
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,7 @@ def _eval_math_expr(expr: str, t_val: float) -> float:
         "ln": math.log,
         "abs": abs,
     }
-    cleaned = expr.replace("^", "**")
-    return float(eval(cleaned, {"__builtins__": {}}, safe_dict))
+    return safe_eval(expr, safe_dict)            # niente eval: solo numeri, operatori e le funzioni elencate sopra
 
 
 class Sketch4Operations:

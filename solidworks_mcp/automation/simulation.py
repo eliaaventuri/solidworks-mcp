@@ -144,6 +144,9 @@ def _dialog_texts(pid: int, press_ok: bool = False) -> List[str]:
     return out
 
 
+from ..utils.keep_file import keeps_old_file, set_aside  # noqa: E402
+
+
 class SimulationOperations:
     """Simulazione statica lineare. Richiede SolidWorksAutomation (get_active_doc, _com, _result, _find_entity...)."""
 
@@ -1126,9 +1129,8 @@ class SimulationOperations:
                                 logger.warning(f"run_simulation: finestra aperta da SolidWorks durante l'analisi: {d}")
                     time.sleep(0.5)
                 if not flag["done"] and pid and self.is_dedicated_mode():
-                    import subprocess
                     flag["killed"] = True
-                    subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+                    self.kill_dedicated()                 # solo il processo lanciato dal server, mai un PID per numero
             th = threading.Thread(target=watchdog, daemon=True)
             th.start()
             t0 = time.time()
@@ -1422,6 +1424,7 @@ class SimulationOperations:
             logger.error(f"get_simulation_stress_on_faces: {e} {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
+    @keeps_old_file
     def export_simulation_plot(self, filepath: str, result: str = "von_mises", view: str = "isometric",
                                study: str = None) -> Dict:
         """Esporta in PNG la mappa a colori dei risultati. result: von_mises | displacement | strain | un nome di grafico esistente."""
@@ -1442,8 +1445,7 @@ class SimulationOperations:
             doc.ViewZoomtofit2()
             fp = os.path.abspath(filepath)
             os.makedirs(os.path.dirname(fp), exist_ok=True)
-            if os.path.exists(fp):
-                os.remove(fp)
+            set_aside(self, fp)              # il file vecchio torna al suo posto se l'export non riesce
             ok = doc.Extension.SaveAs(fp, 0, 1, _nullv(), _bi(), _bi())
             size = os.path.getsize(fp) if os.path.exists(fp) else 0
             if not ok or size == 0:

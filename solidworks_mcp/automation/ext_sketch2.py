@@ -815,7 +815,8 @@ class Sketch2Operations:
                 return None
             ns = dict(_EQ_FUNCS)
             ns[var] = value
-            return float(eval(e, {"__builtins__": {}}, ns))
+            from ..utils.safe_math import safe_eval
+            return safe_eval(e, ns)              # niente eval: solo numeri, operatori e le funzioni ammesse
         except Exception:
             return None
 

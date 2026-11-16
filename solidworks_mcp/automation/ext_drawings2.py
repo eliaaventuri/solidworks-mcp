@@ -12,6 +12,7 @@ from typing import Dict
 
 from ..constants import SwErrors
 from .modeling_base import null_variant
+from ..utils.keep_file import keeps_old_file, set_aside
 
 logger = logging.getLogger(__name__)
 
@@ -789,6 +790,7 @@ class Drawings2Operations:
             return self._result(False, f"insert_drawing_block: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 10. Audit ed Esportazione
+    @keeps_old_file
     def export_pdf_layers(self, filepath: str, include_layers: list = None, overwrite: bool = False) -> Dict:
         """Esporta la tavola in un file PDF vettoriale preservando i layer CAD separati."""
         try:
@@ -799,8 +801,7 @@ class Drawings2Operations:
             if os.path.exists(path) and not overwrite:
                 return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            if os.path.exists(path):
-                os.remove(path)
+            set_aside(self, path)            # il file vecchio torna al suo posto se l'export non riesce
             ok, _e, _w = self._save_as(doc, path)
             if not ok:
                 return self._result(False, f"export_pdf_layers: esportazione PDF non riuscita ({path})", SwErrors.swExportError)

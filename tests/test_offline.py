@@ -76,6 +76,7 @@ if not STUBBED:
     from solidworks_mcp.automation import base as _base                # noqa: E402
     _base.find_solidworks = lambda *a, **k: None
     SolidWorksAutomation._try_connect_com = lambda self: False
+    _REAL_CONNECT_DEDICATED = SolidWorksAutomation._connect_dedicated   # per provarne il ramo d'errore con un processo finto
     SolidWorksAutomation._connect_dedicated = lambda self: self._result(False, "test offline: SolidWorks non usato",
                                                                         SwErrors.swConnectionError)
 
@@ -3171,6 +3172,167 @@ def test_report_fix_tools():
     record("execute_tool_sequence: try_on_copy annidato non ammesso", "nested 'try_on_copy'" in res[0].text)
 
 
+# ============================================================================ revisione 2026-11-12: sicurezza e file
+def test_review_fixes(tmp):
+    import logging
+    import subprocess as sp
+
+    real = srv.sw_automation
+
+    # 1. export con overwrite: il file vecchio non deve andare perso se l'export fallisce
+    try:
+        from solidworks_mcp.utils import keep_file as kf
+    except Exception as e:
+        kf = None
+        record("keep_file: modulo presente", False, repr(e))
+    if kf is not None:
+        class _Exp:
+            @kf.keeps_old_file
+            def export(self, path, write, ok):
+                kf.set_aside(self, path)
+                if write is not None:
+                    Path(path).write_bytes(write)
+                if ok is None:
+                    raise RuntimeError("boom")
+                return {"success": ok}
+        p = Path(tmp) / "vecchio.pdf"
+        p.write_bytes(b"VECCHIO")
+        _Exp().export(str(p), None, False)
+        record("export fallito senza file nuovo: il file vecchio torna al suo posto", p.exists() and p.read_bytes() == b"VECCHIO")
+        _Exp().export(str(p), b"", False)
+        record("export fallito con file vuoto: il file vecchio torna al suo posto", p.read_bytes() == b"VECCHIO")
+        try:
+            _Exp().export(str(p), None, None)
+        except RuntimeError:
+            pass
+        record("export con eccezione: il file vecchio torna al suo posto", p.exists() and p.read_bytes() == b"VECCHIO")
+        _Exp().export(str(p), b"NUOVO", True)
+        record("export riuscito: resta il file nuovo e nessuna copia messa da parte",
+               p.read_bytes() == b"NUOVO" and [f.name for f in Path(tmp).glob("vecchio.pdf*")] == ["vecchio.pdf"])
+        p2 = Path(tmp) / "per_componente.stl"
+        p2.write_bytes(b"VECCHIO")
+        _Exp().export(str(p2), None, True)
+        record("tool riuscito senza quel file (STL per componente): il vecchio non viene rimesso",
+               not list(Path(tmp).glob("per_componente.stl*")))
+    for meth in ("export_drawing", "export_model", "export_model_image", "export_simulation_plot", "export_pdf_layers"):
+        fn = getattr(SolidWorksAutomation, meth)
+        src = inspect.getsource(inspect.unwrap(fn))
+        record(f"{meth}: il file vecchio e' messo da parte, non cancellato prima dell'export",
+               hasattr(fn, "__wrapped__") and "set_aside(" in src)
+
+    # 2. argomenti sconosciuti segnalati; 3. il codice di execute_python non finisce nel log
+    fake = _FakeAutomation()
+    srv.sw_automation = fake
+    seen = []
+
+    class _H(logging.Handler):
+        def emit(self, rec):
+            seen.append(rec.getMessage())
+    h, old_level = _H(), srv.logger.level
+    srv.logger.addHandler(h)
+    srv.logger.setLevel(logging.INFO)
+    try:
+        fake.draw_line = lambda **kw: {"success": True, "message": "ok", "error_code": 0, "error_name": "swSuccess", "data": {}}
+        text = asyncio.run(srv.call_tool("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1, "lunghezza": 5}))[0].text
+        record("argomento sconosciuto: segnalato nel risultato", text.startswith("[SUCCESS]") and "lunghezza" in text, text[:160])
+        text = asyncio.run(srv.call_tool("draw_line", {"x1": 0, "y1": 0, "x2": 1, "y2": 1}))[0].text
+        record("argomenti giusti: nessun avviso", "ignorat" not in text, text[:120])
+        asyncio.run(srv.call_tool("execute_python", {"code": "SEGRETO_12345 = 1"}))
+        record("log: il codice di execute_python non viene scritto",
+               any("execute_python" in s for s in seen) and not any("SEGRETO_12345" in s for s in seen), str(seen[-2:])[:160])
+    finally:
+        srv.logger.removeHandler(h)
+        srv.logger.setLevel(old_level)
+        srv.sw_automation = real
+
+    # 4. chiusura dell'istanza dedicata: solo dal processo lanciato dal server, mai per numero di PID
+    class _Proc:
+        def __init__(self, alive):
+            self.alive, self.killed, self.pid, self.returncode = alive, 0, 424242, 1
+
+        def poll(self):
+            return None if self.alive else 1
+
+        def kill(self):
+            self.killed += 1
+            self.alive = False
+
+        def wait(self, timeout=None):
+            return 0
+    calls = []
+    old_run, old_popen = sp.run, sp.Popen
+    old_env = {k: os.environ.get(k) for k in ("SW_MCP_STARTUP_TIMEOUT", "SW_MCP_EXE")}
+    sp.run = lambda *a, **k: (calls.append(a[0] if a else k.get("args")), types.SimpleNamespace(returncode=1, stdout="", stderr=""))[1]
+    try:
+        auto = object.__new__(SolidWorksAutomation)
+        auto._sw_app, auto._connected, auto._dedicated_pid = object(), True, 424242
+        auto.is_dedicated_mode = lambda: True
+        live = _Proc(True)
+        auto._dedicated_proc = live
+        srv.sw_automation = auto
+        msg = srv._timeout_message("draw_line", 5)
+        record("timeout: chiude l'istanza dal SUO processo, senza taskkill per numero",
+               live.killed == 1 and not calls and "chiusa" in msg, f"kill={live.killed} taskkill={calls} {msg[:70]}")
+        auto._sw_app, auto._connected, auto._dedicated_pid = object(), True, 424242
+        dead = _Proc(False)
+        auto._dedicated_proc = dead
+        calls.clear()
+        msg = srv._timeout_message("draw_line", 5)
+        record("timeout: processo gia' uscito -> nessuna chiusura (quel numero puo' essere di un altro programma)",
+               dead.killed == 0 and not calls, f"kill={dead.killed} taskkill={calls} {msg[:70]}")
+        if os.name == "nt":
+            spawned = _Proc(True)
+            sp.Popen = lambda *a, **k: spawned
+            os.environ["SW_MCP_STARTUP_TIMEOUT"], os.environ["SW_MCP_EXE"] = "0", sys.executable
+            auto2 = object.__new__(SolidWorksAutomation)
+            auto2._config = types.SimpleNamespace(exe_path="auto")
+            auto2._find_instance_by_pid = lambda pid: None
+            r = globals().get("_REAL_CONNECT_DEDICATED", SolidWorksAutomation._connect_dedicated)(auto2)
+            record("avvio dell'istanza dedicata fallito: il processo lanciato viene chiuso (niente orfani)",
+                   (not r["success"]) and spawned.killed == 1 and not auto2.__dict__.get("_dedicated_pid"),
+                   f"kill={spawned.killed} pid={auto2.__dict__.get('_dedicated_pid')} {r['message'][:60]}")
+    finally:
+        sp.run, sp.Popen = old_run, old_popen
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        srv.sw_automation = real
+
+    # 5. close_document senza documento attivo non sceglie da solo un documento da chiudere
+    auto3 = object.__new__(SolidWorksAutomation)
+    auto3._sw_app, auto3._connected = types.SimpleNamespace(RevisionNumber="34.0"), True
+    auto3.get_active_doc = lambda: (None, {"success": False, "message": "nessuno"})
+    auto3._open_docs = lambda: [("Staffa.SLDPRT", "C:/x/Staffa.SLDPRT", object())]
+    r = auto3.close_document(discard=True)
+    record("close_document senza documento attivo: rifiuta ed elenca i documenti aperti",
+           (not r["success"]) and "attivo" in r["message"] and "Staffa" in r["message"], r["message"][:150])
+
+    # 7. espressioni delle curve da equazione: solo matematica (prima erano passate a eval, aggirabile)
+    import math
+    from solidworks_mcp.automation import ext_sketch4 as s4
+    try:
+        ok_math = abs(s4._eval_math_expr("2*sin(t)+t^2", 1.0) - (2 * math.sin(1.0) + 1.0)) < 1e-12
+    except Exception as e:
+        ok_math = False
+        print("   espressione valida rifiutata:", repr(e))
+    escaped = []
+    for bad in ("().__class__.__bases__[0].__subclasses__().__len__()", "t.real.__class__", "[c for c in (1,2)][0]",
+                "(lambda: 1)()", "'a' * 3 == 'aaa'"):
+        try:
+            s4._eval_math_expr(bad, 0.0)
+            escaped.append(bad)
+        except Exception:
+            pass
+    record("curve da equazione: la matematica funziona, il resto di Python e' rifiutato", ok_math and not escaped,
+           f"valida={ok_math} accettate={escaped}")
+
+    # 6. prova su copia: niente tool che aprono o creano altri documenti
+    record("try_on_copy blocca create_drawing, import_model e split_body",
+           {"create_drawing", "import_model", "split_body"} <= SolidWorksAutomation.TRIAL_BLOCKED_TOOLS)
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -3186,6 +3348,7 @@ def main():
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
+                         ("revisione sicurezza e file", lambda: test_review_fixes(tmp)),
                          ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp)), ("correzioni dal rapporto", test_report_fix_tools)):
             try:
                 fn()

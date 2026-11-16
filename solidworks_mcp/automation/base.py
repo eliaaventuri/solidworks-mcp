@@ -157,6 +157,8 @@ class SolidWorksAutomation:
         while time.time() - start < timeout:
             time.sleep(3)
             if proc.poll() is not None:
+                self._dedicated_proc = None
+                self._dedicated_pid = None
                 return self._result(False, f"Dedicated SolidWorks exited early (code {proc.returncode})",
                                     SwErrors.swConnectionError)
             try:
@@ -167,8 +169,13 @@ class SolidWorksAutomation:
             if app is not None:
                 break
         if app is None:
-            return self._result(False, f"Dedicated SolidWorks PID {proc.pid} not in ROT after {timeout:.0f}s",
-                                SwErrors.swConnectionError)
+            # il processo lanciato non deve restare acceso senza nessuno che lo guidi (ogni nuovo tentativo ne aprirebbe un altro)
+            state = self.kill_dedicated()
+            if state != "failed":                    # nessuna istanza da ricordare: il prossimo connect ne lancia una nuova
+                self._dedicated_proc = None
+                self._dedicated_pid = None
+            return self._result(False, f"Dedicated SolidWorks PID {proc.pid} not in ROT after {timeout:.0f}s "
+                                f"(processo lanciato: {state})", SwErrors.swConnectionError)
         self._sw_app = app
         for attr, val in (("Visible", False), ("UserControl", False)):
             try:
@@ -181,6 +188,28 @@ class SolidWorksAutomation:
                             SwErrors.swSuccess,
                             {"version": str(version), "launched": True, "pid": proc.pid, "dedicated": True,
                              "ui_language": self._ui_language()})
+
+    def kill_dedicated(self) -> str:
+        """Chiude di forza l'istanza dedicata, e SOLO quella: passa dal processo lanciato da questo server (Popen), mai da
+        `taskkill /PID numero` (se il processo e' gia' uscito, quel numero puo' essere stato riusato da un altro programma).
+        -> 'killed' | 'already_exited' | 'failed' | 'none'. Quando l'istanza non c'e' piu' azzera la connessione; PID e
+        processo restano annotati: servono a `connect` per riconoscere l'istanza persa (rilancio solo con SW_MCP_AUTORESTART=1)."""
+        proc = self.__dict__.get("_dedicated_proc")
+        if proc is None:
+            return "none"
+        state = "already_exited"
+        if proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(timeout=30)
+                state = "killed"
+            except Exception as e:
+                logger.warning(f"chiusura dell'istanza dedicata (PID {getattr(proc, 'pid', '?')}) non riuscita: {e}")
+                state = "killed" if proc.poll() is not None else "failed"
+        if state != "failed":
+            self._sw_app = None
+            self._connected = False
+        return state
 
     def _keep_hidden(self):
         """In dedicated mode SolidWorks tends to re-show itself: hide it again (cheap)."""
@@ -238,10 +267,12 @@ class SolidWorksAutomation:
             if proc is not None:
                 proc.wait(timeout=60)
         except Exception:
-            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+            if self.kill_dedicated() == "failed":
+                return self._result(False, f"Dedicated instance PID {pid} did not close", SwErrors.swConnectionError)
         self._sw_app = None
         self._connected = False
         self._dedicated_pid = None
+        self._dedicated_proc = None
         return self._result(True, f"Dedicated instance PID {pid} closed")
 
     # ========================================================================
