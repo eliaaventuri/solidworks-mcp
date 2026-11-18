@@ -628,6 +628,8 @@ class DataExportOperations:
             cfgs = self._dx_cfg_list(doc, configuration)
             body_name = str(bd.Name) if bd is not None else None      # dopo la ricostruzione il puntatore al corpo non e' piu' valido
             tries = 0
+            first = lambda r: r[0] if isinstance(r, tuple) else r
+            read = {}
             for c in cfgs:
                 if bd is not None:
                     # Body2.SetMaterialProperty restituisce True ma non fa nulla se il corpo non e' stato "toccato" prima da un
@@ -639,14 +641,29 @@ class DataExportOperations:
                         bd.SetMaterialProperty(c, mat["file"], mat["name"])
                         self._dx_rebuild(doc)
                         bd, _e = self._dx_body(doc, body_name)
-                        r = bd.GetMaterialPropertyName(c, _byref_bstr())
-                        if (r[0] if isinstance(r, tuple) else r) == mat["name"]:
+                        read[c] = str(first(bd.GetMaterialPropertyName(c, _byref_bstr())) or "")
+                        if read[c] == mat["name"]:
                             break
                 else:
-                    doc.SetMaterialPropertyName2(c, mat["database"], mat["name"])
+                    # pezzo intero: rilettura dopo la ricostruzione (prima nessuna: successo anche se non applicato).
+                    # Misurato 2026-11-16: con un corpo che ha un materiale suo e dopo get_part_mass_properties(body=...) la
+                    # PRIMA chiamata non cambia il materiale del pezzo (resta il vecchio), la seconda si' -> fino a 3 tentativi
+                    for tries in range(1, 4):
+                        doc.SetMaterialPropertyName2(c, mat["database"], mat["name"])
+                        self._dx_rebuild(doc)
+                        read[c] = str(first(doc.GetMaterialPropertyName2(c, _byref_bstr())) or "")
+                        if read[c] == mat["name"]:
+                            break
             self._dx_rebuild(doc)
+            wrong = {c: v for c, v in read.items() if v != mat["name"]}
+            if wrong:
+                return self._result(False, f"Materiale '{mat['name']}' NON assegnato" + (f" al corpo {body_name}" if bd is not None else "")
+                                    + f": SolidWorks riporta {wrong} dopo {tries} tentativi",
+                                    SwErrors.swFeatureError, {"material": mat["name"], "read_back": read, "body": body_name,
+                                                              "attempts": tries or None})
             data = {"material": mat["name"], "category": mat["category"], "library": mat["file"],
-                    "density_table_kg_m3": mat["density"], "configurations": cfgs, "body": body_name, "attempts": tries or None}
+                    "density_table_kg_m3": mat["density"], "configurations": cfgs, "body": body_name, "attempts": tries or None,
+                    "read_back": read}
             if bd is None and link_title_block:
                 lr = self.link_material_to_title_block()
                 data["title_block_link"] = lr["success"]
@@ -1026,19 +1043,31 @@ class DataExportOperations:
             out.append({"index": i, "equation": eq, "value": val, "global_variable": gv})
         return em, out
 
-    def _dx_check_model(self, doc) -> Dict:
-        """Ricostruisce e riporta feature con errori + volume (pezzi)."""
+    def _dx_check_model(self, doc, before: Dict = None) -> Dict:
+        """Ricostruisce e riporta le feature in errore + volume (pezzi). GetErrorCode2 letto con `_feat_error` (prima
+        `int(...)` su un metodo: eccezione ingoiata, `feature_errors` sempre vuoto). Gli avvisi non contano come errori.
+        `before` = risultato di una chiamata fatta PRIMA della modifica: `new_feature_errors` sono le feature andate in
+        errore per colpa della modifica (un modello gia' rotto non fa rifiutare un'equazione innocente)."""
         self._dx_rebuild(doc)
         info: Dict[str, Any] = {}
-        if int(doc.GetType) == 1:
-            bad = []
+        if int(self._com(doc, "GetType")) == 1:
+            bad, warn, unread = [], [], []
             for n, t, f in self._features(doc):
-                try:
-                    if int(self._com(f, "GetErrorCode2")) not in (0,):
-                        bad.append(n)
-                except Exception:
-                    pass
+                code, is_warning = self._feat_error(f)
+                if code is None:
+                    unread.append(n)
+                elif code and not is_warning:
+                    bad.append(n)
+                elif code or is_warning:
+                    warn.append(n)
             info["feature_errors"] = bad
+            if warn:
+                info["feature_warnings"] = warn
+            if unread:
+                info["feature_errors_unreadable"] = unread
+            if before is not None:
+                old = set(before.get("feature_errors", []))
+                info["new_feature_errors"] = [n for n in bad if n not in old]
             info["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 4)
         return info
 
@@ -1071,6 +1100,7 @@ class DataExportOperations:
             text = f'"{name}"={value}'
             idx = next((e["index"] for e in eqs if e["global_variable"]
                         and re.match(rf'^"{re.escape(name)}"\s*=', e["equation"])), None)
+            base = self._dx_check_model(doc)
             if idx is None:
                 r = em.Add2(-1, text, True)
                 created = True
@@ -1079,10 +1109,10 @@ class DataExportOperations:
             else:
                 self._dx_set_eq(doc, em, idx, text)
                 created = False
-            info = self._dx_check_model(doc)
+            info = self._dx_check_model(doc, base)
             em, eqs = self._dx_eqs(doc)
             cur = next((e for e in eqs if re.match(rf'^"{re.escape(name)}"\s*=', e["equation"])), None)
-            return self._result(cur is not None and not info.get("feature_errors"),
+            return self._result(cur is not None and not info.get("new_feature_errors"),
                                 f"Variabile '{name}' {'creata' if created else 'modificata'} = {cur['value'] if cur else '?'}",
                                 SwErrors.swSuccess, {"name": name, "value": cur["value"] if cur else None,
                                                      "equation": cur["equation"] if cur else text, "created": created, **info})
@@ -1112,6 +1142,18 @@ class DataExportOperations:
             doc, err = self._dx_doc((1, 2))
             if err:
                 return err
+            base = self._dx_check_model(doc)
+            # valore della quota guidata (lato sinistro "D1@Schizzo1"): cancellare l'equazione NON lo riporta indietro
+            # (misurato 2026-11-16: equazione rimossa ma quota rimasta a 100, foro fuori dal blocco), quindi si ripristina a mano
+            lhs = re.match(r'\s*"([^"]+@[^"]+)"\s*=', str(equation))
+            old_dim = None
+            if lhs:
+                try:
+                    p = doc.Parameter(lhs.group(1))
+                    if p is not None:
+                        old_dim = (p, float(self._com(p, "SystemValue")))
+                except Exception:
+                    old_dim = None
             em = doc.GetEquationMgr
             n0 = int(em.GetCount)
             r = em.Add2(-1, equation, True)
@@ -1119,12 +1161,27 @@ class DataExportOperations:
                 return self._result(False, f"Equazione rifiutata (quota o variabile inesistente?): {equation}",
                                     SwErrors.swInvalidInput)
             em, eqs = self._dx_eqs(doc)
-            info = self._dx_check_model(doc)
+            info = self._dx_check_model(doc, base)
             cur = eqs[-1]
-            if info.get("feature_errors"):
+            if info.get("new_feature_errors"):
                 em.Delete(n0)
-                self._dx_rebuild(doc)
-                return self._result(False, f"Equazione con errori, rimossa: {equation}", SwErrors.swInvalidInput, info)
+                restored = None
+                if old_dim is not None:
+                    try:
+                        old_dim[0].SystemValue = old_dim[1]
+                        restored = abs(float(self._com(old_dim[0], "SystemValue")) - old_dim[1]) < 1e-12
+                    except Exception as e:
+                        logger.warning(f"add_equation: quota {lhs.group(1)} non ripristinata: {e}")
+                        restored = False
+                after = self._dx_check_model(doc, base)
+                info.update({"dimension_restored": restored, "errors_after_removal": after.get("new_feature_errors", []),
+                             "volume_after_removal_mm3": after.get("volume_mm3")})
+                msg = f"Equazione rimossa: manda in errore {info['new_feature_errors']}: {equation}"
+                if restored:
+                    msg += f" (quota {lhs.group(1)} riportata al valore di prima)"
+                if after.get("new_feature_errors"):
+                    msg += f" - ATTENZIONE: il modello resta in errore {after['new_feature_errors']}"
+                return self._result(False, msg, SwErrors.swInvalidInput, info)
             return self._result(True, f"Equazione {cur['index']}: {cur['equation']} = {cur['value']}", SwErrors.swSuccess,
                                 {"index": cur["index"], "value": cur["value"], **info})
         except Exception as e:
@@ -1139,10 +1196,11 @@ class DataExportOperations:
             em, eqs = self._dx_eqs(doc)
             if not (0 <= int(index) < len(eqs)):
                 return self._result(False, f"Indice {index} fuori intervallo (0..{len(eqs) - 1})", SwErrors.swInvalidInput)
+            base = self._dx_check_model(doc)
             self._dx_set_eq(doc, em, int(index), equation)
-            info = self._dx_check_model(doc)
+            info = self._dx_check_model(doc, base)
             em, eqs = self._dx_eqs(doc)
-            return self._result(not info.get("feature_errors"), f"Equazione {index}: {eqs[int(index)]['equation']} = {eqs[int(index)]['value']}",
+            return self._result(not info.get("new_feature_errors"), f"Equazione {index}: {eqs[int(index)]['equation']} = {eqs[int(index)]['value']}",
                                 SwErrors.swSuccess, {"equation": eqs[int(index)], **info})
         except Exception as e:
             return self._dx_fail("update_equation", e)

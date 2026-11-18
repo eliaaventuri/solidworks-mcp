@@ -451,6 +451,7 @@ class AssemblyAnalysisMixin:
 
             trajectory_collisions = []
             first_collision = None
+            failed_steps = []
 
             try:
                 for k in range(1, n_steps + 1):
@@ -461,6 +462,7 @@ class AssemblyAnalysisMixin:
                         doc.ForceRebuild2(False)
                     except Exception as ex:
                         logger.warning(f"detect_collisions step {k} transform error: {ex}")
+                        failed_steps.append(k)
                         continue
 
                     hits = self._run_interference_check(doc, target_names, include_coincident, treat_subassemblies_as_components)
@@ -482,11 +484,22 @@ class AssemblyAnalysisMixin:
                             break
             finally:
                 # Ripristino tassativo della posa iniziale
+                restore_error = ""
                 try:
                     comp.Transform2 = self._as_transform(M0, t0)
                     doc.ForceRebuild2(False)
-                except Exception:
-                    pass
+                except Exception as ex:
+                    restore_error = str(ex)
+                    logger.warning(f"detect_collisions: ripristino della posa: {ex}")
+            # (revisione 2026-11-12) posa RILETTA e confrontata con quella iniziale (prima `initial_pose_restored` era True scritto a mano)
+            try:
+                M1, t1 = self._as_pose(comp)
+                pose_err_mm = max(abs(float(a) - float(b)) for a, b in zip(t1, t0)) * 1000.0
+                rot_err = max(abs(float(M1[i][j]) - float(M0[i][j])) for i in range(3) for j in range(3))
+                restored = pose_err_mm < 1e-6 and rot_err < 1e-9
+            except Exception as ex:
+                restored, pose_err_mm, rot_err = False, None, None
+                restore_error = restore_error or f"posa non rileggibile: {ex}"
 
             has_collision = len(trajectory_collisions) > 0
             u = unit or "mm"
@@ -499,17 +512,28 @@ class AssemblyAnalysisMixin:
                 max_safe = round(total_dist_unit, 4)
                 msg = f"Nessuna collisione rilevata lungo la traiettoria ({total_dist_unit} {u} su {n_steps} passi)."
 
-            return self._result(True, msg, SwErrors.swSuccess, {
+            data = {
                 "mode": "dynamic",
                 "moving_component": moving_name,
                 "collision_detected": has_collision,
-                "steps_tested": len(trajectory_collisions) if (stop_on_collision and has_collision) else n_steps,
+                "steps_tested": (first_collision["step"] if (stop_on_collision and has_collision) else n_steps) - len(failed_steps),
                 "first_collision_step": first_collision["step"] if first_collision else None,
                 "max_safe_displacement": max_safe,
                 "unit": u,
-                "initial_pose_restored": True,
+                "initial_pose_restored": restored,
+                "motion": "Transform2 (moto imposto, non dagli accoppiamenti)",
                 "collisions": trajectory_collisions
-            })
+            }
+            if failed_steps:
+                data["failed_steps"] = failed_steps
+                msg += f" ATTENZIONE: passi non provati (componente non spostabile): {failed_steps}."
+            if not restored:
+                data["restore_error"] = restore_error
+                data["pose_error_mm"] = None if pose_err_mm is None else round(pose_err_mm, 6)
+                return self._result(False, msg + f" Posa iniziale di {moving_name} NON ripristinata"
+                                    + (f" (scarto {pose_err_mm:.4f} mm)" if pose_err_mm is not None else "")
+                                    + (f": {restore_error}" if restore_error else ""), SwErrors.swFeatureError, data)
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             return self._as_fail("detect_collisions", e)
 

@@ -140,12 +140,8 @@ class CurvesOperations:
         return best
 
     def _rebuild_error(self, feat) -> int:
-        try:
-            code = feat.GetErrorCode2
-            code = code[0] if isinstance(code, tuple) else code
-            return int(code or 0)
-        except Exception:
-            return 0
+        code, _warn = self._feat_error(feat)
+        return int(code or 0)
 
     def _sketch_circle_radius(self, doc, sketch_name: str) -> Optional[float]:
         """Raggio (m) del primo cerchio/arco dello schizzo `sketch_name`; None se non c'e'."""

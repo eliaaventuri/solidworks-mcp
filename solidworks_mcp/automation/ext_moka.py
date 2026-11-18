@@ -399,8 +399,7 @@ class MokaOperations:
                 data["instances_note"] = "contate dalle facce create / facce di una istanza (seme incluso)"
             try:
                 fo = self._find_feature(doc, data["feature"])
-                code = fo.GetErrorCode2
-                code = code[0] if isinstance(code, tuple) else code
+                code, _warn = self._feat_error(fo)
                 if code:
                     data["rebuild_error_code"] = int(code)
             except Exception:
@@ -747,12 +746,9 @@ class MokaOperations:
                 return self._result(False, f"Feature '{name}' non trovata. Feature: {self._names(doc)}", SwErrors.swSelectionError)
             tname = str(self._com(feat, "GetTypeName2"))
             data = {"name": str(self._com(feat, "Name")), "type": tname, "unit": self._unit_name(unit)}
-            try:
-                code = feat.GetErrorCode2
-                code = code[0] if isinstance(code, tuple) else code
-                data["rebuild_error_code"] = int(code or 0)
-            except Exception:
-                pass
+            code, _warn = self._feat_error(feat)
+            if code is not None:
+                data["rebuild_error_code"] = int(code)
             try:
                 s = feat.IsSuppressed2(1, None)
                 data["suppressed"] = bool(s[0] if isinstance(s, (tuple, list)) else s)

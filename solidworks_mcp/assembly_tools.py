@@ -164,7 +164,8 @@ _TOOLS = {
         "Automatic explode. mode='native' = SolidWorks AutoExplode (one 'Chain' step; may produce no steps); mode='mates' = heuristic from mates (disassembly order from mate depth from the base component, direction along the "
         "concentric axis, distances from bounding boxes with minimum `gap`; reports `bbox_overlaps` of the exploded state); 'auto' = native, then 'mates'; 'axis' (default) = one step per component along "
         "`axis`, spaced by `gap`.",
-        {"axis": (S, "x|y|z (mode=axis only)"),
+        {"axis": (S, "x|y|z|-x|-y|-z (mode=axis only): the sign is the direction the components move away from the base "
+                     "(without a fixed or given base, the base is the component at the opposite end)"),
          "gap": (N, "mode=axis: spacing between consecutive components; mode=mates: minimum box distance (mm)"),
          "base_component": _COMP, "mode": (S, "axis | native | mates | auto"), "unit": _UNIT}, []),
     "show_exploded": ("show_exploded", "Explode (true) or collapse (false) the assembly.",
@@ -197,7 +198,8 @@ _TOOLS = {
     "detect_collisions": ("detect_collisions",
         "Detect collisions and interferences in the assembly, statically or dynamically along a linear motion trajectory. "
         "If `moving_component` is provided, sweeps the component along (dx, dy, dz) across `steps` intervals, detects any collision, "
-        "and safely restores the initial pose.",
+        "and restores the initial pose (re-read and compared: `initial_pose_restored`). The component is moved rigidly with its "
+        "transform (the motion is imposed, not driven by mates: a fully mated component may be pulled back by the rebuild).",
         {"moving_component": (S, "Optional component name to move dynamically along trajectory"),
          "dx": (N, "X displacement along trajectory, in mm (or document length unit; default 0.0)"),
          "dy": (N, "Y displacement along trajectory, in mm (or document length unit; default 0.0)"),

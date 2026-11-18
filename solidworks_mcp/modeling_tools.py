@@ -247,8 +247,9 @@ _TOOLS = {
          "path_sketch": (S, "Path: sketch name or name of any curve feature (e.g. a helix)"),
          "cut": (B, "Cut, not boss"),
          "circular_diameter": (N, "Circular profile diameter (`unit`), replaces profile_sketch"),
-         "twist_angle": (N, "Twist along the path in degrees (default 0)"),
-         "keep_normal": (B, "Keep profile normal to path (default true)"), "unit": _UNIT,
+         "twist_angle": (N, "Total twist of the profile along the path in degrees (default 0); needs keep_normal=true and no guide curves"),
+         "keep_normal": (B, "true (default): the profile follows the path, staying normal to it; false: the profile keeps its "
+                            "original orientation along the whole path (SolidWorks 'keep normal constant')"), "unit": _UNIT,
          "guide_sketches": (A, "Guide curve names (sketches or curve features), e.g. [\"Sketch3\"]"),
          "thin_thickness": (N, "Thin-wall thickness (`unit`)"),
          "thin_type": (S, "one_direction (default) | opposite_direction | mid_plane | two_directions"),

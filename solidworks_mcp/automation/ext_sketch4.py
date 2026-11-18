@@ -662,12 +662,30 @@ class Sketch4Operations:
                 return self._result(False, "show_sketch_curvature: nessuna entità nello schizzo.", SwErrors.swSelectionError)
 
             sm = doc.SketchManager
+            # (revisione 2026-11-12) scala e densita' di partenza: tornano al loro posto se il tool fallisce a meta' e sono
+            # riportate nel risultato (i pettini restano come chiesti dopo il tool: e' il suo scopo)
+            prev = {}
+            for key, attr in (("scale", "CurvatureScale"), ("density", "CurvatureDensity")):
+                try:
+                    prev[key] = getattr(sm, attr)
+                except Exception:
+                    prev[key] = None
+            done = []
             try:
                 sm.CurvatureScale = float(scale or 10.0)
+                done.append(("scale", "CurvatureScale"))
                 sm.CurvatureDensity = int(density or 20)
+                done.append(("density", "CurvatureDensity"))
                 target.ShowCurvatureCombs = bool(visible)
             except Exception as ex:
-                return self._result(False, f"show_sketch_curvature: impostazione pettini non riuscita: {ex}", SwErrors.swSketchError)
+                for key, attr in reversed(done):
+                    if prev[key] is not None:
+                        try:
+                            setattr(sm, attr, prev[key])
+                        except Exception as ex2:
+                            logger.warning(f"show_sketch_curvature: {attr} non ripristinato: {ex2}")
+                return self._result(False, f"show_sketch_curvature: impostazione pettini non riuscita: {ex} (scala e densita' "
+                                    "tornate come prima)", SwErrors.swSketchError, {"previous": prev})
             shown = bool(target.ShowCurvatureCombs)
             if shown != bool(visible):
                 return self._result(False, "show_sketch_curvature: SolidWorks non ha cambiato la visualizzazione dei pettini.", SwErrors.swSketchError)
@@ -678,7 +696,8 @@ class Sketch4Operations:
                 "curvature_displayed": True,
                 "visible": shown,
                 "scale": float(scale or 10.0),
-                "density": int(density or 20)
+                "density": int(density or 20),
+                "previous": prev
             })
         except Exception as e:
             logger.error(f"show_sketch_curvature: {e} - {traceback.format_exc()}")

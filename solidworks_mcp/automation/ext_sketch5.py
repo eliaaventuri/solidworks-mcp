@@ -662,26 +662,55 @@ class Sketch5Operations:
 
             sm = doc.SketchManager
             impostazioni = {"AddToDB": add_to_db, "AutoSolve": auto_solve, "AutoInference": auto_inference}
-            for nome, valore in impostazioni.items():
+            chiavi = {"AddToDB": "add_to_db", "AutoSolve": "auto_solve", "AutoInference": "auto_inference"}
+            # (revisione 2026-11-12) valori di partenza letti prima: tornano al loro posto se il tool fallisce a meta' e
+            # sono riportati nel risultato (le impostazioni RESTANO attive dopo il tool: e' il suo scopo)
+            prima = {}
+            for nome in impostazioni:
+                try:
+                    prima[nome] = bool(getattr(sm, nome))
+                except Exception:
+                    prima[nome] = None
+            cambiati = []
+
+            def _scrivi(nome, valore):
                 try:
                     setattr(sm, nome, bool(valore))
                 except Exception:
-                    try:
-                        getattr(sm, "set_" + nome)(bool(valore))
-                    except Exception as ex:
-                        return self._result(False, f"set_sketch_performance_mode: {nome} non impostato: {ex}", SwErrors.swSketchError)
+                    getattr(sm, "set_" + nome)(bool(valore))
+
+            def _annulla():
+                for n in reversed(cambiati):
+                    if prima.get(n) is not None:
+                        try:
+                            _scrivi(n, prima[n])
+                        except Exception as ex2:
+                            logger.warning(f"set_sketch_performance_mode: {n} non ripristinato: {ex2}")
+            for nome, valore in impostazioni.items():
+                try:
+                    _scrivi(nome, valore)
+                except Exception as ex:
+                    _annulla()
+                    return self._result(False, f"set_sketch_performance_mode: {nome} non impostato: {ex} (le altre "
+                                        "impostazioni sono tornate come prima)", SwErrors.swSketchError, {"previous": {chiavi[n]: v for n, v in prima.items()}})
+                cambiati.append(nome)
                 try:
                     letto = bool(getattr(sm, nome))
                 except Exception:
                     letto = None
                 if letto != bool(valore):
-                    return self._result(False, f"set_sketch_performance_mode: {nome} non verificato (letto {letto}, atteso {bool(valore)}).", SwErrors.swSketchError)
+                    _annulla()
+                    return self._result(False, f"set_sketch_performance_mode: {nome} non verificato (letto {letto}, atteso {bool(valore)}); "
+                                        "le impostazioni sono tornate come prima.", SwErrors.swSketchError,
+                                        {"previous": {chiavi[n]: v for n, v in prima.items()}})
 
-            msg = f"Modalità prestazioni schizzo aggiornata (AddToDB={add_to_db}, AutoSolve={auto_solve}, AutoInference={auto_inference})."
+            msg = (f"Modalità prestazioni schizzo aggiornata (AddToDB={add_to_db}, AutoSolve={auto_solve}, AutoInference={auto_inference}); "
+                   "resta attiva finche' non la si cambia: per tornare indietro richiamare il tool con i valori in data.previous.")
             return self._result(True, msg, SwErrors.swSuccess, {
                 "add_to_db": bool(add_to_db),
                 "auto_solve": bool(auto_solve),
-                "auto_inference": bool(auto_inference)
+                "auto_inference": bool(auto_inference),
+                "previous": {chiavi[n]: v for n, v in prima.items()}
             })
         except Exception as e:
             logger.error(f"set_sketch_performance_mode: {e} - {traceback.format_exc()}")

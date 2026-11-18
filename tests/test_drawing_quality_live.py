@@ -638,6 +638,9 @@ async def sheet_verticale(c):
     await T(c, "export_drawing", "verticale: PNG", filepath=str(png), format="png")
     PNGS.append(str(png))
     ok, text, lay = await c.call("get_drawing_layout")
+    if not ok or "sheet_mm" not in lay:          # tool fallito (istanza persa): prova rossa, non un'eccezione che ferma tutto il test
+        record("foglio verticale A3 297 x 420 con cartiglio in basso a destra", False, text[:160])
+        return
     W, H = lay["sheet_mm"]
     record("foglio verticale A3 297 x 420 con cartiglio in basso a destra", abs(W - 297) < 0.5 and abs(H - 420) < 0.5, str(lay["sheet_mm"]))
     if ok:

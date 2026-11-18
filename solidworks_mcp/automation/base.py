@@ -23,6 +23,26 @@ from ..utils.sw_lang import std_plane_index, is_origin_name
 
 logger = logging.getLogger(__name__)
 
+# HRESULT di un server COM che non c'e' piu' (processo uscito, oggetto scollegato): l'istanza e' persa
+_COM_GONE = {-2147023174,    # RPC_S_SERVER_UNAVAILABLE 0x800706BA
+             -2147023170,    # RPC_S_CALL_FAILED 0x800706BE
+             -2147417848,    # RPC_E_DISCONNECTED 0x80010108
+             -2147220995}    # CO_E_OBJNOTCONNECTED 0x800401FD
+# HRESULT di un'istanza viva ma occupata (finestra modale, ricostruzione in corso): si riprova, non e' persa
+_COM_BUSY = {-2147418111,    # RPC_E_CALL_REJECTED 0x80010001
+             -2147417846}    # RPC_E_SERVERCALL_RETRYLATER 0x8001010A
+
+
+def _hresult(e) -> Optional[int]:
+    """HRESULT di un'eccezione COM (pywintypes.com_error: attributo hresult o primo argomento), None se non c'e'."""
+    hr = getattr(e, "hresult", None)
+    if hr is None and getattr(e, "args", None):
+        hr = e.args[0]
+    try:
+        return int(hr)
+    except (TypeError, ValueError):
+        return None
+
 
 class SolidWorksAutomation:
     """
@@ -50,23 +70,39 @@ class SolidWorksAutomation:
     
     @property
     def is_connected(self) -> bool:
-        """Check if connected to SolidWorks"""
+        """SolidWorks risponde? Un errore COM PASSEGGERO non vale come istanza persa (revisione 2026-11-12): prima ogni errore
+        azzerava la connessione e, con SW_MCP_AUTORESTART=1, `connect` uccideva e rilanciava l'istanza dedicata (documenti
+        persi) anche quando era solo occupata. Ora:
+          - istanza occupata (chiamata rifiutata / riprova piu' tardi): fino a 3 letture a 0,5 s; se resta occupata ma il
+            processo e' vivo la connessione resta (il tool riportera' il suo errore; un blocco vero lo ferma il timeout);
+          - istanza persa solo se il server COM non c'e' piu' (HRESULT in _COM_GONE) o il processo dedicato e' uscito;
+          - altri errori: come prima per l'istanza dell'utente; con l'istanza dedicata viva la connessione resta."""
         if not self._connected or self._sw_app is None:
             return False
-        
-        try:
-            # Test connection by accessing a property
-            _ = self._sw_app.RevisionNumber
-            return True
-        except:
+        err = None
+        for attempt in range(3):
             try:
-                # Some versions use method instead of property
-                _ = self._sw_app.RevisionNumber()
+                _ = self._sw_app.RevisionNumber
                 return True
-            except:
-                self._connected = False
-                self._sw_app = None
-                return False
+            except Exception as e:
+                err = e
+            if _hresult(err) not in _COM_BUSY:
+                break
+            if attempt < 2:
+                time.sleep(0.5)
+        hr = _hresult(err)
+        proc = self.__dict__.get("_dedicated_proc")
+        try:
+            dedicated = bool(self.is_dedicated_mode())
+        except Exception:
+            dedicated = False
+        proc_alive = proc is not None and proc.poll() is None
+        if hr not in _COM_GONE and (hr in _COM_BUSY and (proc is None or proc_alive) or dedicated and proc_alive):
+            logger.warning(f"SolidWorks non risponde ora ({err!r}) ma l'istanza e' viva: connessione mantenuta")
+            return True
+        self._connected = False
+        self._sw_app = None
+        return False
     
     @property
     def units(self) -> UnitConverter:
@@ -466,6 +502,27 @@ class SolidWorksAutomation:
         if callable(value) and not isinstance(value, win32com.client.CDispatch):
             return value()
         return value
+
+    @staticmethod
+    def _feat_error(feat) -> Tuple[Optional[int], bool]:
+        """Errore di ricostruzione di una feature -> (codice, e' solo un avviso); (None, False) se non si legge.
+        UNICO modo di leggere IFeature.GetErrorCode2 (revisione 2026-11-12: nel codice ce n'erano 4). In late binding arriva
+        come METODO che vuole il flag d'avviso per riferimento: letto come proprieta' (int(...), codice[0]) dava un'eccezione
+        ingoiata, quindi nessuna feature risultava mai in errore (misurato sugli accoppiamenti il 2026-10-24: codice 47)."""
+        try:
+            m = feat.GetErrorCode2
+            if callable(m) and not isinstance(m, win32com.client.CDispatch):
+                bf = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, False)
+                code = m(bf)
+                if isinstance(code, tuple):          # early binding: (codice, avviso)
+                    return int(code[0] or 0), bool(code[1]) if len(code) > 1 else False
+                return int(code or 0), bool(bf.value)
+            if isinstance(m, tuple):
+                return int(m[0] or 0), bool(m[1]) if len(m) > 1 else False
+            return int(m or 0), False
+        except Exception as e:
+            logger.debug(f"GetErrorCode2 non letto: {e}")
+            return None, False
 
     def _select_std_plane(self, doc, plane: str) -> bool:
         """Select Front/Top/Right plane by position in the tree (works in any UI language)"""

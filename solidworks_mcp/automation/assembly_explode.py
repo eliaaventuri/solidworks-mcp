@@ -599,14 +599,17 @@ class AssemblyExplodeMixin:
             d, e = self._ex_parse_dir(axis)
             if e or d[0] != "axis":
                 return self._result(False, e or "axis: x, y, z, -x, -y, -z", SwErrors.swInvalidInput)
-            idx = d[1][0]
+            idx, neg = d[1]
             comps = [c for c in self._as_top_components(doc, True) if int(self._com(c, "GetSuppression")) != 0]
             if len(comps) < 2:
                 return self._result(False, "Servono almeno 2 componenti", SwErrors.swInvalidInput)
+            # (revisione 2026-11-12) '-x' era uguale a 'x': ora le posizioni si leggono lungo l'asse col suo verso, quindi senza
+            # base fissa la base e' il componente all'estremo opposto e gli altri si allontanano nel verso chiesto
+            s = -1.0 if neg else 1.0
             centers = {}
             for c in comps:
                 b = c.GetBox(False, False)
-                centers[str(c.Name2)] = (b[idx] + b[idx + 3]) / 2.0
+                centers[str(c.Name2)] = s * (b[idx] + b[idx + 3]) / 2.0
             if base_component:
                 base, e = self._as_comp(doc, base_component, True)
                 if e:
@@ -614,23 +617,32 @@ class AssemblyExplodeMixin:
             else:
                 fixed = [c for c in comps if bool(self._com(c, "IsFixed"))]
                 base = fixed[0] if fixed else sorted(comps, key=lambda c: centers[str(c.Name2)])[0]
-            bc = centers[str(base.Name2)]
-            above = sorted([c for c in comps if centers[str(c.Name2)] > bc + 1e-9 and c is not base],
-                           key=lambda c: centers[str(c.Name2)])
-            below = sorted([c for c in comps if centers[str(c.Name2)] < bc - 1e-9 and c is not base],
-                           key=lambda c: -centers[str(c.Name2)])
-            same = [c for c in comps if abs(centers[str(c.Name2)] - bc) <= 1e-9 and c is not base]
+            # confronto per NOME: `c is not base` confrontava oggetti COM di chiamate diverse (sempre diversi), cosi' il
+            # componente base finiva fra quelli da spostare
+            bname = str(base.Name2)
+            if bname not in centers:
+                return self._result(False, f"Componente base '{bname}' non fra i componenti di primo livello attivi",
+                                    SwErrors.swSelectionError)
+            bc = centers[bname]
+            others = [c for c in comps if str(c.Name2) != bname]
+            above = sorted([c for c in others if centers[str(c.Name2)] > bc + 1e-9], key=lambda c: centers[str(c.Name2)])
+            below = sorted([c for c in others if centers[str(c.Name2)] < bc - 1e-9], key=lambda c: -centers[str(c.Name2)])
+            same = [c for c in others if abs(centers[str(c.Name2)] - bc) <= 1e-9]
             steps = []
             nm = "xyz"[idx]
+            fwd, back = ("-" + nm, nm) if neg else (nm, "-" + nm)
             for k, c in enumerate(above, 1):
-                steps.append({"components": [str(c.Name2)], "direction": nm, "distance": gap * k})
+                steps.append({"components": [str(c.Name2)], "direction": fwd, "distance": gap * k})
             for k, c in enumerate(below, 1):
-                steps.append({"components": [str(c.Name2)], "direction": "-" + nm, "distance": gap * k})
+                steps.append({"components": [str(c.Name2)], "direction": back, "distance": gap * k})
             for k, c in enumerate(same, 1):
-                steps.append({"components": [str(c.Name2)], "direction": nm, "distance": gap * (len(above) + k)})
+                steps.append({"components": [str(c.Name2)], "direction": fwd, "distance": gap * (len(above) + k)})
+            if not steps:
+                return self._result(False, "Nessun componente da spostare oltre la base", SwErrors.swInvalidInput)
             r = self.create_exploded_view(steps, unit=unit, keep_exploded=True)
             if r["success"]:
                 r["data"]["method"] = "axis"
+                r["data"]["base_component"] = bname
             return r
         except Exception as e:
             return self._as_fail("auto_explode", e)

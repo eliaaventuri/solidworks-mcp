@@ -1285,7 +1285,16 @@ class DrawingDimsMixin:
                             pass
             if not cand:
                 return self._result(False, f"Quota '{dimension}' non trovata nelle viste", SwErrors.swInvalidInput)
-            dd, dim, vsel = cand[0]
+            # (revisione 2026-11-12) piu' quote diverse con lo stesso testo/valore: prima si prendeva la prima in silenzio
+            exact = [c for c in cand if q in (c[1].FullName, c[1].Name) or q.lower() == c[1].FullName.lower()]
+            names = []
+            for c in cand:
+                if c[1].FullName not in names:
+                    names.append(c[1].FullName)
+            if not exact and len(names) > 1:
+                return self._result(False, f"Quota '{dimension}' ambigua: {len(names)} quote corrispondono {names}. Ripeti con il "
+                                    "nome completo (o indica `view`).", SwErrors.swInvalidInput, {"candidates": names})
+            dd, dim, vsel = (exact or cand)[0]
             scope = "drawing"
             note = ""
             try:
@@ -1315,14 +1324,15 @@ class DrawingDimsMixin:
             dim.SetToleranceType(tt)
             tol = dim.Tolerance
             applied = {"type": tolerance_type}
+            want = {}                            # valori attesi (m), confrontati con quelli riletti
             if tt in (2, 3, 4, 5, 6):
                 if tt == 4:
                     u = m(upper if upper is not None else (lower or 0))
                     tol.SetValues(-u, u)
-                elif tt == 2:
+                    want = {"min": -u, "max": u}
+                elif tt in (2, 3):
                     tol.SetValues(-m(lower or 0), m(upper or 0))
-                elif tt == 3:
-                    tol.SetValues(-m(lower or 0), m(upper or 0))
+                    want = {"min": -m(lower or 0), "max": m(upper or 0)}
                 elif tt == 5:
                     tol.SetValues(0.0, 0.0)
                 applied["max"], applied["min"] = float(self._com(tol, "GetMaxValue")) * 1000.0, float(self._com(tol, "GetMinValue")) * 1000.0
@@ -1330,7 +1340,10 @@ class DrawingDimsMixin:
                 tol.SetFitValues(str(hole_fit or ""), str(shaft_fit or ""))
                 if tt == 8 and (upper is not None or lower is not None):
                     tol.SetValues(-m(lower or 0), m(upper or 0))
+                    want = {"min": -m(lower or 0), "max": m(upper or 0)}
                 applied["hole_fit"], applied["shaft_fit"] = str(self._com(tol, "GetHoleFitValue")), str(self._com(tol, "GetShaftFitValue"))
+                if tt == 8 and want:
+                    applied["max"], applied["min"] = float(self._com(tol, "GetMaxValue")) * 1000.0, float(self._com(tol, "GetMinValue")) * 1000.0
             if precision is not None or tol_precision is not None:
                 p = int(precision) if precision is not None else int(self._com(dd, "GetPrimaryPrecision2"))
                 tp = int(tol_precision) if tol_precision is not None else int(self._com(dd, "GetPrimaryTolPrecision2"))
@@ -1342,9 +1355,24 @@ class DrawingDimsMixin:
                 dim_txt = " | ".join(str(dd2.GetTextAtIndex(i)).strip() for i in range(int(self._com(dd2, "GetTextCount"))))
             except Exception:
                 pass
-            return self._result(True, f"Tolleranza {tolerance_type} impostata su {dim.FullName}{note}", SwErrors.swSuccess,
-                                {"dimension": dim.FullName, "applied": applied, "text": dim_txt,
-                                 "scope": scope, "drawing_only": scope == "drawing", "applied_to_model": scope == "model",
-                                 "tolerance_type_read": int(self._com(dim, "GetToleranceType"))})
+            # (revisione 2026-11-12) confronto fra chiesto e riletto: prima i valori si rileggevano ma il successo era sempre
+            tt_read = int(self._com(dim, "GetToleranceType"))
+            bad = []
+            if tt_read != tt:
+                bad.append(f"tipo letto {tt_read} invece di {tt}")
+            for k in ("min", "max"):
+                if k in want and abs(applied[k] / 1000.0 - want[k]) > 1e-9:
+                    bad.append(f"{k} letto {applied[k]:.4f} mm invece di {want[k] * 1000.0:.4f}")
+            if tt in (7, 8, 9):
+                for k, v in (("hole_fit", hole_fit), ("shaft_fit", shaft_fit)):
+                    if v and applied[k].strip().lower() != str(v).strip().lower():
+                        bad.append(f"{k} letto '{applied[k]}' invece di '{v}'")
+            data = {"dimension": dim.FullName, "applied": applied, "text": dim_txt,
+                    "scope": scope, "drawing_only": scope == "drawing", "applied_to_model": scope == "model",
+                    "tolerance_type_read": tt_read}
+            if bad:
+                return self._result(False, f"Tolleranza su {dim.FullName} NON applicata come chiesto: {'; '.join(bad)} "
+                                    "(la quota ha ora i valori riletti in data.applied)", SwErrors.swFeatureError, data)
+            return self._result(True, f"Tolleranza {tolerance_type} impostata su {dim.FullName}{note}", SwErrors.swSuccess, data)
         except Exception as e:
             return self._fail("set_dimension_tolerance", e)

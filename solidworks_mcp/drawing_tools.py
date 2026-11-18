@@ -52,7 +52,7 @@ _TOOLS = {
         'Example: {"parent_view":"Drawing View1","orientation":"vertical","offset":0,"label":"A"}.',
         {"parent_view": _VIEW, "orientation": (S, "horizontal | vertical | points | stepped | aligned"),
          "offset": (N, "Cut line distance from the view center in mm, model scale; 0 = through the center"),
-         "points": (A, "Coordinates in mm from the view center: [x1,y1,x2,y2] for 'points'; polyline [x1,y1,x2,y2,x3,y3,...] for stepped/aligned"),
+         "points": (A, "Coordinates in mm from the view center, model scale (like offset): [x1,y1,x2,y2] for 'points'; polyline [x1,y1,x2,y2,x3,y3,...] for stepped/aligned"),
          "label": (S, "Label (A, B, ...)"), "flip": (B, "Reverse the viewing direction"),
          "view_x": (N, "Result view X in mm on the sheet; default automatic"),
          "view_y": (N, "Result view Y in mm on the sheet; default automatic"), "unit": _UNIT}, []),

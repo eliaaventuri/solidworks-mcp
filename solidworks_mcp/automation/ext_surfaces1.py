@@ -154,13 +154,9 @@ class Surfaces1Operations:
                 "total_surface_area_mm2": round(total1 * 1e6, 3), "solid_bodies": snap1["solids"],
                 "volume_mm3": round(snap1["volume"] * 1e9, 3),
                 "volume_delta_mm3": round((snap1["volume"] - snap0["volume"]) * 1e9, 3)}
-        try:
-            code = self._com(f, "GetErrorCode2")
-            code = code[0] if isinstance(code, tuple) else code
-            if code:
-                data["rebuild_error_code"] = int(code)
-        except Exception:
-            pass
+        code, _warn = self._feat_error(f)
+        if code:
+            data["rebuild_error_code"] = int(code)
         if extra:
             data.update(extra)
         msg = (f"{label}: {name} (superficie {data['surface_area_mm2']:.2f} mm2, corpi superficie "

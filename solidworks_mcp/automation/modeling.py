@@ -133,10 +133,11 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         try:
             f = self._find_feature(doc, info.get("feature"))
             if f is not None:
-                code = f.GetErrorCode2
-                code = code[0] if isinstance(code, tuple) else code
+                code, warn = self._feat_error(f)
                 if code:
                     info["rebuild_error_code"] = int(code)
+                    if warn:
+                        info["rebuild_warning"] = True
         except Exception:
             pass
         if extra:
@@ -583,19 +584,30 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                     return self._result(False, f"Guida '{g}' non trovata", SwErrors.swSelectionError)
             fm = doc.FeatureManager
             dia = self._mmu(circular_diameter or 0, unit)
-            tw = 1 if twist_angle else 0     # 0 segui percorso, 1 = torsione
+            # swTwistControlType_e (swconst): 0 segui il percorso, 1 normale costante (il profilo non ruota),
+            # 2 segui percorso e prima guida, 8 torsione costante lungo il percorso. (revisione 2026-11-12) Prima keep_normal=true
+            # (default) azzerava twist_angle in silenzio e keep_normal=false non cambiava nulla.
+            twist = float(twist_angle or 0.0)
             if guide_sketches:
+                if twist:
+                    return self._result(False, "twist_angle non si combina con le curve guida (sono le guide a orientare "
+                                        "il profilo): togli l'uno o le altre.", SwErrors.swInvalidInput)
                 tw = 2                       # segui percorso e prima guida (le guide scalano il profilo)
-            elif keep_normal:
-                tw = 0
+            elif twist:
+                if not keep_normal:
+                    return self._result(False, "twist_angle richiede keep_normal=true: SolidWorks torce solo un profilo che "
+                                        "segue il percorso, non uno a orientamento costante.", SwErrors.swInvalidInput)
+                tw = 8
+            else:
+                tw = 0 if keep_normal else 1
             try:
                 if cut:
                     feat = fm.InsertCutSwept5(False, 0, tw, False, False, st, et, is_thin, thk1, thk2, thin_code, 0,
-                                              True, True, math.radians(twist_angle), True, False, False, False,
+                                              True, True, math.radians(twist), True, False, False, False,
                                               circ, dia, 0)
                 else:
                     feat = fm.InsertProtrusionSwept4(False, 0, tw, False, False, st, et, is_thin, thk1, thk2, thin_code, 0,
-                                                     bool(merge), True, True, math.radians(twist_angle), True,
+                                                     bool(merge), True, True, math.radians(twist), True,
                                                      circ, dia, 0)
             except Exception as e:
                 return self._result(False, f"Sweep fallito: {e}", SwErrors.swFeatureError)
@@ -605,13 +617,28 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 extra.update({"thin_thickness": thin_thickness, "thin_type": (thin_type or "one_direction").lower()})
             if st or et:
                 extra.update({"start_tangency": st, "end_tangency": et})
+            extra.update({"twist_control": {0: "follow_path", 1: "keep_normal_constant", 2: "follow_path_and_guide",
+                                            8: "constant_twist"}[tw], "twist_angle": twist})
             res = self._finish(doc, "Sweep taglio" if cut else "Sweep", feat, v0, before, extra,
                                require_volume_change=True)
             if res.get("success"):
-                res["data"].update(self._readback(doc, res["data"].get("feature"),
-                                                  {"start_tangency_readback": "StartTangencyType",
-                                                   "end_tangency_readback": "EndTangencyType",
-                                                   "guide_count": "GetGuideCurvesCount"}))
+                rb = self._readback(doc, res["data"].get("feature"),
+                                    {"start_tangency_readback": "StartTangencyType",
+                                     "end_tangency_readback": "EndTangencyType",
+                                     "guide_count": "GetGuideCurvesCount",
+                                     "twist_control_readback": "TwistControlType",
+                                     "twist_angle_readback_rad": "TwistAngle"})
+                res["data"].update(rb)
+                bad = []
+                if rb.get("twist_control_readback") is not None and int(rb["twist_control_readback"]) != tw:
+                    bad.append(f"controllo torsione letto {rb['twist_control_readback']} invece di {tw}")
+                if tw == 8 and rb.get("twist_angle_readback_rad") is not None \
+                        and abs(float(rb["twist_angle_readback_rad"]) - math.radians(twist)) > 1e-6:
+                    bad.append(f"angolo di torsione letto {math.degrees(float(rb['twist_angle_readback_rad'])):.4f} gradi")
+                if bad:
+                    res.update(success=False, error_code=int(SwErrors.swFeatureError), error_name=SwErrors.swFeatureError.name)
+                    res["message"] += (" - ATTENZIONE: SolidWorks non ha applicato le opzioni chieste: " + "; ".join(bad)
+                                       + " (la feature e' rimasta nel modello)")
             return res
         except Exception as e:
             logger.error(f"sweep: {e}\n{traceback.format_exc()}")
@@ -2492,13 +2519,11 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                         row["suppressed"] = bool(self._com(f, "IsSuppressed"))
                     except Exception:
                         pass
-                try:
-                    code = f.GetErrorCode2
-                    code = code[0] if isinstance(code, tuple) else code
-                    if code:
-                        row["error_code"] = int(code)
-                except Exception:
-                    pass
+                code, warn = self._feat_error(f)
+                if code:
+                    row["error_code"] = int(code)
+                    if warn:
+                        row["warning"] = True
                 if include_dimensions:
                     row["dimensions"] = self._sketch_dimensions(doc, n)
                 rows.append(row)
@@ -2534,10 +2559,20 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             doc.ClearSelection2(True)
         vol = self._volume_m3(doc)
         state = "soppressa" if suppress else "riattivata"
+        # (revisione 2026-11-12) successo solo se lo stato RILETTO e' quello chiesto (prima: successo anche con api_ok=false)
+        try:
+            f2 = self._find_feature(doc, name) or feat
+            now = bool(self._com(f2, "IsSuppressed"))
+        except Exception as e:
+            return self._result(False, f"Feature {name}: stato di soppressione non rileggibile ({e})", SwErrors.swFeatureError,
+                                {"feature": name, "api_ok": ok})
+        data = {"feature": name, "suppressed": now, "api_ok": ok, "volume_mm3": round(vol * 1e9, 3),
+                "volume_delta_mm3": round((vol - v0) * 1e9, 3)}
+        if now != bool(suppress):
+            return self._result(False, f"SolidWorks non ha {'soppresso' if suppress else 'riattivato'} la feature {name} "
+                                f"(riletta: {'soppressa' if now else 'attiva'})", SwErrors.swFeatureError, data)
         return self._result(True, f"Feature {name} {state} (volume {vol * 1e9:.1f} mm3, delta {(vol - v0) * 1e9:+.1f})",
-                            SwErrors.swSuccess, {"feature": name, "suppressed": suppress, "api_ok": ok,
-                                                 "volume_mm3": round(vol * 1e9, 3),
-                                                 "volume_delta_mm3": round((vol - v0) * 1e9, 3)})
+                            SwErrors.swSuccess, data)
 
     def suppress_feature(self, name: str) -> Dict:
         try:
@@ -2675,19 +2710,20 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 return err
             self._exit_sketch(doc)
             ok = bool(doc.ForceRebuild3(False) if force else doc.EditRebuild3)
-            bad = []
+            bad, warnings = [], []
             for n, t, f in self._features(doc):
-                try:
-                    code = f.GetErrorCode2
-                    code = code[0] if isinstance(code, tuple) else code
-                    if code:
-                        bad.append({"name": n, "error_code": int(code)})
-                except Exception:
-                    pass
+                code, warn = self._feat_error(f)
+                if code and not warn:
+                    bad.append({"name": n, "error_code": int(code)})
+                elif code or warn:
+                    warnings.append({"name": n, "error_code": int(code or 0)})
             vol = self._volume_m3(doc)
-            return self._result(not bad, f"Ricostruito: {len(bad)} feature con errori; volume {vol * 1e9:.1f} mm3",
-                                SwErrors.swSuccess if not bad else SwErrors.swFeatureError,
-                                {"rebuild_ok": ok, "errors": bad, "volume_mm3": round(vol * 1e9, 3)})
+            data = {"rebuild_ok": ok, "errors": bad, "volume_mm3": round(vol * 1e9, 3)}
+            if warnings:
+                data["warnings"] = warnings
+            return self._result(not bad, f"Ricostruito: {len(bad)} feature con errori; volume {vol * 1e9:.1f} mm3"
+                                + (f"; {len(warnings)} con avvisi" if warnings else ""),
+                                SwErrors.swSuccess if not bad else SwErrors.swFeatureError, data)
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 

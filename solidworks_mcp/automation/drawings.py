@@ -383,20 +383,39 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 sheet.ReloadTemplate(True)
                 fmt_used = os.path.basename(fmt)
             self._drawing_model_path = model_path
+            # modifiche dell'utente non salvate nel modello? (lette PRIMA di aggiungere le proprieta' del cartiglio)
+            try:
+                model_dirty = bool(self._com(mdoc, "GetSaveFlag"))
+            except Exception:
+                model_dirty = True               # non si sa: meglio non salvare il lavoro di qualcun altro
             # every property referenced by the title block must exist (else the sheet shows "ERRORE:<name>")
             created_props = self._ensure_titleblock_props(doc, mdoc)
             missing = self._missing_props_from_dxf(doc)
             if missing:
                 created_props += self._ensure_titleblock_props(doc, mdoc, extra=missing)
+            model_saved, model_note = False, ""
             if created_props and save_model and opened is False and self._get_doc_path(mdoc):
-                try:
-                    mdoc.Save3(1, 0, 0)   # persist the new (empty) properties in the model
-                except Exception as e:
-                    logger.debug(f"model save failed: {e}")
+                if model_dirty:
+                    # (revisione 2026-11-12) salvare qui scriverebbe anche le modifiche non salvate dell'utente
+                    model_note = ("il modello aveva modifiche non salvate: le proprieta' del cartiglio sono state aggiunte "
+                                  "ma il modello NON e' stato salvato (salvalo tu quando vuoi)")
+                else:
+                    r_s = None
+                    try:
+                        r_s = mdoc.Save3(1, 0, 0)   # persist the new (empty) properties in the model
+                        model_saved = bool(r_s[0] if isinstance(r_s, tuple) else r_s) \
+                            and not bool(self._com(mdoc, "GetSaveFlag"))
+                    except Exception as e:
+                        r_s = repr(e)
+                        logger.debug(f"model save failed: {e}")
+                    if not model_saved:
+                        model_note = f"salvataggio del modello con le proprieta' del cartiglio non riuscito (Save3: {r_s})"
+            save_err = ""
             if save_as:
                 ok_s, e_s, w_s = self._save_as(doc, os.path.abspath(save_as))
                 if not ok_s:
                     logger.warning(f"create_drawing save_as failed: {e_s}/{w_s}")
+                    save_err = f"errori={e_s}, avvisi={w_s}"
             tnum = self._fit_title_number(doc)
             title = self._get_doc_title(doc)
             if not hasattr(self, "_auto_paper"):
@@ -415,9 +434,18 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     "sheet_format": fmt_used or "none",
                     "titleblock_properties_created": len(created_props),
                     "still_missing": self._missing_props_from_dxf(doc),
-                    "saved_as": os.path.abspath(save_as) if save_as else "", "title_number": tnum}
+                    "saved_as": os.path.abspath(save_as) if save_as and not save_err else "", "title_number": tnum,
+                    "model_saved": model_saved}
+            if model_note:
+                data["model_note"] = model_note
             msg = f"Disegno creato: {title} ({paper_size.upper()} {orientation}, " \
                   f"{'primo' if first else 'terzo'} diedro)"
+            if model_note:
+                msg += f" - {model_note}"
+            if save_err:
+                data["save_error"] = save_err
+                return self._result(False, msg + f" - ma NON salvato in {os.path.abspath(save_as)} ({save_err}): la tavola "
+                                    f"'{title}' resta aperta, salvala con save_drawing", SwErrors.swFileSaveError, data)
             if add_views:
                 r = self.add_standard_views(["front", "top", "right", "isometric"],
                                             scale=scale, model_path=model_path)
@@ -773,10 +801,10 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
         """Section view from a parent view.
 
         orientation: 'horizontal' | 'vertical' | 'points'. `offset` is the distance of the
-        cut line from the view centre (model units on the sheet scale); `points` =
-        [x1, y1, x2, y2] relative to the view centre (used with 'points').
+        cut line from the view centre (model units, model scale); `points` =
+        [x1, y1, x2, y2] relative to the view centre (used with 'points'), model scale.
         Sezione a gradini o allineata: orientation='stepped' / 'aligned' con points = poligonale
-        [x1,y1,x2,y2,x3,y3,...] (almeno 3 punti, relativi al centro vista, unita' del foglio): segmenti
+        [x1,y1,x2,y2,x3,y3,...] (almeno 3 punti, relativi al centro vista, mm del MODELLO come 'points'): segmenti
         orizzontali/verticali collegati = sezione a gradini; un tratto inclinato = sezione allineata (ruotata).
         La vista risultante e' allineata alla madre (stessa direzione della linea) se c'e' posto."""
         try:
@@ -803,7 +831,9 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 if not points or len(points) < 6 or len(points) % 2:
                     return self._result(False, "Servono points=[x1,y1,x2,y2,x3,y3,...] (almeno 3 punti)",
                                         SwErrors.swInvalidInput)
-                q = [self._m(p, unit) / sc for p in points]       # coordinate dello schizzo = unita' modello
+                # coordinate in mm del MODELLO (scala del modello), come `offset` e 'points' (revisione 2026-11-12: qui si
+                # divideva per la scala della vista, quindi a scala diversa da 1:1 la stessa coppia di punti tagliava altrove)
+                q = [self._m(p, unit) for p in points]            # coordinate dello schizzo nella vista = unita' modello
                 poly = [(q[i], q[i + 1]) for i in range(0, len(q), 2)]
                 p1, p2 = poly[0], poly[-1]
                 # direzione della vista: perpendicolare al primo tratto (verso l'alto/basso o destra/sinistra)

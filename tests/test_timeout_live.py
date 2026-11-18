@@ -117,8 +117,14 @@ async def scenario_sleep(c, pid, elia_pids):
     dt = time.time() - t0
     record("B: tool successivo rifiutato subito mentre il precedente e' in corso", (not ok) and "ancora eseguendo" in text and dt < 5,
            f"{dt:.1f} s: {text[:120]}")
-    time.sleep(max(0.0, 45 - TIMEOUT_S))                  # lo sleep finisce
-    ok, text, _ = await c.call("list_open_documents")
+    time.sleep(max(0.0, 42 - TIMEOUT_S))                  # lo sleep da 40 s finisce
+    # dopo lo sleep il thread COM chiude il tool sull'istanza gia' uccisa (preferenze, documento attivo): sul PC carico della
+    # regressione completa puo' servire qualche secondo in piu' (2026-11-16: ancora occupato a 45 s). Tetto: 20 tentativi da 1 s.
+    for _ in range(20):
+        ok, text, _ = await c.call("list_open_documents")
+        if "ancora eseguendo" not in text:
+            break
+        time.sleep(1.0)
     record("B: dopo lo sblocco il server esegue di nuovo i tool", "ancora eseguendo" not in text, text[:120])
 
 

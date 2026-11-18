@@ -903,12 +903,26 @@ def _close_sketch_handler() -> Dict:
         if had_active:
             try:
                 doc.SketchManager.InsertSketch(True)
-            except:
+            except Exception as e:
+                logger.debug(f"close_sketch: InsertSketch: {e}")
                 try:
                     doc.InsertSketch2(True)
-                except:
-                    pass
-            
+                except Exception as e2:
+                    logger.debug(f"close_sketch: InsertSketch2: {e2}")
+            # (revisione 2026-11-12) successo solo se lo schizzo risulta davvero chiuso (prima: due except muti e "closed")
+            try:
+                still_open = doc.SketchManager.ActiveSketch is not None
+            except Exception:
+                still_open = True
+            if still_open:
+                return {
+                    "success": False,
+                    "message": "Lo schizzo e' ancora aperto: SolidWorks non l'ha chiuso (finestra di dialogo aperta o comando "
+                               "in corso?)",
+                    "error_code": int(SwErrors.swSketchError),
+                    "error_name": SwErrors.swSketchError.name,
+                    "data": {"had_active_sketch": True, "action": "none"}
+                }
             return {
                 "success": True,
                 "message": "Sketch closed successfully",

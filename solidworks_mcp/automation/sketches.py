@@ -12,7 +12,7 @@ from typing import Dict
 import win32com.client
 import pythoncom
 
-from ..constants import SwErrors, SwPlanes
+from ..constants import SwErrors
 
 logger = logging.getLogger(__name__)
 
@@ -64,45 +64,42 @@ class SketchOperations:
             doc, err = self.get_active_doc()
             if err:
                 return err
-            
-            # Get plane name
-            plane_name = SwPlanes.get(plane)
-            
-            # Create empty variant for callout parameter
-            empty_callout = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
-            
-            # Select plane
-            result = doc.Extension.SelectByID2(
-                plane_name, "PLANE", 0, 0, 0, False, 0, empty_callout, 0
-            )
-            
-            if not result:
-                # Localized SolidWorks (e.g. "Piano frontale"): select by tree position
-                result = self._select_std_plane(doc, plane)
-
-            if not result:
-                # piano di riferimento creato dall'utente (es. "Piano1") o nome italiano
+            plane = str(plane or "Front")
+            # (revisione 2026-11-12) prima SwPlanes.get trasformava OGNI nome sconosciuto in "Front Plane": con SolidWorks in
+            # inglese "Plane1" inesistente dava uno schizzo sul piano frontale con la risposta "Sketch created on Plane1".
+            # Ora: piano standard (front/top/right, in ogni lingua) per posizione nell'albero, altrimenti la feature con
+            # QUEL nome; nessun ripiego.
+            feat = self._std_ref_feature(doc, plane)
+            if feat is None:
                 try:
                     feat = doc.FeatureByName(plane)
-                    result = bool(feat is not None and feat.Select2(False, 0))
                 except Exception:
-                    result = False
-
-            if not result:
-                return self._result(False, f"Could not select {plane_name}",
-                                  SwErrors.swSelectionError)
-            
-            # Insert sketch
+                    feat = None
+            if feat is None:
+                return self._result(False, f"Piano '{plane}' non trovato: usa Front/Top/Right (o il nome italiano) oppure il "
+                                    "nome esatto di un piano di riferimento del modello.", SwErrors.swSelectionError)
+            # uno schizzo gia' aperto si chiude prima: InsertSketch2 alterna apri/chiudi
+            try:
+                if self._com(doc.SketchManager, "ActiveSketch") is not None:
+                    doc.SketchManager.InsertSketch(True)
+            except Exception:
+                pass
+            doc.ClearSelection2(True)
+            if not feat.Select2(False, 0):
+                return self._result(False, f"Piano '{plane}' trovato ma non selezionabile", SwErrors.swSelectionError)
             doc.InsertSketch2(True)
-            
+            if self._com(doc.SketchManager, "ActiveSketch") is None:
+                return self._result(False, f"SolidWorks non ha aperto lo schizzo sul piano '{plane}'", SwErrors.swSketchError)
             try:
                 axes = self._sketch_plane_info(doc)
             except Exception:
                 axes = {}
-            # Il messaggio riporta il piano vero (Top, Plane8...), non sempre "Front Plane"
-            real_plane = plane
-            return self._result(True, f"Sketch created on {real_plane}",
-                              SwErrors.swSuccess, {"plane": real_plane, **axes})
+            try:
+                real_plane = str(self._com(feat, "Name"))
+            except Exception:
+                real_plane = plane
+            return self._result(True, f"Sketch created on {plane}" + (f" ({real_plane})" if real_plane != plane else ""),
+                                SwErrors.swSuccess, {"plane": plane, "plane_feature": real_plane, **axes})
             
         except Exception as e:
             logger.error(f"Create sketch error: {e}\n{traceback.format_exc()}")

@@ -28,6 +28,7 @@ import win32com.client
 import pythoncom
 
 from ..constants import SwErrors
+from ..utils.keep_file import keeps_old_file, set_aside
 from .assembly_analysis import AssemblyAnalysisMixin
 from .assembly_motion import AssemblyMotionMixin
 from .assembly_explode import AssemblyExplodeMixin
@@ -914,6 +915,7 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                                "plane_normal": [round(v, 6) for v in n]}
         return out
 
+    @keeps_old_file
     def mirror_components(self, components: list, plane, orientation: int = 0, opposite_hand: bool = False,
                           name_suffix: str = "_mirror", folder: str = None, overwrite: bool = False,
                           align_exact: bool = True, unit: str = None) -> Dict:
@@ -974,7 +976,8 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                             return self._result(False, f"Il file {dst} e' aperto in SolidWorks (e' gia' un componente?): non si puo' "
                                                 "sovrascrivere. Elimina il componente e chiudi il documento, oppure usa un altro "
                                                 "name_suffix.", SwErrors.swFileSaveError, {"refused": "file_in_use", "file": dst})
-                        os.remove(dst)
+                for dst in planned:
+                    set_aside(self, dst)     # il file vecchio torna al suo posto se lo specchio non lo riscrive
                 loc = os.path.abspath(folder) if folder else os.path.dirname(self._as_comp_path(comps[0]))
                 doc.MirrorComponents3(plane_obj, empty_c, empty_i, False, disp_array(comps), False, empty_s if False else
                                       win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_BSTR,
@@ -1053,17 +1056,10 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
     def _as_feat_error2(self, feat):
         """-> (codice, e' solo un avviso). Sulle feature d'accoppiamento GetErrorCode2 arriva come METODO (vuole il flag per
         riferimento): letto come proprieta' dava sempre 0 e nessun accoppiamento risultava in errore (trovato il 2026-10-24:
-        distanza in conflitto con un coincidente = codice 47, i coincidenti coinvolti = 1 con avviso)."""
-        try:
-            m = feat.GetErrorCode2
-            if callable(m):
-                bf = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, False)
-                return int(m(bf) or 0), bool(bf.value)
-            if isinstance(m, tuple):
-                return int(m[0] or 0), bool(m[1]) if len(m) > 1 else False
-            return int(m or 0), False
-        except Exception:
-            return 0, False
+        distanza in conflitto con un coincidente = codice 47, i coincidenti coinvolti = 1 con avviso).
+        La lettura e' quella comune `_feat_error`; qui un codice illeggibile vale 0 (come prima)."""
+        code, warn = self._feat_error(feat)
+        return (code or 0), warn
 
     def _as_mate_dim(self, doc, feat, idx: int = 1):
         name = str(self._com(feat, "Name"))

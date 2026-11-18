@@ -149,7 +149,10 @@ TOOLS = {
     ),
     "set_sketch_performance_mode": (
         "set_sketch_performance_mode",
-        "Toggle high-speed batch sketching mode (AddToDB, AutoSolve, AutoInference) to generate complex sketches rapidly.",
+        "Toggle high-speed batch sketching mode (AddToDB, AutoSolve, AutoInference) to generate complex sketches rapidly. "
+        "The settings STAY active after the tool; the previous values are returned in data.previous (call again with them to "
+        "go back). Every value is read back: if SolidWorks does not keep one (e.g. auto_solve=true on a part with no open "
+        "sketch reads back false), the tool fails and restores the values it had already changed.",
         {
             "add_to_db": (B, "true = add entities directly to internal database bypassing interactive UI redraws (default false)"),
             "auto_solve": (B, "true = solve sketch constraints automatically after each operation; false = pause solver (default true)"),

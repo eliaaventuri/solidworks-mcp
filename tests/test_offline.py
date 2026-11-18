@@ -3333,6 +3333,497 @@ def test_review_fixes(tmp):
            {"create_drawing", "import_model", "split_body"} <= SolidWorksAutomation.TRIAL_BLOCKED_TOOLS)
 
 
+def _bare_auto():
+    """Automazione senza costruttore (niente config, niente COM): i test patchano solo cio' che serve."""
+    a = SolidWorksAutomation()
+    a._sw_app, a._connected = None, False
+    return a
+
+
+def _try(fn):
+    try:
+        return fn()
+    except Exception as e:
+        return {"success": None, "message": f"eccezione: {e!r}", "data": {}}
+
+
+def test_review_sec2_rest(tmp):
+    """Revisione 2026-11-12, sezione 2 (sicurezza e file): i quattro punti rimasti, scritti prima della correzione."""
+    import pythoncom as _pc
+    from solidworks_mcp.automation import base as _base
+
+    # 1. is_connected: un errore COM passeggero (istanza occupata) non vale come istanza persa
+    BUSY, GONE = -2147418111, -2147023174          # RPC_E_CALL_REJECTED, RPC_S_SERVER_UNAVAILABLE
+
+    class _App:
+        def __init__(self, fails, hr):
+            self.fails, self.hr, self.reads = fails, hr, 0
+
+        @property
+        def RevisionNumber(self):
+            self.reads += 1
+            if self.reads <= self.fails:
+                raise _pc.com_error(self.hr, "test", None, None)
+            return "34.4.1"
+
+    class _P:
+        def __init__(self, alive):
+            self.alive = alive
+
+        def poll(self):
+            return None if self.alive else 1
+    old_sleep = _base.time.sleep
+    _base.time.sleep = lambda s: None
+    try:
+        a = _bare_auto()
+        a._sw_app, a._connected = _App(2, BUSY), True
+        ok = a.is_connected
+        record("is_connected: due rifiuti 'occupato' e poi risposta -> collegata, istanza tenuta",
+               ok is True and a._sw_app is not None and a._connected, f"is_connected={ok}")
+        a = _bare_auto()
+        a._sw_app, a._connected, a._dedicated_proc = _App(99, BUSY), True, _P(True)
+        a.is_dedicated_mode = lambda: True
+        ok = a.is_connected
+        record("is_connected: istanza dedicata viva ma sempre occupata -> NON data per persa (niente rilancio)",
+               ok is True and a._sw_app is not None, f"is_connected={ok}")
+        a = _bare_auto()
+        a._sw_app, a._connected, a._dedicated_proc = _App(99, GONE), True, _P(True)
+        a.is_dedicated_mode = lambda: True
+        record("is_connected: server COM sparito -> istanza persa", a.is_connected is False and a._sw_app is None)
+        a = _bare_auto()
+        a._sw_app, a._connected, a._dedicated_proc = _App(99, BUSY), True, _P(False)
+        a.is_dedicated_mode = lambda: True
+        record("is_connected: processo dedicato uscito -> istanza persa", a.is_connected is False)
+    finally:
+        _base.time.sleep = old_sleep
+
+    # 2. create_drawing non salva il modello aperto con modifiche dell'utente; save_as fallito = errore (anche [V] sez. 1)
+    mpath = Path(tmp) / "pezzo.SLDPRT"
+    mpath.write_bytes(b"x")
+    tpl = Path(tmp) / "tavola.drwdot"
+    tpl.write_bytes(b"x")
+
+    class _MDoc:
+        def __init__(self, dirty):
+            self.dirty, self.saves = dirty, 0
+
+        def GetSaveFlag(self):
+            return self.dirty
+
+        def Save3(self, *a):
+            self.saves += 1
+            self.dirty = False
+            return True
+
+    class _Sheet:
+        def SetProperties2(self, *a): return True
+        def SetTemplateName(self, *a): return True
+        def ReloadTemplate(self, *a): return True
+        def GetName(self): return "Foglio1"
+
+    class _DDoc:
+        def GetCurrentSheet(self): return _Sheet()
+
+    def _drw_auto(mdoc, save_ok):
+        d = _bare_auto()
+        d._sw_app = types.SimpleNamespace(RevisionNumber="34.4.1", NewDocument=lambda *a: _DDoc())
+        d._connected = True
+        d._get_model_doc = lambda p: (mdoc, False)
+        d._default_template = lambda t: str(tpl)
+        d._sheet_format_path = lambda *a: None
+
+        def _props(doc, md, extra=None):
+            md.dirty = True                      # le proprieta' nuove sporcano il modello
+            return ["Descrizione"]
+        d._ensure_titleblock_props = _props
+        d._missing_props_from_dxf = lambda doc: []
+        d._save_as = lambda doc, p: (save_ok, 0 if save_ok else 1, 0)
+        d._fit_title_number = lambda doc: 0
+        d._get_doc_title = lambda doc: "Tavola1"
+        d._get_doc_path = lambda doc: str(mpath)
+        return d
+    dirty = _MDoc(True)
+    r = _try(lambda: _drw_auto(dirty, True).create_drawing(model_path=str(mpath), paper_size="A3"))
+    record("create_drawing: modello con modifiche non salvate dell'utente -> NON salvato, detto nel risultato",
+           r["success"] and dirty.saves == 0 and r["data"].get("model_saved") is False, f"saves={dirty.saves} {r['message'][:80]}")
+    clean = _MDoc(False)
+    r = _try(lambda: _drw_auto(clean, True).create_drawing(model_path=str(mpath), paper_size="A3"))
+    record("create_drawing: modello senza modifiche -> salvato con le proprieta' del cartiglio",
+           r["success"] and clean.saves == 1 and r["data"].get("model_saved") is True, f"saves={clean.saves} {r['message'][:80]}")
+    r = _try(lambda: _drw_auto(_MDoc(False), False).create_drawing(model_path=str(mpath), paper_size="A3",
+                                                                    save_as=str(Path(tmp) / "t.SLDDRW")))
+    record("create_drawing: save_as fallito -> errore, nessun saved_as dichiarato",
+           r["success"] is False and not r.get("data", {}).get("saved_as") and "Tavola1" in r["message"], r["message"][:110])
+
+    # 3. preferenze di schizzo: valore precedente riportato, ripristinato se il tool fallisce a meta'
+    class _SM:
+        def __init__(self, broken=()):
+            object.__setattr__(self, "_broken", set(broken))
+            object.__setattr__(self, "vals", {"AddToDB": False, "AutoSolve": True, "AutoInference": True,
+                                              "CurvatureScale": 10.0, "CurvatureDensity": 20})
+
+        def __getattr__(self, n):
+            v = object.__getattribute__(self, "vals")
+            if n in v:
+                return v[n]
+            raise AttributeError(n)
+
+        def __setattr__(self, n, val):
+            if n in self._broken:
+                raise RuntimeError(f"{n} non scrivibile")
+            self.vals[n] = val
+    s5 = _bare_auto()
+    sm = _SM(broken={"AutoInference"})
+    d5 = types.SimpleNamespace(SketchManager=sm)
+    s5._part = lambda: (d5, None)
+    r = _try(lambda: s5.set_sketch_performance_mode(True, False, False))
+    record("set_sketch_performance_mode: fallito a meta' -> le impostazioni gia' cambiate tornano come prima",
+           r["success"] is False and sm.vals["AddToDB"] is False and sm.vals["AutoSolve"] is True, f"{sm.vals} {r['message'][:60]}")
+    sm = _SM()
+    d5 = types.SimpleNamespace(SketchManager=sm)
+    s5._part = lambda: (d5, None)
+    r = _try(lambda: s5.set_sketch_performance_mode(True, False, True))
+    record("set_sketch_performance_mode: riporta i valori precedenti (per tornare indietro)",
+           r["success"] and r["data"].get("previous") == {"add_to_db": False, "auto_solve": True, "auto_inference": True},
+           str(r.get("data", {}).get("previous")))
+    seg = types.SimpleNamespace(ShowCurvatureCombs=False)
+    sm = _SM(broken={"CurvatureDensity"})
+    s4 = _bare_auto()
+    s4._s2_active_or_open = lambda sketch=None: (types.SimpleNamespace(SketchManager=sm), sm, None)
+    s4._s4_segs = lambda doc: [seg]
+    s4._safe_seg_id = lambda s: "Spline1"
+    s4._s4_seg_type = lambda s: 3
+    r = _try(lambda: s4.show_sketch_curvature(scale=15, density=30))
+    record("show_sketch_curvature: fallito a meta' -> la scala dei pettini torna come prima",
+           r["success"] is False and sm.vals["CurvatureScale"] == 10.0, f"{sm.vals} {r['message'][:60]}")
+    sm = _SM()
+    s4._s2_active_or_open = lambda sketch=None: (types.SimpleNamespace(SketchManager=sm), sm, None)
+    r = _try(lambda: s4.show_sketch_curvature(scale=15, density=30))
+    record("show_sketch_curvature: riporta scala e densita' precedenti",
+           r["success"] and r["data"].get("previous") == {"scale": 10.0, "density": 20}, str(r.get("data", {}).get("previous")))
+
+    # 4. mirror_components con overwrite: il file vecchio messo da parte, non cancellato prima di specchiare
+    fn = SolidWorksAutomation.mirror_components
+    src = inspect.getsource(inspect.unwrap(fn))
+    record("mirror_components: il file esistente e' messo da parte (torna se lo specchio fallisce), non cancellato",
+           hasattr(fn, "__wrapped__") and "set_aside(" in src and "os.remove(dst)" not in src)
+
+
+def test_review_v_fixes(tmp):
+    """Revisione 2026-11-12, sezione 1: falsi successi confermati [V], ognuno con un test scritto prima della correzione."""
+    import math
+
+    # [V] create_sketch: un piano inesistente non diventa il piano frontale (SolidWorks in inglese)
+    class _Feat:
+        def __init__(self, name, typ, log):
+            self.Name, self.typ, self.log, self.nxt = name, typ, log, None
+
+        def GetTypeName2(self): return self.typ
+        def GetNextFeature(self): return self.nxt
+
+        def Select2(self, append, mark):
+            self.log.append(self.Name)
+            return True
+
+    class _SkMgr:
+        ActiveSketch = None
+
+    class _SkDoc:
+        def __init__(self, planes):
+            self.log, self.SketchManager = [], _SkMgr()
+            feats = [_Feat(n, "RefPlane", self.log) for n in ("Front Plane", "Top Plane", "Right Plane")]
+            for f1, f2 in zip(feats, feats[1:]):
+                f1.nxt = f2
+            self.first = feats[0]
+            self.extra = {n: _Feat(n, "RefPlane", self.log) for n in planes}
+            self.Extension = self
+
+        def FirstFeature(self): return self.first
+        def FeatureByName(self, n): return self.extra.get(n)
+        def ClearSelection2(self, *a): return True
+
+        def SelectByID2(self, name, *a):
+            self.log.append(name)
+            return True                          # SolidWorks inglese: "Front Plane" esiste sempre
+
+        def InsertSketch2(self, flag):
+            self.SketchManager.ActiveSketch = None if self.SketchManager.ActiveSketch else object()
+    sk = _bare_auto()
+    sk._sketch_plane_info = lambda doc: {}
+    d = _SkDoc([])
+    sk.get_active_doc = lambda: (d, None)
+    r = _try(lambda: sk.create_sketch("Plane1"))
+    record("[V] create_sketch: piano 'Plane1' inesistente -> errore (non uno schizzo sul piano frontale)",
+           r["success"] is False and d.SketchManager.ActiveSketch is None, f"{r['message'][:70]} selezioni={d.log}")
+    d = _SkDoc(["Plane1"])
+    sk.get_active_doc = lambda: (d, None)
+    r = _try(lambda: sk.create_sketch("Plane1"))
+    record("[V] create_sketch: piano 'Plane1' esistente -> schizzo proprio su Plane1",
+           r["success"] and d.log == ["Plane1"] and d.SketchManager.ActiveSketch is not None, f"selezioni={d.log}")
+    d = _SkDoc([])
+    sk.get_active_doc = lambda: (d, None)
+    r = _try(lambda: sk.create_sketch("Top"))
+    record("[V] create_sketch: 'Top' -> secondo piano standard dell'albero", r["success"] and d.log == ["Top Plane"], f"selezioni={d.log}")
+
+    # [V] close_sketch: risposta di successo solo se lo schizzo e' davvero chiuso
+    class _StuckMgr:
+        ActiveSketch = object()
+
+        def InsertSketch(self, flag): return None
+    stuck = types.SimpleNamespace(SketchManager=_StuckMgr(), InsertSketch2=lambda f: None)
+    real = srv.sw_automation
+    fake = _FakeAutomation()
+    fake.get_active_doc = lambda: (stuck, None)
+    srv.sw_automation = fake
+    try:
+        r = _try(srv._close_sketch_handler)
+    finally:
+        srv.sw_automation = real
+    record("[V] close_sketch: lo schizzo resta aperto -> errore", r["success"] is False, r["message"][:80])
+
+    # [V] sweep: twist_angle e keep_normal arrivano davvero a SolidWorks
+    calls = []
+
+    class _FM:
+        def InsertProtrusionSwept4(self, *a):
+            calls.append(a)
+            return object()
+    sw_doc = types.SimpleNamespace(FeatureManager=_FM(), ClearSelection2=lambda *a: True)
+    sw = _bare_auto()
+    sw._part = lambda: (sw_doc, None)
+    sw._exit_sketch = lambda doc: None
+    sw._volume_m3 = lambda doc: 0.0
+    sw._names = lambda doc: []
+    sw._select_feature = lambda *a: True
+    sw._finish = lambda *a, **k: {"success": True, "message": "ok", "data": {"feature": "Sweep1"}}
+    sw._readback = lambda *a: {}
+    _try(lambda: sw.sweep("S1", "S2", twist_angle=90))
+    tw = calls[-1] if calls else None
+    record("[V] sweep: twist_angle=90 -> torsione costante lungo il percorso (codice 8, 90 gradi)",
+           tw is not None and tw[2] == 8 and abs(tw[15] - math.pi / 2) < 1e-12, f"codice={tw[2] if tw else None}")
+    _try(lambda: sw.sweep("S1", "S2", keep_normal=False))
+    record("[V] sweep: keep_normal=false -> orientamento costante del profilo (codice 1)",
+           calls and calls[-1][2] == 1, f"codice={calls[-1][2] if calls else None}")
+    _try(lambda: sw.sweep("S1", "S2"))
+    record("sweep: default -> il profilo segue il percorso (codice 0)", calls and calls[-1][2] == 0)
+    n0 = len(calls)
+    r = _try(lambda: sw.sweep("S1", "S2", twist_angle=45, keep_normal=False))
+    record("[V] sweep: torsione con keep_normal=false -> rifiutato (SolidWorks non torce un profilo a orientamento costante)",
+           r["success"] is False and len(calls) == n0, r["message"][:80])
+
+    # [V] suppress_feature: successo solo se lo stato riletto e' cambiato
+    class _SFeat:
+        IsSuppressed = False
+
+        def SetSuppression2(self, *a): return False
+    su = _bare_auto()
+    sdoc = types.SimpleNamespace(ClearSelection2=lambda *a: True)
+    su._part = lambda: (sdoc, None)
+    su._exit_sketch = lambda doc: None
+    sf = _SFeat()
+    su._find_feature = lambda doc, n: sf
+    su._volume_m3 = lambda doc: 1e-6
+    r = _try(lambda: su.suppress_feature("Estrusione1"))
+    record("[V] suppress_feature: SolidWorks non sopprime -> errore", r["success"] is False, r["message"][:80])
+    sf.IsSuppressed = True
+    r = _try(lambda: su.suppress_feature("Estrusione1"))
+    record("suppress_feature: gia' soppressa -> successo (stato riletto)", r["success"] is True, r["message"][:80])
+
+    # [V] add_section_view: 'points' e 'stepped' leggono le coordinate allo stesso modo (scala del modello)
+    lines = []
+
+    class _Seg:
+        def Select4(self, *a): return True
+
+    class _SVM:
+        def CreateLine(self, *a):
+            lines.append(tuple(round(v, 9) for v in a))
+            return _Seg()
+    parent = types.SimpleNamespace(Position=(0.2, 0.15), GetOutline=lambda: (0.15, 0.1, 0.25, 0.2), ScaleDecimal=0.5,
+                                   GetName2=lambda: "Drawing View1")
+    vdoc = types.SimpleNamespace(SketchManager=_SVM(), ClearSelection2=lambda *a: True, ActivateView=lambda n: True,
+                                 CreateSectionViewAt5=lambda *a: None)
+    sv = _bare_auto()
+    sv._drawing = lambda: (vdoc, None)
+    sv._find_view = lambda doc, n: (parent, None)
+    sv._select_view = lambda doc, v: True
+    sv._end_view_sketch = lambda doc: None
+    _try(lambda: sv.add_section_view(orientation="points", points=[-10, 5, 10, 5], unit="mm"))
+    pts_line = lines[-1] if lines else None
+    lines.clear()
+    _try(lambda: sv.add_section_view(orientation="stepped", points=[-10, 5, 0, 5, 0, -5, 10, -5], unit="mm"))
+    record("[V] add_section_view a scala 1:2: 'points' e 'stepped' tagliano negli stessi punti del modello",
+           pts_line == (-0.01, 0.005, 0, 0.01, 0.005, 0) and lines[:1] == [(-0.01, 0.005, 0, 0.0, 0.005, 0)],
+           f"points={pts_line} stepped={lines[:1]}")
+
+    # [V] set_dimension_tolerance: valori riletti confrontati; quota ambigua segnalata
+    class _Tol:
+        def __init__(self, works):
+            self.works, self.mn, self.mx = works, 0.0, 0.0
+
+        def SetValues(self, mn, mx):
+            if self.works:
+                self.mn, self.mx = mn, mx
+            return True
+
+        def GetMaxValue(self): return self.mx
+        def GetMinValue(self): return self.mn
+
+    class _Dim:
+        def __init__(self, full, works=True):
+            self.FullName, self.Name, self.Value, self.DrivenState = full, full.split("@")[0], 30.0, 1
+            self.Tolerance, self.tt = _Tol(works), 0
+
+        def SetToleranceType(self, tt):
+            self.tt = tt
+
+        def GetToleranceType(self): return self.tt
+
+    class _DD:
+        def __init__(self, dim):
+            self.dim = dim
+            self.GetDisplayData = types.SimpleNamespace(GetTextCount=lambda: 1, GetTextAtIndex=lambda i: "30")
+
+        def GetDimension2(self, i): return self.dim
+        def GetPrimaryPrecision2(self): return 2
+        def GetPrimaryTolPrecision2(self): return 2
+        def SetPrecision3(self, *a): return True
+    tdoc = object()
+    st = _bare_auto()
+    st._drawing = lambda: (tdoc, None)
+    st._sheet_views = lambda doc: ["V1"]
+    dims = [_DD(_Dim("RD1@Vista1", works=False))]
+    st._display_dims = lambda v: dims
+    r = _try(lambda: st.set_dimension_tolerance("RD1@Vista1", "symmetric", upper=0.1))
+    record("[V] set_dimension_tolerance: SolidWorks non applica i valori -> errore con i valori riletti",
+           r["success"] is False, r["message"][:90])
+    dims = [_DD(_Dim("RD1@Vista1")), _DD(_Dim("RD2@Vista1"))]
+    r = _try(lambda: st.set_dimension_tolerance("30", "symmetric", upper=0.1))
+    record("[V] set_dimension_tolerance: due quote da 30 -> rifiuto che le elenca (niente scelta a caso)",
+           r["success"] is False and "RD1@Vista1" in r["message"] and "RD2@Vista1" in r["message"], r["message"][:120])
+    dims = [_DD(_Dim("RD1@Vista1"))]
+    r = _try(lambda: st.set_dimension_tolerance("RD1@Vista1", "symmetric", upper=0.1))
+    record("set_dimension_tolerance: valori applicati e riletti -> successo", r["success"] is True, r["message"][:90])
+
+    # [V] auto_explode: il componente base non si muove; '-x' esplode verso -x
+    class _Comp:
+        def __init__(self, name, x):
+            self.Name2, self.x, self.GetSuppression, self.IsFixed = name, x, 2, False
+
+        def GetBox(self, *a):
+            return (self.x - 0.005, 0, 0, self.x + 0.005, 0.01, 0.01)
+    comps = [_Comp("A-1", 0.0), _Comp("B-1", 0.010), _Comp("C-1", 0.010)]
+    steps_seen = []
+    ae = _bare_auto()
+    ae._asm = lambda: (object(), None)
+    ae._as_collapse = lambda doc: False
+    ae._as_top_components = lambda doc, flag: comps
+    ae._as_comp = lambda doc, name, flag=True: (_Comp(name, {"A-1": 0.0, "B-1": 0.010, "C-1": 0.010}[name]), None)
+
+    def _cev(steps, unit=None, keep_exploded=True):
+        steps_seen.append(steps)
+        return {"success": True, "message": "ok", "data": {}}
+    ae.create_exploded_view = _cev
+    _try(lambda: ae.auto_explode(axis="x", gap=30, base_component="B-1"))
+    moved = [n for s in (steps_seen[-1] if steps_seen else []) for n in s["components"]]
+    record("[V] auto_explode: il componente base (B-1) non viene spostato", steps_seen and "B-1" not in moved, f"spostati={moved}")
+    _try(lambda: ae.auto_explode(axis="-x", gap=30))
+    st_neg = steps_seen[-1] if steps_seen else []
+    record("[V] auto_explode axis='-x': i componenti vanno verso -x (base all'estremo +x)",
+           st_neg and all(s["direction"] == "-x" for s in st_neg) and "A-1" in [n for s in st_neg for n in s["components"]],
+           str([(s["components"], s["direction"]) for s in st_neg]))
+
+    # [V] detect_collisions: initial_pose_restored misurato, non scritto a mano
+    class _Mov:
+        def __init__(self):
+            self.Name2, self.t, self.fail_restore = "perno-1", [0.0, 0.0, 0.0], True
+
+        @property
+        def Transform2(self):
+            return list(self.t)
+
+        @Transform2.setter
+        def Transform2(self, t):
+            if self.fail_restore and t == [0.0, 0.0, 0.0]:
+                raise RuntimeError("Transform2 rifiutato")
+            self.t = list(t)
+    mov = _Mov()
+    dc = _bare_auto()
+    dc._asm = lambda: (types.SimpleNamespace(ForceRebuild2=lambda f: True), None)
+    dc._as_collapse = lambda doc: False
+    dc._as_comp = lambda doc, n: (mov, None)
+    dc._as_pose = lambda c: ([[1, 0, 0], [0, 1, 0], [0, 0, 1]], list(c.t))
+    dc._as_transform = lambda M, t: [float(v) for v in t]
+    dc._run_interference_check = lambda *a: []
+    r = _try(lambda: dc.detect_collisions(moving_component="perno-1", dx=10, steps=2, unit="mm"))
+    record("[V] detect_collisions: posa iniziale non ripristinata -> detto (initial_pose_restored false) ed errore",
+           r["success"] is False and r.get("data", {}).get("initial_pose_restored") is False, r["message"][:90])
+    mov.fail_restore, mov.t = False, [0.0, 0.0, 0.0]
+    r = _try(lambda: dc.detect_collisions(moving_component="perno-1", dx=10, steps=2, unit="mm"))
+    record("detect_collisions: posa ripristinata e riletta -> successo", r["success"] and r["data"].get("initial_pose_restored") is True,
+           r["message"][:90])
+
+    # [V] assign_material: successo solo se il materiale riletto e' quello chiesto
+    mat = {"name": "AISI 304", "file": "C:/x/materiali.sldmat", "database": "materiali", "category": "Acciaio", "density": 8000}
+
+    class _MatDoc:
+        def __init__(self):
+            self.Extension = types.SimpleNamespace(CreateMassProperty2=lambda: types.SimpleNamespace(SelectedItems=None,
+                                                                                                    Density=1.0))
+
+        def SetMaterialPropertyName2(self, *a): return None
+        def GetMaterialPropertyName2(self, cfg, db): return ""
+    am = _bare_auto()
+    mdoc2 = _MatDoc()
+    am._dx_doc = lambda types_=None: (mdoc2, None)
+    am._dx_find_material = lambda m, c=None: (mat, None)
+    am._dx_rebuild = lambda doc: None
+    am._dx_cfg_list = lambda doc, c: ["Predefinito"]
+    am._mass_props = lambda doc: None
+    am._dx_body = lambda doc, b: (None, None)
+    r = _try(lambda: am.assign_material("AISI 304", link_title_block=False))
+    record("[V] assign_material (pezzo): materiale non riletto -> errore", r["success"] is False, r["message"][:90])
+    body = types.SimpleNamespace(Name="Corpo1", SetMaterialProperty=lambda *a: True, GetMaterialPropertyName=lambda *a: "")
+    am._dx_body = lambda doc, b: (body, None)
+    r = _try(lambda: am.assign_material("AISI 304", body="Corpo1"))
+    record("[V] assign_material (corpo): 3 tentativi falliti -> errore", r["success"] is False, r["message"][:90])
+
+    # [V] add_equation: GetErrorCode2 letto come metodo (codice + avviso); equazione che rompe il modello rimossa
+    class _EM:
+        def __init__(self):
+            self.eqs = []
+
+        @property
+        def GetCount(self): return len(self.eqs)
+
+        def Add2(self, i, text, solve):
+            self.eqs.append(text)
+            return len(self.eqs) - 1
+
+        def Delete(self, i):
+            self.eqs.pop(i)
+    em = _EM()
+
+    class _ErrFeat:
+        def GetErrorCode2(self, is_warning):     # come le feature vere: metodo con il flag d'avviso per riferimento
+            is_warning.value = False
+            return 71 if em.eqs else 0
+    edoc = types.SimpleNamespace(GetEquationMgr=em, GetType=1)
+    eq = _bare_auto()
+    eq._dx_doc = lambda t=None: (edoc, None)
+    eq._dx_rebuild = lambda doc: None
+    eq._dx_eqs = lambda doc: (em, [{"index": i, "equation": e, "value": 1.0, "global_variable": False} for i, e in enumerate(em.eqs)])
+    eq._features = lambda doc: [("Taglio1", "Cut", _ErrFeat())]
+    eq._volume_m3 = lambda doc: 1e-6
+    r = _try(lambda: eq.add_equation('"D1@Schizzo1" = 500'))
+    record("[V] add_equation: l'equazione rompe il modello (codice 71) -> rimossa ed errore",
+           r["success"] is False and em.eqs == [], f"{r['message'][:80]} equazioni={em.eqs}")
+    fake_ok = types.SimpleNamespace(GetErrorCode2=lambda bf: 0)
+    eq._features = lambda doc: [("Taglio1", "Cut", fake_ok)]
+    r = _try(lambda: eq.add_equation('"D1@Schizzo1" = 50'))
+    record("add_equation: equazione sana -> resta", r["success"] is True and len(em.eqs) == 1, r["message"][:80])
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -3349,6 +3840,8 @@ def main():
                          ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
                          ("risorse e prompt", test_resources_and_prompts),
                          ("revisione sicurezza e file", lambda: test_review_fixes(tmp)),
+                         ("revisione sezione 2, resto", lambda: test_review_sec2_rest(tmp)),
+                         ("revisione falsi successi [V]", lambda: test_review_v_fixes(tmp)),
                          ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp)), ("correzioni dal rapporto", test_report_fix_tools)):
             try:
                 fn()
