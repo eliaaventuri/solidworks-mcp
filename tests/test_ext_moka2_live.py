@@ -360,7 +360,7 @@ async def m4_definition(c):
            ok and df.get("kind") == "linear_pattern" and df.get("direction1", {}).get("instances") == 4
            and near(df["direction1"].get("spacing", 0), 15, absolute=1e-4)
            and [f["name"] for f in df.get("patterned_features", [])] == [hole], f"{df.get('direction1')} {df.get('patterned_features')}")
-    ok, text, d = await c.call("fillet_edges", radius=2, edge_points=[[top[0], 30, 40]])
+    ok, text, d = await c.call("fillet_at_points", radius=2, edge_points=[[top[0], 30, 40]])
     fil = d.get("feature")
     ok, text, d = await c.call("get_feature_definition", name=fil)
     df = d.get("definition", {})

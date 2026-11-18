@@ -50,10 +50,6 @@ def _grow(r: Rect, m: float) -> Rect:
     return (r[0] - m, r[1] - m, r[2] + m, r[3] + m)
 
 
-def _shift(r: Rect, dx: float, dy: float) -> Rect:
-    return (r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy)
-
-
 class DrawingDimsMixin:
     """Mixin di DrawingOperations: lettura geometria quote, impilamento, inventario, tolleranze."""
 

@@ -54,13 +54,6 @@ class Sketch3Operations:
             mode="closest", entity=entity, point=point, unit=unit, sketch=sketch
         )
 
-    def offset_sketch_entities(self, entities: list, offset: float, both_directions: bool = False,
-                               make_construction: bool = False, cap_ends: bool = False, unit: str = None) -> Dict:
-        """Esegue l'offset di entita' di schizzo con opzioni bidirezionale e geometria di costruzione."""
-        return self.offset_entities(
-            entities=entities, offset=offset, both_directions=both_directions,
-            make_construction=make_construction, cap_ends=cap_ends, unit=unit
-        )
 
     def set_dynamic_mirror_sketch(self, enable: bool, centerline=None, unit: str = None, sketch: str = None) -> Dict:
         """Attiva o disattiva la specchiatura dinamica in uno schizzo."""
@@ -203,35 +196,6 @@ class Sketch3Operations:
             logger.error(f"draw_conic_curve: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def draw_centerline(self, x1: float, y1: float, x2: float, y2: float, unit: str = None) -> Dict:
-        """Traccia una linea di costruzione / mezzeria direttamente."""
-        try:
-            doc, sk, err = self._s2_active_or_open()
-            if err:
-                return err
-            x1_m = self._mmu(x1, unit)
-            y1_m = self._mmu(y1, unit)
-            x2_m = self._mmu(x2, unit)
-            y2_m = self._mmu(y2, unit)
-            sk_mgr = doc.SketchManager
-            segs_before = self._segments(sk)
-            before_segs = len(segs_before)
-            before_constr = sum(1 for s in segs_before if bool(s.ConstructionGeometry))
-            try:
-                sk_mgr.CreateCenterLine(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
-            except Exception:
-                doc.CreateCenterLineVB(x1_m, y1_m, 0.0, x2_m, y2_m, 0.0)
-            segs_after = self._segments(sk)
-            after_constr = sum(1 for s in segs_after if bool(s.ConstructionGeometry))
-            if len(segs_after) <= before_segs or after_constr <= before_constr:
-                return self._result(False, "draw_centerline: linea di mezzeria non creata come costruzione da SolidWorks.", SwErrors.swSketchError)
-            return self._result(
-                True, f"Linea di mezzeria tracciata da ({x1}, {y1}) a ({x2}, {y2}).",
-                SwErrors.swSuccess, {"start": [x1, y1], "end": [x2, y2], "construction": True}
-            )
-        except Exception as e:
-            logger.error(f"draw_centerline: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def draw_midpoint_line(self, cx: float, cy: float, length: float, angle: float = 0.0,
                            construction: bool = False, unit: str = None) -> Dict:
@@ -246,16 +210,13 @@ class Sketch3Operations:
             x2 = cx + dx
             y2 = cy + dy
             if construction:
-                return self.draw_centerline(x1, y1, x2, y2, unit=unit)
+                return self.draw_centerline_axis(x1, y1, x2, y2, unit=unit)
             else:
                 return self.draw_line(x1, y1, x2, y2, unit=unit)
         except Exception as e:
             logger.error(f"draw_midpoint_line: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def draw_3point_arc(self, x1: float, y1: float, x2: float, y2: float, x3: float, y3: float, unit: str = None) -> Dict:
-        """Disegna un arco passante per 3 punti (inizio, fine, terzo punto)."""
-        return self.draw_arc_3point(x1, y1, x2, y2, x3, y3, unit=unit)
 
     def draw_centerpoint_arc(self, cx: float, cy: float, radius: float, start_angle: float = 0.0,
                              end_angle: float = 90.0, unit: str = None) -> Dict:
@@ -322,27 +283,6 @@ class Sketch3Operations:
             logger.error(f"draw_arc_slot: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def draw_sketch_text(self, text: str, x: float = 0.0, y: float = 0.0, text_height: float = None,
-                         font_name: str = None, guide_entity=None, unit: str = None) -> Dict:
-        """Inserisce testo vettoriale nello schizzo."""
-        try:
-            doc, sk, err = self._s2_active_or_open()
-            if err:
-                return err
-            x_m = self._mmu(x, unit)
-            y_m = self._mmu(y, unit)
-            if guide_entity:
-                ok, msg = self._select_ref(doc, sk, guide_entity, append=False, unit=unit)
-                if not ok:
-                    return self._result(False, f"draw_sketch_text: guida '{guide_entity}' non selezionabile: {msg}", SwErrors.swSelectionError)
-            doc.InsertSketchText(x_m, y_m, 0.0, str(text), 1, 0, 0, 100, 0)
-            return self._result(
-                True, f"Testo vettoriale '{text}' inserito a ({x}, {y}).",
-                SwErrors.swSuccess, {"text": text, "position": [x, y], "ignored_params": ["text_height", "font_name"]}
-            )
-        except Exception as e:
-            logger.error(f"draw_sketch_text: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def draw_3d_arc(self, p1: list, p2: list, p3: list, unit: str = None) -> Dict:
         """Disegna un arco nello spazio 3D nello schizzo 3D attivo."""
@@ -420,23 +360,6 @@ class Sketch3Operations:
             logger.error(f"add_3d_sketch_axis_dimension: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def edit_spline_handles(self, spline, point_index: int = 0, tangent_weight: float = None,
-                            tangent_angle: float = None, unit: str = None) -> Dict:
-        """Ispeziona o regola peso e angolo di tangenza delle maniglie di una spline."""
-        try:
-            doc, sk, err = self._s2_active_or_open()
-            if err:
-                return err
-            doc.ClearSelection2(True)
-            self._select_ref(doc, sk, spline, append=False, unit=unit)
-            return self._result(
-                True, f"Maniglia punto {point_index} della spline {spline} aggiornata.",
-                SwErrors.swSuccess, {"spline": spline, "point_index": point_index,
-                                     "tangent_weight": tangent_weight, "tangent_angle": tangent_angle}
-            )
-        except Exception as e:
-            logger.error(f"edit_spline_handles: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def edit_sketch_block(self, block_name: str) -> Dict:
         """Modifica la definizione di un blocco di schizzo o chiude la modifica."""

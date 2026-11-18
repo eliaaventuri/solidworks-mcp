@@ -65,14 +65,14 @@ async def run_tests():
             ok, text, _ = await c.call("create_sketch", plane="Front")
             record("create_sketch", ok, text[:70])
 
-            ok, text, _ = await c.call("draw_centerline", x1=0, y1=0, x2=0, y2=100)
-            record("draw_centerline", ok, text[:70])
+            ok, text, _ = await c.call("draw_centerline_axis", x1=0, y1=0, x2=0, y2=100)
+            record("draw_centerline_axis", ok, text[:70])
 
             ok, text, _ = await c.call("draw_midpoint_line", cx=50, cy=0, length=40, angle=0)
             record("draw_midpoint_line", ok, text[:70])
 
-            ok, text, _ = await c.call("draw_3point_arc", x1=0, y1=0, x2=20, y2=20, x3=10, y3=30)
-            record("draw_3point_arc", ok, text[:70])
+            ok, text, _ = await c.call("draw_arc_3point", x1=0, y1=0, x2=20, y2=20, x3=10, y3=30)
+            record("draw_arc_3point", ok, text[:70])
 
             ok, text, _ = await c.call("draw_elliptical_arc", cx=100, cy=50, major_x=40, major_y=0, minor_r=20, start_angle=0, end_angle=180)
             record("draw_elliptical_arc", ok, text[:70])
@@ -102,8 +102,8 @@ async def run_tests():
             ok, text, _ = await c.call("create_new_part")
             ok, text, _ = await c.call("create_sketch", plane="Front")
             await c.call("draw_rectangle", x1=0, y1=0, x2=60, y2=40)
-            ok, text, _ = await c.call("extrude_sketch", depth=30)
-            record("extrude_sketch", ok, text[:70])
+            ok, text, _ = await c.call("extrude_boss", depth=30)
+            record("extrude_boss", ok, text[:70])
 
             # Query topologia (6 facce del parallelepipedo)
             ok, text, data = await c.call("query_topology_by_criteria", entity_type="face", surface_type="plane")

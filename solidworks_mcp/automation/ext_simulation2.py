@@ -149,24 +149,6 @@ class Simulation2Operations:
                 sm.ActiveStudy = i
         return st, sm, None
 
-    # ------------------------------------------------------------------ 1. Studi FEA speciali
-    def create_frequency_study(self, study_name: str = "Frequency 1", num_frequencies: int = 5) -> Dict:
-        """Crea uno studio di frequenze modali; il numero di modi e' riletto da SolidWorks."""
-        try:
-            st, sm, err = self._s2_create_study(study_name, 1, "frequenze")
-            if err:
-                return err
-            fo = st.FrequencyStudyOptions
-            fo.NoOfFrequencies = int(num_frequencies)
-            count = int(fo.NoOfFrequencies)
-            if count != int(num_frequencies):
-                return self._s2_err(f"Studio '{study_name}' creato ma il numero di modi resta {count}", SwErrors.swUnknownError)
-            return self._result(True, f"Studio di frequenze '{study_name}' creato con {count} modi", SwErrors.swSuccess,
-                                {"name": study_name, "type": "frequency", "analysis_type": int(st.AnalysisType),
-                                 "num_frequencies": count})
-        except Exception as e:
-            logger.error(f"create_frequency_study: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     def create_buckling_study(self, study_name: str = "Buckling 1", num_modes: int = 4) -> Dict:
         """Crea uno studio di instabilita' lineare (buckling); il numero di modi e' riletto da SolidWorks."""
@@ -933,30 +915,6 @@ class Simulation2Operations:
             logger.error(f"set_solver_options: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    # ------------------------------------------------------------------ 10. Risultati e sonde
-    def get_mode_shapes(self, mode_number: int = 1, study_name: str = None) -> Dict:
-        """Frequenza (Hz, rad/s) del modo richiesto e tabella di tutti i modi di uno studio di frequenze eseguito."""
-        try:
-            st, doc, sm, err = self._sim_study(study_name)
-            if err:
-                return err
-            if int(st.AnalysisType) != 1:
-                return self._s2_err("Serve uno studio di frequenze", SwErrors.swInvalidInput)
-            res = st.Results
-            if res is None:
-                return self._s2_err("Risultati non disponibili: esegui prima lo studio.", SwErrors.swInvalidInput)
-            f = list(res.GetResonantFrequencies(_bi()) or [])
-            modes = [{"mode": int(f[i]), "rad_s": float(f[i + 1]), "hz": float(f[i + 2]), "period_s": float(f[i + 3])}
-                     for i in range(0, len(f) - 3, 4)]
-            chosen = next((m for m in modes if m["mode"] == int(mode_number)), None)
-            if chosen is None:
-                return self._s2_err(f"Modo {mode_number} non trovato (modi calcolati: {len(modes)})", SwErrors.swInvalidInput)
-            return self._result(True, f"Modo {chosen['mode']}: {chosen['hz']:.3f} Hz ({chosen['rad_s']:.3f} rad/s)", SwErrors.swSuccess,
-                                {"mode": chosen["mode"], "frequency_hz": chosen["hz"], "frequency_rad_s": chosen["rad_s"],
-                                 "all_modes": modes})
-        except Exception as e:
-            logger.error(f"get_mode_shapes: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     def get_buckling_load_factor(self, mode_number: int = 1, study_name: str = None) -> Dict:
         """Fattore di carico critico (BLF) del modo richiesto di uno studio di buckling eseguito."""

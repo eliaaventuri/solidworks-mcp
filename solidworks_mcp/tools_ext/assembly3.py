@@ -39,15 +39,6 @@ TOOLS = {
         },
         ["component_name"],
     ),
-    "insert_new_virtual_part": (
-        "insert_new_virtual_part",
-        "Create a new virtual part directly inside the assembly without creating an external file on disk.",
-        {
-            "plane_or_face": (S, "Reference plane or planar face name for placing the new virtual part (default 'Front Plane')"),
-            "part_name": (S, "Optional name prefix for the new virtual part"),
-        },
-        [],
-    ),
     "insert_new_virtual_assembly": (
         "insert_new_virtual_assembly",
         "Create a new virtual subassembly directly inside the assembly.",
@@ -70,25 +61,6 @@ TOOLS = {
         {},
         [],
     ),
-    "save_virtual_component_external": (
-        "save_virtual_component_external",
-        "Save an internal virtual component to an external .sldprt file on disk.",
-        {
-            "component_name": (S, "Name of the virtual component instance (e.g. '[Part1^Assy]')"),
-            "filepath": (S, "Target destination path for .sldprt file on disk"),
-            "overwrite": (B, "Overwrite existing file if present (default false)"),
-        },
-        ["component_name", "filepath"],
-    ),
-    "lock_mate_rotation": (
-        "lock_mate_rotation",
-        "Lock or unlock rotation on a concentric mate to eliminate redundant rotational degrees of freedom.",
-        {
-            "mate_name": (S, "Name of the concentric mate feature (e.g. 'Concentric1')"),
-            "locked": (B, "True to lock rotation, False to unlock (default true)"),
-        },
-        ["mate_name"],
-    ),
     "add_concentric_mate_with_tolerance": (
         "add_concentric_mate_with_tolerance",
         "Add a concentric mate between holes or cylindrical faces with compensatory positional hole tolerance.",
@@ -101,14 +73,6 @@ TOOLS = {
         },
         ["entity1", "entity2"],
     ),
-    "flip_mate_alignment": (
-        "flip_mate_alignment",
-        "Flip the alignment direction (aligned vs anti-aligned) of an existing mate.",
-        {
-            "mate_name": (S, "Name of the mate feature to flip alignment (e.g. 'Coincident1')"),
-        },
-        ["mate_name"],
-    ),
     "add_gear_mate": (
         "add_gear_mate",
         "Add a mechanical gear mate between two cylindrical faces, revolute axes, or pitch circles with a gear ratio.",
@@ -120,40 +84,6 @@ TOOLS = {
             "reverse": (B, "Reverse relative rotation direction (default false)"),
         },
         ["entity1", "entity2"],
-    ),
-    "add_rack_pinion_mate": (
-        "add_rack_pinion_mate",
-        "Add a mechanical rack and pinion mate coupling linear translation of a rack to rotation of a pinion.",
-        {
-            "rack_entity": (None, "Linear edge or planar face of the rack: name or {'edge': [x, y, z]}"),
-            "pinion_entity": (None, "Cylindrical face or axis of the pinion: name or {'face': [x, y, z]}"),
-            "pitch_diameter": (N, "Pinion pitch circle diameter in mm (`unit`, default 50.0)"),
-            "reverse": (B, "Reverse motion direction (default false)"),
-            "unit": UNIT,
-        },
-        ["rack_entity", "pinion_entity"],
-    ),
-    "add_cam_mate": (
-        "add_cam_mate",
-        "Add a mechanical cam-follower mate tangent to a series of contiguous cam surfaces.",
-        {
-            "cam_faces": (A, "List of contiguous cam faces: names or [{'face': [x, y, z]}, ...]"),
-            "follower_face": (None, "Follower face or vertex: name or {'face': [x, y, z]}"),
-        },
-        ["cam_faces", "follower_face"],
-    ),
-    "add_slot_mate": (
-        "add_slot_mate",
-        "Add a mechanical slot mate constraining a pin, bolt, or cylinder inside a straight or curved slot.",
-        {
-            "slot_entity": (None, "Slot cylindrical/curved face or slot feature: name or {'face': [x, y, z]}"),
-            "pin_entity": (None, "Pin cylindrical face or axis: name or {'face': [x, y, z]}"),
-            "constraint_type": (S, "Constraint: 'free' | 'center' (default) | 'distance' | 'percent'"),
-            "distance": (N, "Distance from slot end in mm for constraint_type='distance' (`unit`, default 0.0)"),
-            "percent": (N, "Percentage along slot for constraint_type='percent' (0-100, default 50.0)"),
-            "unit": UNIT,
-        },
-        ["slot_entity", "pin_entity"],
     ),
     "add_hinge_mate": (
         "add_hinge_mate",
@@ -232,23 +162,6 @@ TOOLS = {
         },
         ["component_name"],
     ),
-    "promote_subassembly_component": (
-        "promote_subassembly_component",
-        "Move a component out of a subassembly up to the top-level assembly.",
-        {
-            "component_name": (S, "Full path or name of the component inside subassembly to promote"),
-        },
-        ["component_name"],
-    ),
-    "demote_subassembly_component": (
-        "demote_subassembly_component",
-        "Move a top-level assembly component into an existing nested subassembly.",
-        {
-            "component_name": (S, "Top-level component name to demote"),
-            "target_subassembly": (S, "Target subassembly name to receive the component"),
-        },
-        ["component_name", "target_subassembly"],
-    ),
     "isolate_components": (
         "isolate_components",
         "Isolate selected components by hiding or rendering transparent all other components in the assembly.",
@@ -292,15 +205,6 @@ TOOLS = {
         },
         [],
     ),
-    "set_envelope_component": (
-        "set_envelope_component",
-        "Designate a component as an Envelope (reference geometry excluded from BOM and mass calculations).",
-        {
-            "component_name": (S, "Component instance name to configure as envelope"),
-            "is_envelope": (B, "True to designate as envelope, False for standard component (default true)"),
-        },
-        ["component_name"],
-    ),
     "insert_cavity_feature": (
         "insert_cavity_feature",
         "Insert a cavity/impression feature into the in-context edited part using other components as core/tooling.",
@@ -319,15 +223,6 @@ TOOLS = {
         },
         ["components"],
     ),
-    "create_smart_component": (
-        "create_smart_component",
-        "Create a Smart Component associating automatic sizing, mounting features, and mating components.",
-        {
-            "component_name": (S, "Base component name to convert into a Smart Component"),
-            "associated_features": (A, "Optional list of feature names to associate with the smart component"),
-        },
-        ["component_name"],
-    ),
 }
 
 DESTRUCTIVE = {
@@ -335,5 +230,4 @@ DESTRUCTIVE = {
 }
 
 OVERWRITE = {
-    "save_virtual_component_external": "filepath",
 }

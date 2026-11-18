@@ -137,7 +137,7 @@ def _raw_all_tools() -> list[Tool]:
                             "properties": {
                                 "tool": {
                                     "type": "string",
-                                    "description": "Name of the MCP tool to execute (e.g. 'create_sketch', 'draw_line', 'extrude_sketch')"
+                                    "description": "Name of the MCP tool to execute (e.g. 'create_sketch', 'draw_line', 'extrude_boss')"
                                 },
                                 "arguments": {
                                     "type": "object",
@@ -349,64 +349,6 @@ def _raw_all_tools() -> list[Tool]:
             }
         ),
         
-        # Feature Tools
-        Tool(
-            name="extrude_sketch",
-            description="Extrude the active sketch (Boss-Extrude).",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "depth": {"type": "number", "default": 10, "description": "Extrusion depth in `unit`"},
-                    "both_directions": {"type": "boolean", "default": False, "description": "Extrude in both directions"},
-                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="cut_extrude",
-            description="Cut extrude to remove material.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "depth": {"type": "number", "default": 10, "description": "Cut depth in `unit`"},
-                    "through_all": {"type": "boolean", "default": False, "description": "Cut through all"},
-                    "both_directions": {"type": "boolean", "default": False, "description": "Cut both directions"},
-                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="fillet_edges",
-            description="Add a fillet to selected edges. Example: {\"radius\":2,\"edge_points\":[[10,0,5]]}",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "radius": {"type": "number", "default": 2, "description": "Fillet radius in `unit`"},
-                    "edge_points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
-                                    "description": "[x,y,z] points ON the edges to fillet (self-selecting). Omitted: already selected edges"},
-                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
-                },
-                "required": []
-            }
-        ),
-        Tool(
-            name="chamfer_edges",
-            description="Add a chamfer to selected edges. Example: {\"distance\":2,\"edge_points\":[[10,0,5]]}",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "distance": {"type": "number", "default": 2, "description": "Chamfer distance in `unit`"},
-                    "angle": {"type": "number", "default": 45, "description": "Chamfer angle (degrees)"},
-                    "distance2": {"type": "number", "description": "Second distance in `unit`, for a distance-distance chamfer"},
-                    "edge_points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
-                                    "description": "[x,y,z] points ON the edges to chamfer (self-selecting). Omitted: already selected edges"},
-                    "unit": {"type": "string", "description": "mm | inch | m (default mm)"}
-                },
-                "required": []
-            }
-        ),
         Tool(
             name="list_features",
             description="List the features of the active document, one compact line each: \"name (type)\" plus \" [soppressa]\" when "
@@ -1189,10 +1131,6 @@ BASE_DISPATCH = {
     "draw_rectangle": ("draw_rectangle", {"x1", "y1", "x2", "y2", "unit"}),
     "draw_arc": ("draw_arc_center", {"cx", "cy", "radius", "start_angle", "end_angle", "unit"}),
     "draw_polygon": ("draw_polygon", {"cx", "cy", "radius", "sides", "unit"}),
-    "extrude_sketch": ("extrude_sketch", {"depth", "both_directions", "unit"}),
-    "cut_extrude": ("cut_extrude", {"depth", "through_all", "both_directions", "unit"}),
-    "fillet_edges": ("fillet_edges", {"radius", "unit", "edge_points"}),
-    "chamfer_edges": ("chamfer_edges", {"distance", "angle", "unit", "edge_points", "distance2"}),
 }
 
 def _search_tools_handler(arguments: dict) -> Dict:
@@ -1293,6 +1231,9 @@ TOOLSET_TABLES = {
     "simulation": SIMULATION_DISPATCH,
 }
 TOOLSET_NAMES = ("base",) + tuple(TOOLSET_TABLES)
+# estrusione, taglio, raccordo e smusso stanno anche nel gruppo base: i vecchi doppioni base (extrude_sketch, cut_extrude,
+# fillet_edges, chamfer_edges) sono stati tolti (revisione 2026-11-12, sez. 4) e SW_MCP_TOOLSETS=base deve poter modellare
+BASE_FROM_MODELING = frozenset({"extrude_boss", "extrude_cut", "fillet_at_points", "chamfer_at_points"})
 
 
 def _python_enabled() -> bool:
@@ -1314,7 +1255,7 @@ def _enabled_toolsets() -> set:
 
 def _tool_group(name: str):
     """Gruppo di un tool, o None se il tool non esiste."""
-    if name in BASE_DISPATCH or name in SPECIAL_HANDLERS or name == "execute_python":
+    if name in BASE_DISPATCH or name in SPECIAL_HANDLERS or name in BASE_FROM_MODELING or name == "execute_python":
         return "base"
     for group, table in TOOLSET_TABLES.items():
         if name in table:

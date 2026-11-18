@@ -3,16 +3,6 @@
 from ._common import S, N, B, A, PT3
 
 TOOLS = {
-    # 1. Creazione e Gestione Studi FEA
-    "create_frequency_study": (
-        "create_frequency_study",
-        "Create a modal frequency FEA study to calculate resonance modes and natural frequencies in Hz.",
-        {
-            "study_name": (S, "Name of the frequency study (default 'Frequency 1')"),
-            "num_frequencies": (N, "Number of resonant natural frequencies count (default 5)"),
-        },
-        [],
-    ),
     "create_buckling_study": (
         "create_buckling_study",
         "Create an elastic linear buckling study to calculate critical load factor multipliers.",
@@ -214,7 +204,7 @@ TOOLS = {
     # 6. Contatti tra Corpi e Giunzioni
     "add_shrink_fit_contact": (
         "add_shrink_fit_contact",
-        "Shrink-fit contact between a hub hole and a shaft (cylindrical faces); the interference comes from the GEOMETRY and is reported.",
+        "Shrink-fit contact between a hub hole and a shaft (cylindrical faces); the interference comes from the GEOMETRY and is reported, friction is read back. Other local contacts: add_simulation_contact.",
         {
             "face_hub_point": (A, "Point [x,y,z] mm ON the hub (hole) cylindrical face"),
             "face_shaft_point": (A, "Point [x,y,z] mm ON the shaft cylindrical face"),
@@ -291,16 +281,6 @@ TOOLS = {
         [],
     ),
 
-    # 10. Risultati, Sonde e Report di Calcolo
-    "get_mode_shapes": (
-        "get_mode_shapes",
-        "Extract modal resonant frequencies in Hz and mode shape deformation vectors from a frequency study.",
-        {
-            "mode_number": (N, "Mode number 1-based index count (default 1)"),
-            "study_name": (S, "Study name (or active study if omitted)"),
-        },
-        [],
-    ),
     "get_buckling_load_factor": (
         "get_buckling_load_factor",
         "Extract the critical buckling load factor (BLF) multiplier from a buckling study.",

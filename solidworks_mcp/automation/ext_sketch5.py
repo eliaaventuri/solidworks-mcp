@@ -8,7 +8,6 @@ import logging
 import traceback
 
 import pythoncom
-from pathlib import Path
 from typing import Dict, Any, List
 
 from ..constants import SwErrors
@@ -152,44 +151,6 @@ class Sketch5Operations:
             logger.error(f"insert_spline_point: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def delete_spline_point(self, point_index: int = 1, spline_entity: str = None) -> Dict:
-        """Elimina un punto di passaggio da una spline specificando il suo indice."""
-        try:
-            doc, _sk, err = self._s2_active_or_open()
-            if err:
-                return err
-
-            sp = self._find_spline(doc, spline_entity)
-            if sp is None:
-                return self._result(False, f"Spline '{spline_entity}' non trovata." if spline_entity else "Nessuna spline trovata nello schizzo.", SwErrors.swSelectionError)
-
-            pts = ()
-            try:
-                pts = self._com(sp, "GetPoints2") or self._com(sp, "GetPoints") or ()
-            except Exception:
-                pass
-
-            idx = max(0, int(point_index or 1) - 1)
-            if idx >= len(pts):
-                return self._result(False, f"delete_spline_point: punto #{point_index} fuori campo (punti della spline: {len(pts)}).", SwErrors.swInvalidInput)
-            target_pt = pts[idx]
-            try:
-                ok = bool(sp.DeletePoint(target_pt))
-            except Exception as ex:
-                return self._result(False, f"delete_spline_point: eliminazione punto non riuscita: {ex}", SwErrors.swSketchError)
-            if not ok:
-                return self._result(False, f"delete_spline_point: SolidWorks non ha eliminato il punto #{point_index} (DeletePoint={ok}, punti della spline {len(pts)}, tipo oggetto {type(target_pt).__name__}).", SwErrors.swSketchError)
-
-            spline_name = self._safe_seg_id(sp)
-            msg = f"Punto #{point_index} rimosso dalla spline '{spline_name}'."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "spline_entity": spline_name,
-                "deleted_index": point_index,
-                "deleted": True
-            })
-        except Exception as e:
-            logger.error(f"delete_spline_point: {e} - {traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def edit_spline_handle(self, point_index: int = 0, magnitude: float = None,
                            radial_angle_deg: float = None, polar_angle_deg: float = None,
@@ -566,89 +527,6 @@ class Sketch5Operations:
             logger.error(f"rotate_copy_3d_sketch: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def merge_sketch_points(self, distance: float = 0.01, unit: str = None) -> Dict:
-        """Fonde automaticamente i punti coincidenti entro una distanza di tolleranza."""
-        try:
-            doc, _sk, err = self._s2_active_or_open()
-            if err:
-                return err
-
-            sk = doc.SketchManager.ActiveSketch
-            dist_m = self._mmu(distance or 0.01, unit)
-
-            pts_before = int(self._com(sk, "GetSketchPointsCount2"))
-            try:
-                ok = bool(sk.MergePoints(float(dist_m)))
-            except Exception as ex:
-                return self._result(False, f"merge_sketch_points: fusione non riuscita: {ex}", SwErrors.swSketchError)
-            pts_after = int(self._com(sk, "GetSketchPointsCount2"))
-            if pts_after >= pts_before:
-                return self._result(False, f"merge_sketch_points: SolidWorks non ha fuso alcun punto (MergePoints={ok}, punti prima {pts_before} dopo {pts_after}).", SwErrors.swSketchError)
-
-            u = unit or "mm"
-            msg = f"Fusione punti di schizzo eseguita entro tolleranza {distance} {u}."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "points_merged": True,
-                "tolerance": distance
-            })
-        except Exception as e:
-            logger.error(f"merge_sketch_points: {e} - {traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
-
-    def save_sketch_block_to_file(self, block_name: str, filepath: str, overwrite: bool = False) -> Dict:
-        """Salva ed esporta una definizione di blocco di schizzo esistente in un file .sldblk esterno."""
-        try:
-            out_p = Path(filepath).resolve()
-            if out_p.exists() and not overwrite:
-                return self._result(False, f"Il file {out_p} esiste già. Usa overwrite=True per sovrascrivere.", SwErrors.swInvalidInput)
-
-            doc, err = self._part()
-            if err:
-                doc, err = self.get_active_doc()
-                if err:
-                    return err
-
-            sm = doc.SketchManager
-            bdefs = ()
-            try:
-                bdefs = self._com(sm, "GetSketchBlockDefinitions") or ()
-            except Exception:
-                pass
-
-            target_bdef = None
-            if bdefs:
-                for b in bdefs:
-                    try:
-                        feat = self._com(b, "GetFeature")
-                        if feat and feat.Name.lower() == block_name.lower():
-                            target_bdef = b
-                            break
-                    except Exception:
-                        pass
-                if target_bdef is None and bdefs:
-                    target_bdef = bdefs[0]
-
-            ok = False
-            out_p.parent.mkdir(parents=True, exist_ok=True)
-            if target_bdef is not None:
-                try:
-                    ok = bool(target_bdef.Save(str(out_p)))
-                except Exception as ex:
-                    logger.warning(f"BlockDef Save error: {ex}")
-            else:
-                if not out_p.exists():
-                    out_p.write_bytes(b"SOLIDWORKS_BLOCK_PLACEHOLDER")
-                ok = True
-
-            msg = f"Blocco di schizzo '{block_name}' esportato con successo in '{out_p.name}'."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "block_name": block_name,
-                "filepath": str(out_p),
-                "saved": ok
-            })
-        except Exception as e:
-            logger.error(f"save_sketch_block_to_file: {e} - {traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def set_sketch_performance_mode(self, add_to_db: bool = False, auto_solve: bool = True,
                                     auto_inference: bool = True) -> Dict:

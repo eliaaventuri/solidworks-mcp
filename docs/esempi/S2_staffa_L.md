@@ -28,7 +28,7 @@
    -> [SUCCESS] Estrusione: Estrusione-Estrusione1 (volume 32160.0 mm3, delta +32160.0)
 10. `get_bounding_box` `{}`  
    -> [SUCCESS] Box 40.0 x 80.0 x 60.0 mm
-11. `fillet_edges` `{"radius":10,"edge_points":[[20,6,6]]}`  
+11. `fillet_at_points` `{"radius":10,"edge_points":[[20,6,6]]}`  
    -> [SUCCESS] Raccordo: Raccordo1 (volume 33018.4 mm3, delta +858.4)
 12. `create_sketch_on_face` `{"x":20,"y":50,"z":6}`  
    -> [SUCCESS] Sketch created on face at (20, 50, 6) mm
@@ -38,7 +38,7 @@
    -> [SUCCESS] Asola creata
 15. `extrude_cut` `{"end_condition":"through_all"}`  
    -> [SUCCESS] Taglio estruso: Taglio-Estrusione1 (volume 30456.6 mm3, delta -2561.8)
-16. `chamfer_edges` `{"distance":1,"angle":45,"edge_points":[[20,80,6],[20,80,0],[20,0,60],[20,6,60],[20,0,0]]}`  
+16. `chamfer_at_points` `{"distance":1,"angle":45,"edge_points":[[20,80,6],[20,80,0],[20,0,60],[20,6,60],[20,0,0]]}`  
    -> [SUCCESS] Smusso: Smusso1 (volume 30356.6 mm3, delta -100.0)
 17. `list_features` `{}`  
    -> [SUCCESS] 23 features found

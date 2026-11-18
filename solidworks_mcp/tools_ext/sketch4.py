@@ -4,24 +4,6 @@ S, N, B, A, O = "string", "number", "boolean", "array", "object"
 _UNIT = (S, "Length unit ('mm' | 'm' | 'in' | 'ft', default from document)")
 
 TOOLS = {
-    "insert_intersection_curve": (
-        "insert_intersection_curve",
-        "Generate 2D or 3D sketch curves at the geometric intersection between solid/surface bodies, faces, or planes and the active sketch plane.",
-        {
-            "entities": (A, "Optional array of entity names or faces/bodies to intersect; if omitted, intersects selected entities or bodies with active sketch plane"),
-            "unit": _UNIT,
-        },
-        [],
-    ),
-    "insert_silhouette_entities": (
-        "insert_silhouette_entities",
-        "Project the outer silhouette outline (shadow boundary) of solid bodies or components onto the active sketch plane.",
-        {
-            "body": (S, "Optional target body or component name to project silhouette from"),
-            "exclude_internal_loops": (B, "true = exclude internal cutouts and holes, keeping only exterior boundary (default true)"),
-        },
-        [],
-    ),
     "sketch_offset_on_surface": (
         "sketch_offset_on_surface",
         "Create a geodesic or Euclidean 3D offset curve directly on a curved model face from selected edges.",
@@ -125,23 +107,6 @@ TOOLS = {
             "scale": (N, "Curvature comb visualization scale factor (scale, default 10.0)"),
             "density": (N, "Curvature comb tooth density (count, default 20)"),
             "visible": (B, "true = display combs; false = hide combs (default true)"),
-        },
-        [],
-    ),
-    "get_spline_curvature_analysis": (
-        "get_spline_curvature_analysis",
-        "Quantitative analysis of spline geometry: calculates inflection points (concavity changes) and minimum radius of curvature with critical coordinates.",
-        {
-            "entity": (S, "Spline segment ID to inspect (default: active or first spline)"),
-            "unit": _UNIT,
-        },
-        [],
-    ),
-    "diagnose_sketch_relations": (
-        "diagnose_sketch_relations",
-        "Inspect all geometric constraints in the sketch: categorizes relations into valid, redundant, conflicting, and dangling/orphaned.",
-        {
-            "sketch": (S, "Sketch name to diagnose (default: active sketch)"),
         },
         [],
     ),

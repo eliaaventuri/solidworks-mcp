@@ -437,7 +437,7 @@ _TOOLS = {
          "origin": (A, "Numeric mode: origin [x,y,z] (`unit`) relative to the model origin"),
          "rotation": (A, "Numeric mode: rotation [rx,ry,rz] in degrees about X, Y, Z")}, []),
     # ---------------------------------------------------------------- feature management
-    "list_model_features": ("list_model_features", "List features: type, suppression, errors, optional dimensions.",
+    "list_model_features": ("list_model_features", "List features in detail: type, suppression, rebuild errors and warnings, optional dimensions. Compact list: list_features; parent-child tree: get_feature_tree.",
         {"include_dimensions": (B, "Include dimensions")}, []),
     "suppress_feature": ("suppress_feature", "Suppress a feature by name.", {"name": (S, "Feature name")}, ["name"]),
     "unsuppress_feature": ("unsuppress_feature", "Unsuppress a suppressed feature.", {"name": (S, "Feature name")}, ["name"]),
@@ -476,10 +476,8 @@ _TOOLS = {
         {"kind": (S, "face (default) | edge | vertex"), "unit": _UNIT,
          "limit": (N, "Max entities returned (count, default 60)"),
          "include_params": (B, "Include surface/curve parameters (default true; false = compact rows)")}, []),
-    "get_mass_properties": ("get_mass_properties", "Volume, mass, area, center of mass.",
+    "get_mass_properties": ("get_mass_properties", "Quick volume, mass, area and center of mass of the active document. Principal moments, inertia, one body or another coordinate system: get_part_mass_properties.",
         {"unit": _UNIT}, []),
-    "set_material": ("set_material", "Assign a material from the SolidWorks database (e.g. 'AISI 1020').",
-        {"material": (S, "Material name (default 'AISI 1020')")}, []),
 }
 
 # tool aggiunti per lotti (tools_ext/*.py): stesso formato, stesso gruppo "modeling"

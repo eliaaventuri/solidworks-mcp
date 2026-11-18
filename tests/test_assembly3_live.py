@@ -158,10 +158,10 @@ async def run():
 
                 # 7. Specialized Features
                 AX_BOX = max(range(3), key=lambda i: -abs(bb_box["size"][i] - 30.0))   # asse di estrusione della scatola
-                ok_pat,text_pat, data_pat = await c.call("linear_component_pattern", seed_component="asm3_pin_indip-1",
+                ok_pat,text_pat, data_pat = await c.call("component_linear_pattern", components=["asm3_pin_indip-1"],
                                                           direction1={"component": "asm3_box-1", "edge": pt_on(mid_point(bb_box), AX_BOX, mid_point(bb_box)[AX_BOX], 25, 25)},
                                                           count1=3, spacing1=30.0)
-                record("linear_component_pattern (prep)", ok_pat and (data_pat or {}).get("total_instances") == 3,
+                record("component_linear_pattern (prep)", ok_pat and (data_pat or {}).get("total_instances") == 3,
                        f"istanze {(data_pat or {}).get('total_instances')}" if ok_pat else text_pat[:60])
                 ok_dis, text_dis, data_dis = await c.call("dissolve_component_pattern", pattern_name=(data_pat or {}).get("feature"))
                 record("dissolve_component_pattern", ok_dis, "" if ok_dis else text_dis[:60])

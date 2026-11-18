@@ -101,17 +101,16 @@ async def scenario(c):
 
     # ---- 1. frequenze: f1 a sbalzo = 1.875^2/(2 pi) sqrt(E I / (rho A L^4))
     f1 = 1.875 ** 2 / (2 * math.pi) * math.sqrt(E * I_MIN / (RHO * A * L ** 4))
-    ok, txt, d = await c.call("create_frequency_study", study_name="Freq_Live", num_frequencies=3)
-    record("create_frequency_study: tipo 1, 3 modi riletti", ok and d.get("analysis_type") == 1 and d.get("num_frequencies") == 3, txt)
+    ok, txt, d = await c.call("create_static_study", name="Freq_Live", analysis="frequency", modes=3)
+    record("create_static_study frequency: 3 modi riletti", ok and d.get("type") == "frequency" and d.get("modes") == 3, txt)
     await c.call("add_restraint", kind="fixed", faces=[x0], study="Freq_Live")
     solved = await mesh_run(c, "Freq_Live")
-    ok, txt, d = await c.call("get_mode_shapes", mode_number=1, study_name="Freq_Live")
-    record("get_mode_shapes: f1 = analitico +-3 %", solved and ok and near(d.get("frequency_hz"), f1, 0.03),
-           f"{d.get('frequency_hz')} Hz vs {f1:.1f} Hz")
-    record("get_mode_shapes: 3 modi crescenti", ok and len(d.get("all_modes", [])) == 3
-           and all(d["all_modes"][i]["hz"] < d["all_modes"][i + 1]["hz"] for i in range(2)), "")
-    ok, txt, d = await c.call("get_mode_shapes", mode_number=7, study_name="Freq_Live")
-    record("get_mode_shapes: modo inesistente -> errore", not ok, txt[:90])
+    ok, txt, d = await c.call("get_simulation_results", study="Freq_Live")
+    md = d.get("modes") or []
+    f_1 = md[0].get("frequency_Hz") if md else None
+    record("get_simulation_results: f1 = analitico +-3 %", solved and ok and near(f_1, f1, 0.03), f"{f_1} Hz vs {f1:.1f} Hz")
+    record("get_simulation_results: 3 modi crescenti", ok and len(md) == 3
+           and all(md[i]["frequency_Hz"] < md[i + 1]["frequency_Hz"] for i in range(2)), "")
     ok, txt, d = await c.call("get_mesh_quality_metrics", study_name="Freq_Live")
     record("get_mesh_quality_metrics: nodi, elementi, aspetto >= 1", ok and d.get("nodes", 0) > 100 and d.get("elements", 0) > 50
            and d.get("max_aspect_ratio", 0) >= 1.0, txt)

@@ -10,7 +10,7 @@ __author__ = "Elia (elo-savage)"
 
 from .automation import SolidWorksAutomation
 from .config import get_config, reload_config, save_config, SolidWorksConfig
-from .constants import SwErrors, SwPlanes, SwDocumentTypes, SwViews
+from .constants import SwErrors, SwDocumentTypes
 from .utils import (
     UnitConverter, 
     mm, cm, inch, ft,
@@ -35,9 +35,7 @@ __all__ = [
     
     # Constants
     "SwErrors",
-    "SwPlanes",
     "SwDocumentTypes",
-    "SwViews",
     
     # Utils
     "UnitConverter",

@@ -57,7 +57,7 @@ async def run():
                 await c.call("create_new_part")
                 await c.call("create_sketch", plane="Front")
                 await c.call("draw_rectangle", x1=-50, y1=-30, x2=50, y2=30, unit="mm")
-                await c.call("extrude_sketch", depth=25, unit="mm")
+                await c.call("extrude_boss", depth=25, unit="mm")
                 await c.call("save_document", filepath=str(PART), overwrite=True)
 
                 # =============================================================

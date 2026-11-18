@@ -115,9 +115,6 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
         logger.error(f"{what}: {e}\n{traceback.format_exc()}")
         return self._result(False, f"{what}: {e}", SwErrors.swUnknownError)
 
-    def _as_title(self, doc) -> str:
-        t = str(self._get_doc_title(doc))
-        return os.path.splitext(t)[0] if t.lower().endswith((".sldasm", ".sldprt")) else t
 
     def _as_utility(self):
         return self._com(self._sw_app, "GetMathUtility")
@@ -1050,8 +1047,6 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             f = self._com(f, "GetNextFeature")
         return out
 
-    def _as_feat_error(self, feat) -> int:
-        return self._as_feat_error2(feat)[0]
 
     def _as_feat_error2(self, feat):
         """-> (codice, e' solo un avviso). Sulle feature d'accoppiamento GetErrorCode2 arriva come METODO (vuole il flag per

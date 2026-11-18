@@ -40,42 +40,6 @@ class Surfaces2Operations:
             logger.error(f"thicken_cut: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
-    def curve_through_reference_points(self, points: list, closed: bool = False, unit: str = None) -> Dict:
-        """Crea una curva 3D passante per punti/vertici di riferimento."""
-        try:
-            doc, err = self._part()
-            if err:
-                return err
-            if not points or len(points) < 2:
-                return self._result(False, "Servono almeno 2 punti per creare la curva 3D.", SwErrors.swInvalidInput)
-            doc.ClearSelection2(True)
-            for p in points:
-                self._select_point(doc, p, append=True, unit=unit)
-            fm = doc.FeatureManager
-            res = fm.InsertCurveFileBegin()
-            return self._result(
-                True, f"Curva 3D attraverso {len(points)} punti di riferimento creata.",
-                SwErrors.swSuccess, {"points_count": len(points), "closed": closed, "created": bool(res)}
-            )
-        except Exception as e:
-            logger.error(f"curve_through_reference_points: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
-
-    def reverse_surface_normal(self, face_point: list, unit: str = None) -> Dict:
-        """Inverte la direzione normale del corpo di superficie."""
-        try:
-            doc, err = self._part()
-            if err:
-                return err
-            doc.ClearSelection2(True)
-            self._select_point(doc, face_point, mark=1, unit=unit)
-            return self._result(
-                True, f"Direzione normale della superficie a {face_point} invertita.",
-                SwErrors.swSuccess, {"face_point": face_point, "inverted": True}
-            )
-        except Exception as e:
-            logger.error(f"reverse_surface_normal: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     def find_open_surface_edges(self, surface_point: list = None, unit: str = None) -> Dict:
         """Individua bordi aperti e fessure tra superfici non cucite."""

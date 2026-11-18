@@ -181,7 +181,7 @@ async def albero(c):
     d = await P.t("revolve_boss", sketch="Schizzo1", angle=360)
     base = PI * (100 * 40 + 225 * 60 + 156.25 * 30)
     await P.veq("rivoluzione", base)
-    await P.t("chamfer_edges", "chamfer_edges autonomo (spigoli per coordinate)", distance=1, angle=45,
+    await P.t("chamfer_at_points", "smusso autonomo (spigoli per coordinate)", distance=1, angle=45,
               edge_points=[[10, 0, 0]])
     c1 = 2 * PI * (10 - 1 / 3) * 0.5
     await P.veq("dopo smusso 1", base - c1)
@@ -243,7 +243,7 @@ async def staffa(c):
               direction1={"edge": [0, 30, 6]}, count1=2, spacing1=24,
               direction2={"edge": [10, 60, 6]}, count2=2, spacing2=25)
     await P.veq("con 4 fori lamati", 564 * 50 + 2250 - 4 * one)
-    await P.t("fillet_edges", "fillet_edges autonomo R10 spigolo esterno", radius=10, edge_points=[[25, 0, 0]])
+    await P.t("fillet_at_points", "raccordo autonomo R10 spigolo esterno", radius=10, edge_points=[[25, 0, 0]])
     fil = 100 * (1 - PI / 4) * 50
     await P.veq("dopo raccordo", 564 * 50 + 2250 - 4 * one - fil)
     ok, text, d = await c.call("set_dimension_value", name="D1@Estrusione-Estrusione1", value=60)
@@ -385,9 +385,9 @@ async def varie(c):
     await P.t("draw_rectangle", x1=-20, y1=-15, x2=20, y2=15)
     await P.t("extrude_boss", "estrusione piano medio", depth=20, end_condition="mid_plane")
     await P.veq("piano medio", 24000)
-    d = await P.t("set_material", material="AISI 1020")
+    d = await P.t("assign_material", material="AISI 1020")
     ok, _, m = await c.call("get_mass_properties")
-    record("condizioni: massa = volume x densita'", ok and rel(m["mass_kg"], 24000e-9 * d["density_kg_m3"]) < TOL,
+    record("condizioni: massa = volume x densita'", ok and rel(m["mass_kg"], 24000e-9 * d["density_used_kg_m3"]) < TOL,
            f"{m.get('mass_kg')} kg")
     await P.t("create_sketch_on_face", x=10, y=0, z=0)
     await P.t("draw_circle", x=0, y=0, radius=5)

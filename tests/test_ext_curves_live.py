@@ -358,7 +358,7 @@ async def c_composita(c):
     await c.call("draw_rectangle", x1=-40, y1=-40, x2=40, y2=40)
     await c.call("close_sketch")
     await need(c, "extrude_boss", "C0 blocco 80x80x20", depth=20)
-    await need(c, "fillet_edges", "C0 spigoli verticali raccordati r=10", radius=10, edge_points=[[40, 40, 10], [-40, 40, 10], [40, -40, 10], [-40, -40, 10]])
+    await need(c, "fillet_at_points", "C0 spigoli verticali raccordati r=10", radius=10, edge_points=[[40, 40, 10], [-40, 40, 10], [40, -40, 10], [-40, -40, 10]])
     cc = 30 + 10 * math.cos(math.radians(45))
     eds = [[0, -40, 20], [40, 0, 20], [0, 40, 20], [-40, 0, 20], [cc, cc, 20], [-cc, cc, 20], [cc, -cc, 20], [-cc, -cc, 20]]
     d = await need(c, "composite_curve", "C1 composita degli 8 spigoli superiori (4 rette + 4 archi)", edge_points=eds)

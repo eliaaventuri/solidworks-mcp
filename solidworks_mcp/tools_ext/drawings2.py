@@ -39,18 +39,6 @@ TOOLS = {
         },
         ["front_face_point", "right_face_point"],
     ),
-    "add_predefined_view": (
-        "add_predefined_view",
-        "Insert a predefined model drawing view configured on the sheet template at given X and Y coordinates.",
-        {
-            "view_name": (S, "Name of the predefined view (default 'Front')"),
-            "x": (N, "X coordinate of view center on sheet in mm (`unit`, default 100.0)"),
-            "y": (N, "Y coordinate of view center on sheet in mm (`unit`, default 100.0)"),
-            "orientation": (S, "Standard view orientation: 'front' (default) | 'top' | 'right' | 'isometric'"),
-            "unit": UNIT,
-        },
-        [],
-    ),
     "add_aligned_section_view": (
         "add_aligned_section_view",
         "Create an aligned section view (typical of flanges / revolved parts): the cutting line goes from point 1 to the "
@@ -73,21 +61,6 @@ TOOLS = {
         },
         ["x1", "y1", "x2", "y2", "x3", "y3"],
     ),
-    "add_half_section_view": (
-        "add_half_section_view",
-        "Create a half-section view showing one quadrant/half in external view and the other in cross-section.",
-        {
-            "center_x": (N, "X coordinate of pivot center on drawing sheet in mm (`unit`)"),
-            "center_y": (N, "Y coordinate of pivot center on drawing sheet in mm (`unit`)"),
-            "direction": (S, "Cut quadrant direction: 'right' (default) | 'left' | 'top' | 'bottom'"),
-            "view_x": (N, "X placement coordinate of section view in mm (`unit`, default 200.0)"),
-            "view_y": (N, "Y placement coordinate of section view in mm (`unit`, default 150.0)"),
-            "parent_view": (S, "Optional parent drawing view name"),
-            "label": (S, "Section cut letter label (default 'A')"),
-            "unit": UNIT,
-        },
-        ["center_x", "center_y"],
-    ),
     "add_flat_pattern_drawing_view": (
         "add_flat_pattern_drawing_view",
         "Insert a flattened sheet metal flat-pattern drawing view with bend lines and bend direction callouts.",
@@ -98,26 +71,6 @@ TOOLS = {
             "scale": (S, "Optional view scale ratio (e.g. '1:1')"),
             "show_bend_lines": (B, "Show bend lines and annotations (default true)"),
             "unit": UNIT,
-        },
-        [],
-    ),
-    "add_unfolded_view": (
-        "add_unfolded_view",
-        "Insert an unfolded drawing view for complex formed sheet metal components.",
-        {
-            "model_path": (S, "Optional model path (.sldprt)"),
-            "x": (N, "X placement coordinate on sheet in mm (`unit`, default 150.0)"),
-            "y": (N, "Y placement coordinate on sheet in mm (`unit`, default 150.0)"),
-            "unit": UNIT,
-        },
-        [],
-    ),
-    "add_alternate_position_view": (
-        "add_alternate_position_view",
-        "Overlay an alternate position view with phantom line style in an assembly view to show kinematic range.",
-        {
-            "view_name": (S, "Target drawing view name (default active view)"),
-            "configuration": (S, "Assembly configuration name representing alternate kinematic position"),
         },
         [],
     ),
@@ -139,16 +92,6 @@ TOOLS = {
             "angle_deg": (N, "Rotation angle in degrees (deg, default 90.0)"),
         },
         ["view_name"],
-    ),
-    "align_drawing_views": (
-        "align_drawing_views",
-        "Align two independent drawing views horizontally or vertically on the sheet.",
-        {
-            "view_to_align": (S, "Name of drawing view to move and align"),
-            "base_view": (S, "Name of reference base drawing view"),
-            "alignment": (S, "Alignment direction: 'horizontal' (default) | 'vertical'"),
-        },
-        ["view_to_align", "base_view"],
     ),
     "add_ordinate_dimension": (
         "add_ordinate_dimension",
@@ -191,33 +134,6 @@ TOOLS = {
         },
         ["dimension_name"],
     ),
-    "add_weld_symbol": (
-        "add_weld_symbol",
-        "Add an ISO/AWS welding symbol annotation on a drawing view with weld size in mm and length.",
-        {
-            "point": (A, "2D placement point [x, y] on drawing sheet in mm (`unit`)"),
-            "weld_type": (S, "Type of weld: 'fillet' (default) | 'bevel' | 'v-groove' | 'square' | 'plug'"),
-            "size": (N, "Weld leg/throat size in mm (`unit`, default 5.0)"),
-            "length": (N, "Optional continuous or intermittent weld segment length in mm (`unit`)"),
-            "intermittent": (B, "True for intermittent stitch weld (default false)"),
-            "view_name": (S, "Optional drawing view name"),
-            "unit": UNIT,
-        },
-        ["point"],
-    ),
-    "add_edge_chamfer_symbol": (
-        "add_edge_chamfer_symbol",
-        "Add an ISO 13715 edge symbol defining burr or undercut condition on a sheet edge.",
-        {
-            "point": (A, "2D placement point [x, y] on drawing sheet in mm (`unit`)"),
-            "symbol_type": (S, "Condition: 'undercut' (default) | 'burr' | 'sharp'"),
-            "min_size": (N, "Minimum edge deviation value in mm (`unit`, default 0.1)"),
-            "max_size": (N, "Maximum edge deviation value in mm (`unit`, default 0.3)"),
-            "view_name": (S, "Optional drawing view name"),
-            "unit": UNIT,
-        },
-        ["point"],
-    ),
     "add_revision_table": (
         "add_revision_table",
         "Insert an ISO revision table annotation recording revision letter, description, date and author.",
@@ -227,17 +143,6 @@ TOOLS = {
             "revision": (S, "Revision letter or index code (default 'A')"),
             "description": (S, "Modification description (default 'Initial Release')"),
             "author": (S, "Author name or initials (optional)"),
-            "unit": UNIT,
-        },
-        [],
-    ),
-    "add_weldment_cut_list_table": (
-        "add_weldment_cut_list_table",
-        "Insert a weldment cut list table on drawing sheet detailing structural member lengths, angles and quantities.",
-        {
-            "view_name": (S, "Name of drawing view containing the weldment part"),
-            "x": (N, "X placement coordinate on sheet in mm (`unit`, default 50.0)"),
-            "y": (N, "Y placement coordinate on sheet in mm (`unit`, default 250.0)"),
             "unit": UNIT,
         },
         [],
@@ -256,14 +161,6 @@ TOOLS = {
         },
         [],
     ),
-    "add_centerlines": (
-        "add_centerlines",
-        "Automatically insert longitudinal centerline axes on all cylindrical holes and revolved features in a view.",
-        {
-            "view_name": (S, "Drawing view name (default active view)"),
-        },
-        [],
-    ),
     "create_drawing_layer": (
         "create_drawing_layer",
         "Create a CAD drawing layer specifying name, RGB color array, line style, and line thickness weight in mm.",
@@ -274,30 +171,6 @@ TOOLS = {
             "line_weight": (N, "Line thickness weight in mm (`unit`, default 0.25)"),
         },
         ["layer_name"],
-    ),
-    "set_entity_layer": (
-        "set_entity_layer",
-        "Assign a selected annotation, dimension, or drawing view onto a specific drawing layer.",
-        {
-            "layer_name": (S, "Destination drawing layer name"),
-            "entity_name": (S, "Annotation or dimension entity name (optional, default selected)"),
-            "entity_type": (S, "Entity type: 'annotation' (default) | 'dimension' | 'view'"),
-        },
-        ["layer_name"],
-    ),
-    "insert_drawing_block": (
-        "insert_drawing_block",
-        "Insert a 2D block instance or company seal/stamp onto the drawing sheet at position X and Y.",
-        {
-            "block_path": (S, "Optional path to external .sldblk block file"),
-            "block_name": (S, "Name of block definition (default 'TitleBlock')"),
-            "x": (N, "X placement coordinate on sheet in mm (`unit`, default 350.0)"),
-            "y": (N, "Y placement coordinate on sheet in mm (`unit`, default 30.0)"),
-            "scale": (N, "Scale magnification factor ratio (number, default 1.0)"),
-            "angle_deg": (N, "Block rotation angle in degrees (deg, default 0.0)"),
-            "unit": UNIT,
-        },
-        [],
     ),
     "export_pdf_layers": (
         "export_pdf_layers",

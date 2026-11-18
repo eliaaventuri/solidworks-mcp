@@ -50,19 +50,6 @@ TOOLS = {
         },
         ["entity"],
     ),
-    "offset_sketch_entities": (
-        "offset_sketch_entities",
-        "Offset sketch entities with bidirectional, cap ends, and construction geometry options.",
-        {
-            "entities": (A, "List of sketch entity IDs or '@x,y' references to offset"),
-            "offset": (N, "Offset distance in mm (length unit)"),
-            "both_directions": (B, "Offset in both directions symmetrically (default false)"),
-            "make_construction": (B, "Make offset geometry as construction lines (default false)"),
-            "cap_ends": (B, "Close ends with lines or arcs if offset both directions (default false)"),
-            "unit": UNIT,
-        },
-        ["entities", "offset"],
-    ),
     "set_dynamic_mirror_sketch": (
         "set_dynamic_mirror_sketch",
         "Enable or disable dynamic mirroring in sketch about a centerline.",
@@ -124,18 +111,6 @@ TOOLS = {
         },
         ["p_start", "p_end", "p_apex"],
     ),
-    "draw_centerline": (
-        "draw_centerline",
-        "Draw a construction centerline directly between two points.",
-        {
-            "x1": (N, "Start X coordinate in mm (`unit`)"),
-            "y1": (N, "Start Y coordinate in mm (`unit`)"),
-            "x2": (N, "End X coordinate in mm (`unit`)"),
-            "y2": (N, "End Y coordinate in mm (`unit`)"),
-            "unit": UNIT,
-        },
-        ["x1", "y1", "x2", "y2"],
-    ),
     "draw_midpoint_line": (
         "draw_midpoint_line",
         "Draw a symmetric line expanding outward from a specified midpoint.",
@@ -148,20 +123,6 @@ TOOLS = {
             "unit": UNIT,
         },
         ["cx", "cy", "length"],
-    ),
-    "draw_3point_arc": (
-        "draw_3point_arc",
-        "Draw an arc passing through three points: start, end, and an intermediate point on the circumference.",
-        {
-            "x1": (N, "Start X coordinate in mm (`unit`)"),
-            "y1": (N, "Start Y coordinate in mm (`unit`)"),
-            "x2": (N, "End X coordinate in mm (`unit`)"),
-            "y2": (N, "End Y coordinate in mm (`unit`)"),
-            "x3": (N, "Third point on arc X coordinate in mm (`unit`)"),
-            "y3": (N, "Third point on arc Y coordinate in mm (`unit`)"),
-            "unit": UNIT,
-        },
-        ["x1", "y1", "x2", "y2", "x3", "y3"],
     ),
     "draw_centerpoint_arc": (
         "draw_centerpoint_arc",
@@ -204,20 +165,6 @@ TOOLS = {
         },
         ["cx", "cy", "radius", "width"],
     ),
-    "draw_sketch_text": (
-        "draw_sketch_text",
-        "Insert vector sketch text (optionally aligned along a curve or guide edge).",
-        {
-            "text": (S, "Text string to insert"),
-            "x": (N, "Insertion point X in mm (`unit`, default 0.0)"),
-            "y": (N, "Insertion point Y in mm (`unit`, default 0.0)"),
-            "text_height": (N, "Text font height in mm (`unit`, default uses active document style)"),
-            "font_name": (S, "Font family name (e.g. 'Arial')"),
-            "guide_entity": (None, "Optional curve ID or '@x,y' along which text follows"),
-            "unit": UNIT,
-        },
-        ["text"],
-    ),
     "draw_3d_arc": (
         "draw_3d_arc",
         "Draw a 3D arc through three 3D points [x,y,z] in the active 3D sketch.",
@@ -254,18 +201,6 @@ TOOLS = {
             "unit": UNIT,
         },
         ["entity"],
-    ),
-    "edit_spline_handles": (
-        "edit_spline_handles",
-        "Inspect or adjust tangent weight and vector angle on spline control handles.",
-        {
-            "spline": (None, "Spline entity ID or '@x,y'"),
-            "point_index": (N, "Zero-based index of the spline point handle (index, default 0)"),
-            "tangent_weight": (N, "Tangent handle magnitude factor (ratio, default keeps current)"),
-            "tangent_angle": (N, "Tangent angle in degrees (default keeps current)"),
-            "unit": UNIT,
-        },
-        ["spline"],
     ),
     "edit_sketch_block": (
         "edit_sketch_block",

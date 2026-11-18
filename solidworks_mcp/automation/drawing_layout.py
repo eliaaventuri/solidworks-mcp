@@ -290,20 +290,6 @@ class DrawingLayoutMixin:
             best_pos.setdefault(k, (W / 2, H / 2))
         return best_pos, False
 
-    def _choose_scale(self, W, H, first, keys, box) -> Tuple[int, int]:
-        dx, dy, dz = box
-        iso = ((dx + dz) * 0.87, dy * 0.82 + (dx + dz) * 0.5)
-        base = {1: (dx, dy), 2: (dx, dy), 5: (dx, dz), 6: (dx, dz), 3: (dz, dy), 4: (dz, dy),
-                7: iso, 8: iso, 9: iso}
-        for n, d in STD_SCALES:
-            s = n / d
-            sizes = {k: (base[k][0] * s + VIEW_PAD, base[k][1] * s + VIEW_PAD) for k in keys}
-            if 1 not in sizes:
-                sizes[1] = (base[1][0] * s + VIEW_PAD, base[1][1] * s + VIEW_PAD)
-            _, ok = self._plan_layout(W, H, first, list(keys), sizes)
-            if ok:
-                return n, d
-        return STD_SCALES[-1]
 
     # ------------------------------------------------------------------ dimensions
     def _pictorial_names(self, model_path: str) -> List[str]:

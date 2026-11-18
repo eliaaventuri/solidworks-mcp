@@ -37,15 +37,6 @@ class Drawings2Operations:
         except Exception:
             pass
 
-    def _count_centermarks(self, v) -> int:
-        """Conta segni di centro e linee d'asse di una vista (catene GetFirst... -> GetNext)."""
-        n = 0
-        for first in ("GetFirstCenterMark2", "GetFirstCenterLine"):
-            item = self._com(v, first)
-            while item is not None and n < 1000:
-                n += 1
-                item = self._com(item, "GetNext")
-        return n
 
     # ------------------------------------------------------------------ 1. Fogli e Formati
     def edit_sheet_format(self) -> Dict:
@@ -191,21 +182,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"add_relative_view: {e}", SwErrors.swGenericError)
 
-    def add_predefined_view(self, view_name: str = "Front", x: float = 100.0, y: float = 100.0,
-                            orientation: str = "front", unit: str = None) -> Dict:
-        """Inserisce una vista predefinita presente nel template del foglio."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            xm = self._mmu(x, unit)
-            ym = self._mmu(y, unit)
-            return self._result(
-                True, f"Vista predefinita '{view_name}' ({orientation}) posizionata a ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"view_name": view_name, "x": x, "y": y, "x_m": xm, "y_m": ym, "orientation": orientation}
-            )
-        except Exception as e:
-            return self._result(False, f"add_predefined_view: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 3. Viste di Sezione e Dettaglio
     def add_aligned_section_view(self, x1: float, y1: float, x2: float, y2: float, x3: float, y3: float,
@@ -238,20 +214,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"add_aligned_section_view: {e}", SwErrors.swGenericError)
 
-    def add_half_section_view(self, center_x: float, center_y: float, direction: str = "right",
-                              view_x: float = 200.0, view_y: float = 150.0, parent_view: str = None,
-                              label: str = "A", unit: str = None) -> Dict:
-        """Crea una vista di semi-sezione (un quadrante sezionato e l'altro in vista)."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Semi-sezione {label}-{label} creata (direzione {direction}) a ({view_x}, {view_y}) mm.",
-                SwErrors.swSuccess, {"label": label, "direction": direction, "view_x": view_x, "view_y": view_y}
-            )
-        except Exception as e:
-            return self._result(False, f"add_half_section_view: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 4. Viste Speciali di Assieme e Lamiera
     def add_flat_pattern_drawing_view(self, model_path: str = None, x: float = 150.0, y: float = 150.0,
@@ -277,31 +239,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"add_flat_pattern_drawing_view: {e}", SwErrors.swGenericError)
 
-    def add_unfolded_view(self, model_path: str = None, x: float = 150.0, y: float = 150.0, unit: str = None) -> Dict:
-        """Inserisce una vista sviluppata (unfolded) per parti piegate complesse."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Vista sviluppata posizionata sul foglio a ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"x": x, "y": y, "model": model_path}
-            )
-        except Exception as e:
-            return self._result(False, f"add_unfolded_view: {e}", SwErrors.swGenericError)
-
-    def add_alternate_position_view(self, view_name: str = None, configuration: str = None) -> Dict:
-        """Sovrappone una vista in posizione alternativa a tratto e punto nell'assieme."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Vista in posizione alternativa aggiunta alla vista '{view_name or 'Attiva'}' (configurazione: {configuration or 'Default'}).",
-                SwErrors.swSuccess, {"view_name": view_name, "configuration": configuration}
-            )
-        except Exception as e:
-            return self._result(False, f"add_alternate_position_view: {e}", SwErrors.swGenericError)
 
     def show_exploded_drawing_view(self, view_name: str = None, exploded: bool = True, show_lines: bool = True) -> Dict:
         """Mostra o nasconde la vista esplosa dell'assieme con tracciamento delle linee di percorso."""
@@ -358,45 +295,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"rotate_drawing_view: {e}", SwErrors.swGenericError)
 
-    def align_drawing_views(self, view_to_align: str, base_view: str, alignment: str = "horizontal") -> Dict:
-        """Allinea orizzontalmente o verticalmente due viste indipendenti sul foglio."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            modo = str(alignment).lower().strip()
-            if modo not in ("horizontal", "vertical"):
-                return self._result(False, f"align_drawing_views: allineamento '{alignment}' non riconosciuto (usare horizontal o vertical)", SwErrors.swInvalidInput)
-            doc.ClearSelection2(True)
-            if not doc.Extension.SelectByID2(str(view_to_align), "DRAWINGVIEW", 0, 0, 0, False, 0, null_variant(), 0):
-                return self._result(False, f"align_drawing_views: vista '{view_to_align}' non trovata", SwErrors.swSelectionError)
-            if not doc.Extension.SelectByID2(str(base_view), "DRAWINGVIEW", 0, 0, 0, True, 0, null_variant(), 0):
-                return self._result(False, f"align_drawing_views: vista base '{base_view}' non trovata", SwErrors.swSelectionError)
-            if modo == "vertical":
-                doc.AlignVert()
-            else:
-                doc.AlignHorz()
-            doc.ClearSelection2(True)
-            self._drw_rebuild(doc)
-            v1, err1 = self._find_view(doc, view_to_align)
-            v2, err2 = self._find_view(doc, base_view)
-            if err1 or err2:
-                return err1 or err2
-            idx = 1 if modo == "vertical" else 0
-            p1, p2 = tuple(v1.Position), tuple(v2.Position)
-            c1 = self._mm(float(p1[idx]))
-            c2 = self._mm(float(p2[idx]))
-            dbg = {"x_view_mm": self._mm(float(p1[0])), "x_base_mm": self._mm(float(p2[0])),
-                   "y_view_mm": self._mm(float(p1[1])), "y_base_mm": self._mm(float(p2[1]))}
-            if abs(c1 - c2) > 0.05:
-                return self._result(False, f"align_drawing_views: allineamento non applicato ({c1:.3f} mm contro {c2:.3f} mm) {dbg}", SwErrors.swFeatureError)
-            return self._result(
-                True, f"Vista '{view_to_align}' allineata ({alignment}) rispetto a '{base_view}'.",
-                SwErrors.swSuccess, {"view": view_to_align, "base": base_view, "alignment": alignment,
-                                     "coord_view_mm": round(c1, 3), "coord_base_mm": round(c2, 3), **dbg}
-            )
-        except Exception as e:
-            return self._result(False, f"align_drawing_views: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 6. Quotatura Automatica e Modello
     def _d2_view(self, doc, view_name):
@@ -600,34 +498,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"hide_show_dimension: {e}", SwErrors.swGenericError)
 
-    # ------------------------------------------------------------------ 7. Tolleranze Geometriche e Finitura
-    def add_weld_symbol(self, point: list, weld_type: str = "fillet", size: float = 5.0, length: float = None,
-                        intermittent: bool = False, view_name: str = None, unit: str = None) -> Dict:
-        """Inserisce un simbolo grafico di saldatura normalizzato ISO/AWS con dimensioni e parametri."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Simbolo di saldatura ({weld_type}, a={size} mm) inserito sul disegno.",
-                SwErrors.swSuccess, {"point": point, "weld_type": weld_type, "size": size, "length": length, "intermittent": intermittent}
-            )
-        except Exception as e:
-            return self._result(False, f"add_weld_symbol: {e}", SwErrors.swGenericError)
-
-    def add_edge_chamfer_symbol(self, point: list, symbol_type: str = "undercut", min_size: float = 0.1,
-                                max_size: float = 0.3, view_name: str = None, unit: str = None) -> Dict:
-        """Inserisce un simbolo di sbavatura o spigolo vivo/arrotondato secondo ISO 13715."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Simbolo spigolo ISO 13715 ({symbol_type}, {min_size}-{max_size} mm) inserito.",
-                SwErrors.swSuccess, {"point": point, "type": symbol_type, "range": [min_size, max_size]}
-            )
-        except Exception as e:
-            return self._result(False, f"add_edge_chamfer_symbol: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 8. Tabelle, Distinte Base e Pallinatura
     def add_revision_table(self, x: float = 400.0, y: float = 280.0, revision: str = "A",
@@ -657,18 +527,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"add_revision_table: {e}", SwErrors.swGenericError)
 
-    def add_weldment_cut_list_table(self, view_name: str = None, x: float = 50.0, y: float = 250.0, unit: str = None) -> Dict:
-        """Inserisce la tabella distinta di taglio per elementi strutturali saldati."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Distinta di taglio saldati inserita a ({x}, {y}) mm.",
-                SwErrors.swSuccess, {"view_name": view_name, "x": x, "y": y}
-            )
-        except Exception as e:
-            return self._result(False, f"add_weldment_cut_list_table: {e}", SwErrors.swGenericError)
 
     def add_general_table(self, rows: int = 3, columns: int = 3, x: float = 100.0, y: float = 100.0,
                           data: list = None, title: str = None, unit: str = None) -> Dict:
@@ -693,34 +551,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"add_general_table: {e}", SwErrors.swGenericError)
 
-    # ------------------------------------------------------------------ 9. Cartiglio, Livelli (Layers) e Simboli
-    def add_centerlines(self, view_name: str = None) -> Dict:
-        """Inserisce automaticamente le linee d'asse longitudinali su fori e cilindri nella vista."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            if view_name:
-                v, err = self._find_view(doc, view_name)
-                if err:
-                    return err
-                views = [v]
-            else:
-                views = list(self._sheet_views(doc))
-            before = sum(self._count_centermarks(v) for v in views)
-            ok = False
-            for v in views:
-                ok = bool(v.AutoInsertCenterMarks(1, 0, True, True, True, True, True, True, True)) or ok
-            self._drw_rebuild(doc)
-            after = sum(self._count_centermarks(v) for v in views)
-            if not ok or after <= before:
-                return self._result(False, f"add_centerlines: linee d'asse non generate (segni {before} -> {after})", SwErrors.swFeatureError)
-            return self._result(
-                True, f"Linee d'asse automatiche generate (segni di centro {before} -> {after}).",
-                SwErrors.swSuccess, {"views_count": len(views), "marks_before": before, "marks_after": after}
-            )
-        except Exception as e:
-            return self._result(False, f"add_centerlines: {e}", SwErrors.swGenericError)
 
     def create_drawing_layer(self, layer_name: str, color_rgb: list = None, line_style: str = "solid",
                              line_weight: float = 0.25) -> Dict:
@@ -753,41 +583,6 @@ class Drawings2Operations:
         except Exception as e:
             return self._result(False, f"create_drawing_layer: {e}", SwErrors.swGenericError)
 
-    def set_entity_layer(self, layer_name: str, entity_name: str = None, entity_type: str = "annotation") -> Dict:
-        """Assegna un'annotazione, quota o vista a uno specifico livello CAD (Layer)."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            return self._result(
-                True, f"Entita' '{entity_name or 'Selezionata'}' assegnata al livello CAD '{layer_name}'.",
-                SwErrors.swSuccess, {"layer": layer_name, "entity": entity_name, "type": entity_type}
-            )
-        except Exception as e:
-            return self._result(False, f"set_entity_layer: {e}", SwErrors.swGenericError)
-
-    def insert_drawing_block(self, block_path: str = None, block_name: str = "TitleBlock", x: float = 350.0,
-                             y: float = 30.0, scale: float = 1.0, angle_deg: float = 0.0, unit: str = None) -> Dict:
-        """Inserisce un'istanza di blocco 2D (timbro, cartiglio o simbolo) sul foglio."""
-        try:
-            doc, err = self._drawing()
-            if err:
-                return err
-            xm = self._mmu(x, unit)
-            ym = self._mmu(y, unit)
-            rad = math.radians(float(angle_deg))
-            if not block_path or not os.path.isfile(str(block_path)):
-                return self._result(False, f"insert_drawing_block: file blocco '{block_path}' non trovato", SwErrors.swFileNotFoundError)
-            if not doc.InsertBlock(str(block_path), xm, ym, 0, float(scale), rad):
-                return self._result(False, "insert_drawing_block: blocco non inserito", SwErrors.swFeatureError)
-            self._drw_rebuild(doc)
-            return self._result(
-                True, f"Blocco 2D da '{block_path}' inserito a coordinate ({x}, {y}) mm.",
-                SwErrors.swSuccess,
-                {"block_path": str(block_path), "x": x, "y": y, "scale": scale, "angle": angle_deg, "ignored_params": ["block_name"]}
-            )
-        except Exception as e:
-            return self._result(False, f"insert_drawing_block: {e}", SwErrors.swGenericError)
 
     # ------------------------------------------------------------------ 10. Audit ed Esportazione
     @keeps_old_file

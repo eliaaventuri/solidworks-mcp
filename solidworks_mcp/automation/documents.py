@@ -114,41 +114,6 @@ class DocumentOperations:
             logger.error(f"Create assembly error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swFileLoadError)
     
-    def create_new_drawing(self, paper_size: str = "A4") -> Dict:
-        """
-        Create a new drawing document
-        
-        Args:
-            paper_size: Paper size (A4, A3, A2, A1, Letter)
-        
-        Returns:
-            Result dictionary with document info
-        """
-        try:
-            if not self.is_connected:
-                r = self.connect()
-                if not r["success"]:
-                    return r
-            
-            template = find_template("drawing")
-            if not template:
-                template = self._default_template("drawing")
-            
-            doc = self._sw_app.NewDocument(template, 0, 0, 0)
-            
-            if doc is None:
-                return self._result(False, "Failed to create drawing",
-                                  SwErrors.swFileLoadError)
-            
-            title = self._get_doc_title(doc)
-            
-            return self._result(True, f"Created drawing: {title}",
-                              SwErrors.swSuccess,
-                              {"name": title, "type": "Drawing", "paper_size": paper_size})
-            
-        except Exception as e:
-            logger.error(f"Create drawing error: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Error: {e}", SwErrors.swFileLoadError)
     
     def open_document(self, filepath: str) -> Dict:
         """

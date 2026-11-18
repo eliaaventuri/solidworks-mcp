@@ -166,24 +166,6 @@ class SketchOperations:
             logger.error(f"Create sketch on face error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
     
-    def exit_sketch(self) -> Dict:
-        """
-        Exit the current sketch
-        
-        Returns:
-            Result dictionary
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            doc.InsertSketch2(True)
-            
-            return self._result(True, "Exited sketch", SwErrors.swSuccess)
-            
-        except Exception as e:
-            return self._result(False, f"Error: {e}", SwErrors.swSketchError)
     
     def draw_line(self, x1: float = 0, y1: float = 0, 
                   x2: float = 100, y2: float = 0, unit: str = None) -> Dict:
@@ -430,40 +412,3 @@ class SketchOperations:
             logger.error(f"Draw polygon error: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Error: {e}", SwErrors.swSketchError)
     
-    def draw_centerline(self, x1: float = 0, y1: float = -50,
-                        x2: float = 0, y2: float = 50, unit: str = None) -> Dict:
-        """
-        Draw a centerline (for revolve axis)
-        
-        Args:
-            x1, y1: Start point
-            x2, y2: End point
-            unit: Unit for coordinates
-        
-        Returns:
-            Result dictionary
-        """
-        try:
-            doc, err = self.get_active_doc()
-            if err:
-                return err
-            
-            # Convert to meters
-            x1_m = self._units.to_meters(x1, unit)
-            y1_m = self._units.to_meters(y1, unit)
-            x2_m = self._units.to_meters(x2, unit)
-            y2_m = self._units.to_meters(y2, unit)
-            
-            # Draw centerline
-            line = doc.SketchManager.CreateCenterLine(x1_m, y1_m, 0, x2_m, y2_m, 0)
-            
-            if line is None:
-                return self._result(False, "Failed - ensure sketch is active",
-                                  SwErrors.swSketchError)
-            
-            return self._result(True, "Centerline created",
-                              SwErrors.swSuccess, self._ids_of(line))
-            
-        except Exception as e:
-            logger.error(f"Draw centerline error: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Error: {e}", SwErrors.swSketchError)

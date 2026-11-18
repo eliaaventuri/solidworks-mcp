@@ -1,7 +1,8 @@
-"""Tool registrati ma NON implementati: il metodo non chiama SolidWorks (o restituisce valori fissi) e prima rispondeva
-SUCCESS lo stesso. Revisione del 2026-10-23 (REVISIONE_2026-10-23.md): finche' non vengono riscritti e misurati dal vivo
-restano nascosti da list_tools e una chiamata diretta riceve un errore esplicito. Togliere un nome da qui solo insieme a
-un'implementazione vera e a un test live che rilegge il risultato da SolidWorks."""
+"""Tool che il server NON offre: il vecchio metodo non chiamava SolidWorks, restituiva valori fissi o l'API di SolidWorks
+non funziona (prove dal vivo nei motivi). Revisione del 2026-10-23: nascosti da list_tools. Revisione del 2026-11-12 (sez. 4):
+il loro codice (schema, smistamento e metodo) e' stato CANCELLATO; qui resta solo il motivo, cosi' una chiamata diretta con
+il vecchio nome riceve un errore che spiega perche'. Per riaverne uno: implementazione nuova, test live che rilegge il
+risultato da SolidWorks, poi togliere il nome da qui."""
 
 _WHY_NO_COM = "il metodo non chiama SolidWorks: rispondeva SUCCESS senza fare nulla"
 _WHY_NO_API_PLASTIC = "nessuna API nella type library di SolidWorks 2026: niente Insert*/swFm* per agganci a scatto, borchie, labbri e griglie (cercati in sldworks_methods e swconst, 2026-10-24); il comando c'e' solo come PropertyManager interattivo"
@@ -103,9 +104,47 @@ NOT_IMPLEMENTED = {
 }
 
 
+# Doppioni tolti (revisione 2026-11-12, sez. 4): due tool per la stessa cosa confondevano l'agente e gonfiavano l'elenco.
+# Resta quello piu' completo e provato dal vivo; il vecchio nome riceve un errore che dice quale usare e come.
+# Il primo token del valore e' il nome del tool sostitutivo (controllato da test_offline).
+REPLACED_BY = {
+    "extrude_sketch": "extrude_boss (depth; both_directions=true -> end_condition='mid_plane')",
+    "cut_extrude": "extrude_cut (depth; through_all=true -> end_condition='through_all'; both_directions=true -> "
+                   "end_condition='mid_plane', o 'through_all_both' se passante)",
+    "fillet_edges": "fillet_at_points (stessi radius ed edge_points)",
+    "chamfer_edges": "chamfer_at_points (stessi distance, angle, distance2 ed edge_points)",
+    "set_material": "assign_material (material; anche category, body, configuration)",
+    "add_component": "insert_component (file_path al posto di filepath; rotation=[rx,ry,rz])",
+    "fix_component": "set_component_fixed (component=nome, fixed=true)",
+    "float_component": "set_component_fixed (component=nome, fixed=false)",
+    "linear_component_pattern": "component_linear_pattern (components=[seed_component])",
+    "circular_component_pattern": "component_circular_pattern (components=[seed_component])",
+    "offset_sketch_entities": "offset_entities (stessi parametri)",
+    "draw_3point_arc": "draw_arc_3point (stessi parametri)",
+    "draw_centerline": "draw_centerline_axis (stessi parametri)",
+    "draw_sketch_text": "add_sketch_text (text, x, y, height) o draw_sketch_text_along_curve (testo lungo una curva)",
+    "rib_feature": "rib (sketch, thickness, draft_angle; flip_material al posto di reverse_thickness)",
+    "thin_extrude_boss": "extrude_boss (thin_thickness, thin_type)",
+    "thin_extrude_cut": "extrude_cut (thin_thickness, thin_type)",
+    "thin_revolve": "revolve_boss (thin_thickness; il taglio di rivoluzione a parete sottile non c'e': thin_revolve con "
+                    "cut=true ignorava lo spessore)",
+    "swept_cut": "sweep (cut=true; profile_sketch o circular_diameter, path_sketch, guide_sketches, thin_thickness)",
+    "lofted_cut": "loft (cut=true; profile_sketches, guide_sketches, centerline_sketch, thin_thickness)",
+    "mirror_body": "mirror_feature (bodies=[[x,y,z]] = un punto su una faccia del corpo, plane)",
+    "pattern_body": "linear_pattern (bodies=[[x,y,z]]; per la ripetizione circolare circular_pattern con bodies)",
+    "hole_wizard_standard": "create_hole (kind, size, standard, face_point, positions, depth)",
+    "create_frequency_study": "create_static_study (analysis='frequency', name, modes)",
+    "get_mode_shapes": "get_simulation_results (study: frequenze proprie e masse partecipanti di tutti i modi)",
+}
+
+
 def not_implemented_reason(name: str):
+    repl = REPLACED_BY.get(name)
+    if repl is not None:
+        return (f"il tool '{name}' e' stato tolto perche' doppione di un altro tool: usa {repl}. Nessuna modifica "
+                "fatta al modello.")
     why = NOT_IMPLEMENTED.get(name)
     if why is None:
         return None
-    return (f"il tool '{name}' non e' implementato ({why}). E' disattivato finche' non viene riscritto e provato "
-            "dal vivo; vedi REVISIONE_2026-10-23.md.")
+    return (f"il tool '{name}' non e' implementato ({why}). Il server non lo offre: il codice e' stato tolto finche' non "
+            "viene riscritto e provato dal vivo (REVISIONE_2026-10-23.md).")

@@ -81,9 +81,11 @@ if not STUBBED:
                                                                         SwErrors.swConnectionError)
 
 RESULTS = []
-EXPECTED_TOOLS = 557                       # 558 meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON)
+EXPECTED_TOOLS = 448                       # 449 registrati meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON);
+                                           # 2026-11-18: cancellato il codice degli 84 tool nascosti (erano 558 registrati)
+                                           # e tolti 25 doppioni (REPLACED_BY in not_implemented.py)
 from solidworks_mcp.not_implemented import NOT_IMPLEMENTED
-EXPOSED_TOOLS = EXPECTED_TOOLS - len(NOT_IMPLEMENTED)   # i tool non implementati (revisione 2026-10-23) restano nascosti
+EXPOSED_TOOLS = EXPECTED_TOOLS             # i nomi in NOT_IMPLEMENTED non hanno piu' codice: nulla da nascondere
 for _var in ("SW_MCP_ALLOW_PYTHON", "SW_MCP_TOOLSETS"):
     os.environ.pop(_var, None)             # i test partono dal default: tutto attivo tranne execute_python
 
@@ -113,6 +115,31 @@ def test_registry():
         srv.sw_automation = real
     record("tool non implementato chiamato lo stesso: errore esplicito, metodo non eseguito",
            text.startswith("[ERROR]") and "non e' implementato" in text and not fake.calls, text[:90])
+    # revisione 2026-11-12 sez. 4: il codice dei tool nascosti e' cancellato (schema, smistamento e metodo): togliere un
+    # nome da NOT_IMPLEMENTED non deve poter riesporre un tool finto. Il motivo resta per spiegare la chiamata diretta.
+    left = sorted(n for n in NOT_IMPLEMENTED
+                  if any(n in t for t in srv.DISPATCH_TABLES) or hasattr(SolidWorksAutomation, n)
+                  or any(t.name == n for t in srv._raw_all_tools()))
+    record(f"codice dei {len(NOT_IMPLEMENTED)} tool nascosti cancellato (schema, smistamento, metodo)", not left,
+           f"{len(left)} ancora presenti: {left[:6]}")
+    # doppioni esposti (sez. 4): tolti; la chiamata con il vecchio nome dice quale tool usare, e quel tool esiste
+    from solidworks_mcp.not_implemented import REPLACED_BY
+    raw = {t.name for t in srv._raw_all_tools()}
+    left = sorted(n for n in REPLACED_BY
+                  if n in raw or any(n in t for t in srv.DISPATCH_TABLES) or hasattr(SolidWorksAutomation, n))
+    missing = sorted(f"{n}->{r.split()[0]}" for n, r in REPLACED_BY.items() if r.split()[0] not in raw)
+    record(f"{len(REPLACED_BY)} doppioni tolti (schema, smistamento, metodo) e sostituti esistenti", not left and not missing
+           and len(REPLACED_BY) >= 20, f"ancora presenti {left[:6]}, sostituti mancanti {missing[:6]}")
+    srv.sw_automation = fake
+    try:
+        text = asyncio.run(srv.call_tool("extrude_sketch", {"depth": 5}))[0].text
+    finally:
+        srv.sw_automation = real
+    record("doppione chiamato con il vecchio nome: errore che indica il tool da usare, nulla eseguito",
+           text.startswith("[ERROR]") and "extrude_boss" in text and not fake.calls, text[:120])
+    base = {"extrude_boss", "extrude_cut", "fillet_at_points", "chamfer_at_points"}
+    record("i sostituti di estrusione, taglio, raccordo e smusso stanno nel gruppo base (SW_MCP_TOOLSETS=base)",
+           all(srv._tool_group(n) == "base" for n in base), str({n: srv._tool_group(n) for n in base}))
 
 
 def _test_registry_full(expected):
@@ -926,8 +953,6 @@ def test_language():
         record(f"lingua: piani standard e origine trovati per posizione/tipo in un albero {lang}",
                [g.Name if g else None for g in got] == [names[2], names[3], names[4], names[1], names[1], None],
                str([g.Name if g else None for g in got]))
-        record(f"lingua: _select_std_plane('Piano frontale') seleziona il 1° piano ({lang})",
-               sw._select_std_plane(doc, "Piano frontale") and feats[2].selected)
 
 
 # ============================================================================ configurazione
@@ -983,12 +1008,13 @@ def test_toolsets(tmp):
         try:
             names = _names()
             groups_ok = all(n in names for n in srv.BASE_DISPATCH) and all(n in names for n in srv.DRAWING_DISPATCH)
-            none_other = not (set(srv.MODELING_DISPATCH) | set(srv.DATA_DISPATCH)) & names
+            none_other = not ((set(srv.MODELING_DISPATCH) - srv.BASE_FROM_MODELING) | set(srv.DATA_DISPATCH)) & names
+            groups_ok = groups_ok and srv.BASE_FROM_MODELING <= names      # estrusione/taglio/raccordo/smusso anche in base
             record("SW_MCP_TOOLSETS=base,drawings: solo base e disegni esposti", groups_ok and none_other,
                    f"{len(names)} tool")
             text, calls = call("create_sketch", {"plane": "Front"})
             record("tool base attivo con il gruppo scelto", not text.startswith("[ERROR]") or "gruppo" not in text, text[:60])
-            mod = next(n for n in srv.MODELING_DISPATCH)
+            mod = next(n for n in srv.MODELING_DISPATCH if n not in srv.BASE_FROM_MODELING)
             text, calls = call(mod, {})
             record("tool di un gruppo non scelto: errore che nomina il gruppo, nessuna chiamata",
                    text.startswith("[ERROR]") and "'modeling'" in text and not calls, text[:120])
@@ -999,7 +1025,7 @@ def test_toolsets(tmp):
 
         os.environ["SW_MCP_TOOLSETS"] = "bogus"
         try:
-            base = (set(srv.BASE_DISPATCH) | set(srv.SPECIAL_HANDLERS)) - {"execute_python"}
+            base = (set(srv.BASE_DISPATCH) | set(srv.SPECIAL_HANDLERS) | srv.BASE_FROM_MODELING) - {"execute_python"}
             record("gruppo sconosciuto: solo base attivo (execute_python resta nascosto)", _names() == base,
                    f"{len(_names())} tool, attesi {len(base)}")
         finally:
@@ -1429,8 +1455,8 @@ def test_diagnostics_and_search():
     # 2. search_tools con query 'fillet' trova strumenti di raccordo
     res_fillet = srv._search_tools_handler({"query": "fillet", "limit": 10})
     matched_names = [t["name"] for t in res_fillet["data"]["tools"]]
-    record("search_tools: query 'fillet' trova fillet_edges",
-           res_fillet["success"] and "fillet_edges" in matched_names and res_fillet["data"]["total_matches"] > 0)
+    record("search_tools: query 'fillet' trova fillet_at_points",
+           res_fillet["success"] and "fillet_at_points" in matched_names and res_fillet["data"]["total_matches"] > 0)
 
     # 3. search_tools con filtro di gruppo 'simulation'
     res_sim = srv._search_tools_handler({"query": "mesh", "group": "simulation"})
@@ -1702,8 +1728,6 @@ def test_sketch4_tools():
     sw._part = lambda: (None, {"success": False, "message": "Nessun pezzo attivo"})
     sw._s2_active_or_open = lambda sketch=None: (None, None, {"success": False, "message": "Nessun schizzo attivo"})
 
-    r1 = sw.insert_intersection_curve()
-    r2 = sw.insert_silhouette_entities()
     r3 = sw.sketch_offset_on_surface()
     r4 = sw.make_sketch_chain()
     r5 = sw.segment_sketch_entity()
@@ -1713,13 +1737,11 @@ def test_sketch4_tools():
     r9 = sw.stretch_sketch_entities(1, 1)
     r10 = sw.align_sketch_entities([[0, 0]], [[1, 1]])
     r11 = sw.show_sketch_curvature()
-    r12 = sw.get_spline_curvature_analysis()
-    r13 = sw.diagnose_sketch_relations()
     r14 = sw.insert_sketch_picture("nonexistent.png")
     r15 = sw.insert_sketch_block_from_file("nonexistent.sldblk")
 
-    all_failed_cleanly = all(not r["success"] for r in (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15))
-    record("sketch4: tutti i 15 tool gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
+    all_failed_cleanly = all((not r['success'] for r in (r3, r4, r5, r6, r7, r8, r9, r10, r11, r14, r15)))
+    record("sketch4: tutti i tool del lotto gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
 
     # Con mock di schizzo attivo
     class _MockPt:
@@ -1809,24 +1831,18 @@ def test_sketch4_tools():
     sw._part = lambda: (mock_doc, None)
 
     # Test esecuzione mock per i tool principali
-    ok_int = sw.insert_intersection_curve()
-    ok_sil = sw.insert_silhouette_entities()
     ok_off = sw.sketch_offset_on_surface(5.0)
     ok_chn = sw.make_sketch_chain(["Line1"])
     ok_seg = sw.segment_sketch_entity("Line1", count=5, is_segments=True)
     ok_slt = sw.draw_3point_arc_slot(0, 0, 20, 0, 10, 5, width=4)
     ok_curv = sw.show_sketch_curvature("Line1", scale=15.0, density=30, visible=True)
-    ok_ana = sw.get_spline_curvature_analysis("Line1")
     ok_eq3d = sw.draw_equation_curve_3d("10*cos(t)", "10*sin(t)", "2*t", start=0, end=3.14, samples=20)
 
-    record("sketch4: insert_intersection_curve genera struttura dati corretta", ok_int["success"] and "added_segments_count" in ok_int["data"])
-    record("sketch4: insert_silhouette_entities eseguito con successo", ok_sil["success"] and ok_sil["data"]["exclude_internal_loops"])
     record("sketch4: sketch_offset_on_surface calcola distanza e geodetica", ok_off["success"] and ok_off["data"]["geodesic"])
     record("sketch4: make_sketch_chain combina segmenti", ok_chn["success"] and ok_chn["data"]["segment_count"] == 1)
     record("sketch4: segment_sketch_entity suddivide entita' in N segmenti", ok_seg["success"] and ok_seg["data"]["count"] == 5 and ok_seg["data"]["is_segments"])
     record("sketch4: draw_3point_arc_slot crea asola 3 punti con endpoints", ok_slt["success"] and ok_slt["data"]["slot_type"] == "3point_arc")
-    record("sketch4: show_sketch_curvature e get_spline_curvature_analysis analizzano spline",
-           ok_curv["success"] and ok_curv["data"]["density"] == 30 and ok_ana["success"] and "min_radius_mm" in ok_ana["data"])
+    record('sketch4: show_sketch_curvature sulla spline', ok_curv['success'] and ok_curv['data']['density'] == 30)
     record("sketch4: draw_equation_curve_3d valuta formule parametriche e crea punti 3D",
            ok_eq3d["success"] and ok_eq3d["data"]["samples_count"] == 20 and len(ok_eq3d["data"]["start_point_m"]) == 3)
 
@@ -1844,10 +1860,6 @@ def test_sketch4_tools():
 
     fail_doc4 = _FailDoc4()
     sw._s2_active_or_open = lambda sketch=None: (fail_doc4, fail_doc4.SketchManager, None)
-    neg_int4 = sw.insert_intersection_curve()
-    neg_sil4 = sw.insert_silhouette_entities()
-    record("sketch4: controllo negativo, SolidWorks non genera curve ne' silhouette -> success=False",
-           (not neg_int4["success"]) and (not neg_sil4["success"]))
 
     # Controllo negativo: nessun corpo nel modello -> insert_silhouette_entities rifiuta
     class _NoBodyDoc4(_MockDoc):
@@ -1856,9 +1868,6 @@ def test_sketch4_tools():
 
     nobody_doc4 = _NoBodyDoc4()
     sw._s2_active_or_open = lambda sketch=None: (nobody_doc4, nobody_doc4.SketchManager, None)
-    neg_nobody4 = sw.insert_silhouette_entities()
-    record("sketch4: controllo negativo, senza corpi insert_silhouette_entities -> success=False",
-           (not neg_nobody4["success"]))
 
 
 def test_sketch5_tools():
@@ -1872,7 +1881,6 @@ def test_sketch5_tools():
     r1 = sw.relax_sketch_spline()
     r2 = sw.simplify_sketch_spline(0.1)
     r3 = sw.insert_spline_point(10, 20)
-    r4 = sw.delete_spline_point(1)
     r5 = sw.edit_spline_handle(0, magnitude=1.5)
     r6 = sw.replace_sketch_entity("Line1", "Line2")
     r7 = sw.create_sketch_belt()
@@ -1881,12 +1889,10 @@ def test_sketch5_tools():
     r10 = sw.delete_all_sketch_relations()
     r11 = sw.list_sketch_regions()
     r12 = sw.rotate_copy_3d_sketch(45.0)
-    r13 = sw.merge_sketch_points(0.01)
-    r14 = sw.save_sketch_block_to_file("Block1", "nonexistent.sldblk")
     r15 = sw.set_sketch_performance_mode(True, True, True)
 
-    all_failed_cleanly = all(not r["success"] for r in (r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15))
-    record("sketch5: tutti i 15 tool gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
+    all_failed_cleanly = all((not r['success'] for r in (r1, r2, r3, r5, r6, r7, r8, r9, r10, r11, r12, r15)))
+    record("sketch5: tutti i tool del lotto gestiscono assenza doc/schizzo con errore pulito", all_failed_cleanly)
 
     # Mock per esecuzione con schizzo e spline attiva
     class _MockOleStub:
@@ -1974,7 +1980,6 @@ def test_sketch5_tools():
     ok_rel = sw.relax_sketch_spline("Spline1")
     ok_smp = sw.simplify_sketch_spline(0.05, "Spline1")
     ok_ins = sw.insert_spline_point(5, 5, 0, "Spline1")
-    ok_del = sw.delete_spline_point(1, "Spline1")
     ok_hnd = sw.edit_spline_handle(0, magnitude=2.0, spline_entity="Spline1")
     ok_rep = sw.replace_sketch_entity("Line1", "Line2")
     sw._s5_segs = lambda doc: [_MockArcSeg("Arc1")]     # la cinghia vuole pulegge (archi/cerchi)
@@ -1985,21 +1990,16 @@ def test_sketch5_tools():
     ok_dar = sw.delete_all_sketch_relations()
     ok_reg = sw.list_sketch_regions()
     ok_r3d = sw.rotate_copy_3d_sketch(90.0, copy=True, num_copies=3)
-    ok_mrg = sw.merge_sketch_points(0.02)
-    blk_tmp = str(Path(tempfile.gettempdir()) / "block.sldblk")
-    ok_blk = sw.save_sketch_block_to_file("Block1", blk_tmp, overwrite=True)
     ok_prf = sw.set_sketch_performance_mode(True, False, False)
 
-    record("sketch5: relax, simplify, insert e delete punto spline operativi",
-           ok_rel["success"] and ok_smp["success"] and ok_ins["success"] and ok_del["success"])
+    record('sketch5: relax, simplify e inserimento punto spline operativi', ok_rel['success'] and ok_smp['success'] and ok_ins['success'])
     record("sketch5: edit_spline_handle aggiorna manubri tangenza",
            ok_hnd["success"] and ok_hnd["data"]["magnitude"] == 2.0)
     record("sketch5: replace_sketch_entity e create_sketch_belt eseguiti con successo",
            ok_rep["success"] and ok_rep["data"]["replaced"] and ok_blt["success"])
     record("sketch5: relazioni (suppress, get_allowed, delete_all) analizzate correttamente",
            ok_sup["success"] and len(ok_alw["data"]["allowed_relations"]) == 3 and ok_dar["success"])
-    record("sketch5: regioni, rotazione 3D, merge points, export blocco e modalita' performance validi",
-           ok_reg["success"] and ok_r3d["data"]["copy"] and ok_mrg["success"] and ok_blk["success"] and ok_prf["data"]["add_to_db"])
+    record("sketch5: regioni, rotazione 3D e modalita' performance validi", ok_reg['success'] and ok_r3d['data']['copy'] and ok_prf['data']['add_to_db'])
 
     # Controlli negativi: SolidWorks rifiuta sostituzione, cinghia, cancellazione relazioni, file gia' esistente
     class _FailReplaceMgr5(_MockSketch5Mgr):
@@ -2030,9 +2030,6 @@ def test_sketch5_tools():
 
     blk_busy = str(Path(tempfile.gettempdir()) / "block_busy.sldblk")
     Path(blk_busy).write_bytes(b"x")
-    neg_blk5 = sw.save_sketch_block_to_file("Block1", blk_busy)     # esiste e overwrite=False
-    record("sketch5: controllo negativo, export blocco su file esistente senza overwrite -> success=False",
-           (not neg_blk5["success"]))
 
 
 
@@ -2040,7 +2037,7 @@ def test_sketch5_tools():
 def test_assembly3_tools(tmp):
     sw = SolidWorksAutomation()
 
-    # 1. Senza documento assieme attivo, tutti i 34 tool gestiscono l'assenza con errore controllato
+    # 1. Senza documento assieme attivo, tutti i tool del lotto gestiscono l'assenza con errore controllato
     sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
     sw._asm = lambda: (None, {"success": False, "message": "Nessun assieme attivo"})
 
@@ -2048,18 +2045,11 @@ def test_assembly3_tools(tmp):
     r2 = sw.reorder_components(["Comp2"], "Comp1", position="after")
     r3 = sw.select_components_by_size(15.0)
     r4 = sw.set_component_transparency("Comp1", True)
-    r5 = sw.insert_new_virtual_part("Front Plane")
     r6 = sw.insert_new_virtual_assembly("Sub1")
     r7 = sw.edit_part_in_context("Comp1")
     r8 = sw.exit_part_in_context()
-    r9 = sw.save_virtual_component_external("Comp1", os.path.join(tmp, "part.sldprt"))
-    r10 = sw.lock_mate_rotation("Concentric1", True)
     r11 = sw.add_concentric_mate_with_tolerance("Face1", "Face2", tolerance=0.05)
-    r12 = sw.flip_mate_alignment("Coincident1")
     r13 = sw.add_gear_mate("Face1", "Face2", 2.0, 1.0)
-    r14 = sw.add_rack_pinion_mate("Edge1", "Face1", 40.0)
-    r15 = sw.add_cam_mate(["Face1", "Face2"], "Face3")
-    r16 = sw.add_slot_mate("Slot1", "Pin1", "center")
     r17 = sw.add_hinge_mate("Cyl1", "Cyl2", "Face1", "Face2")
     r18 = sw.add_screw_mate("Axis1", "Axis2", pitch=1.5)
     r19 = sw.add_linear_coupler_mate("Face1", "Face2", 1.0)
@@ -2070,15 +2060,11 @@ def test_assembly3_tools(tmp):
     r27 = sw.exit_isolate()
     r28 = sw.auto_repair_mates()
     r30 = sw.create_speedpak("Spd1")
-    r31 = sw.set_envelope_component("Comp1", True)
     r32 = sw.insert_cavity_feature(["Tool1"], 1.5)
     r33 = sw.insert_join_feature(["Comp1", "Comp2"])
 
-    all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
-        r17, r18, r19, r20, r21, r23, r26, r27, r28, r30, r31, r32, r33
-    ))
-    record("assembly3: tutti i 29 tool gestiscono assenza doc assieme con errore pulito", all_failed)
+    all_failed = all((not r['success'] for r in (r1, r2, r3, r4, r6, r7, r8, r11, r13, r17, r18, r19, r20, r21, r23, r26, r27, r28, r30, r32, r33)))
+    record("assembly3: tutti i tool del lotto gestiscono assenza doc assieme con errore pulito", all_failed)
 
     # 2. Mock documento assieme attivo per verificare la logica di successo
     class _MockComp:
@@ -2153,26 +2139,17 @@ def test_assembly3_tools(tmp):
     record("assembly3: indipendenza, riordino, selezione per dimensione e trasparenza",
            ok_ind["success"] and ok_ord["data"]["position"] == "before" and ok_siz["data"]["selected_count"] == 3 and ok_trn["data"]["transparent"])
 
-    ok_vp = sw.insert_new_virtual_part()
     ok_va = sw.insert_new_virtual_assembly()
     ok_ep = sw.edit_part_in_context("Comp1")
     ok_xp = sw.exit_part_in_context()
-    target_part = os.path.join(tmp, "virtual_saved.sldprt")
-    ok_sv = sw.save_virtual_component_external("Comp1", target_part)
-    record("assembly3: parti/assiemi virtuali, in-context e salvataggio esterno",
-           ok_vp["success"] and ok_va["success"] and ok_ep["success"] and ok_xp["success"] and ok_sv["success"])
+    record('assembly3: assiemi virtuali e modifica in-context', ok_va['success'] and ok_ep['success'] and ok_xp['success'])
 
     ok_gear = sw.add_gear_mate("Gear1", "Gear2", 3.0, 1.0)
-    ok_rack = sw.add_rack_pinion_mate("Rack", "Pinion", 50.0)
-    ok_cam = sw.add_cam_mate(["C1", "C2"], "Foll")
-    ok_slot = sw.add_slot_mate("Slot", "Pin", "center")
     ok_hinge = sw.add_hinge_mate("C1", "C2", "F1", "F2", min_angle=0.0, max_angle=90.0)
     ok_screw = sw.add_screw_mate("Ax1", "Ax2", pitch=2.0)
     ok_coupl = sw.add_linear_coupler_mate("S1", "S2", 2.0)
     ok_ujoint = sw.add_universal_joint_mate("Sh1", "Sh2")
-    record("assembly3: 8 accoppiamenti meccanici/avanzati (gear, rack, cam, slot, hinge, screw, coupler, ujoint)",
-           ok_gear["success"] and ok_rack["success"] and ok_cam["success"] and ok_slot["success"] and
-           ok_hinge["success"] and ok_screw["success"] and ok_coupl["success"] and ok_ujoint["success"])
+    record('assembly3: accoppiamenti meccanici/avanzati (gear, hinge, screw, coupler, ujoint)', ok_gear['success'] and ok_hinge['success'] and ok_screw['success'] and ok_coupl['success'] and ok_ujoint['success'])
 
     ok_dis = sw.dissolve_component_pattern("Pattern1")
     ok_flx = sw.set_subassembly_flexible("Sub1", True)
@@ -2180,13 +2157,9 @@ def test_assembly3_tools(tmp):
     ok_xis = sw.exit_isolate()
     ok_rep = sw.auto_repair_mates()
     ok_spd = sw.create_speedpak("SpeedPak1")
-    ok_env = sw.set_envelope_component("C1", True)
     ok_cav = sw.insert_cavity_feature(["Tool1"], 2.0)
     ok_joi = sw.insert_join_feature(["C1", "C2"])
-    record("assembly3: pattern, flessibilita', isolamento, riparazione mates, speedpak, busta, cavita', join",
-           ok_dis["success"] and ok_flx["data"]["flexible"] and ok_iso["success"] and ok_xis["success"] and
-           ok_rep["success"] and ok_spd["success"] and ok_env["data"]["is_envelope"] and
-           ok_cav["success"] and ok_joi["success"])
+    record("assembly3: pattern, flessibilita', isolamento, riparazione mates, speedpak, cavita', join", ok_dis['success'] and ok_flx['data']['flexible'] and ok_iso['success'] and ok_xis['success'] and ok_rep['success'] and ok_spd['success'] and ok_cav['success'] and ok_joi['success'])
 
     # Controlli negativi: AddMate5 non crea nulla, salvataggio rifiutato, selezione fallita -> success=False
     class _NoMateDoc(_MockDoc):
@@ -2197,17 +2170,13 @@ def test_assembly3_tools(tmp):
             return False
     nomate_doc = _NoMateDoc()
     sw._asm = lambda: (nomate_doc, None)
-    neg_rack = sw.add_rack_pinion_mate("Rack", "Pinion", 50.0)
-    neg_cam = sw.add_cam_mate(["C1"], "Foll")
     class _NoSaveComp(_MockComp):
         def SaveVirtualComponent(self, *a):
             return False
     sw._as_comp = lambda doc, name, *a: (_NoSaveComp(name), None)
-    neg_svc = sw.save_virtual_component_external("Comp1", os.path.join(tmp, "neg_virtual.sldprt"))
     sw._as_select_comps = lambda doc, comps: False
     neg_ind = sw.make_component_independent("Comp1")
-    record("assembly3: controllo negativo, AddMate5 senza accoppiamento / salvataggio rifiutato / selezione fallita -> success=False",
-           (not neg_rack["success"]) and (not neg_cam["success"]) and (not neg_svc["success"]) and (not neg_ind["success"]))
+    record('assembly3: controllo negativo, selezione fallita -> success=False', not neg_ind['success'])
 
 
 
@@ -2215,7 +2184,7 @@ def test_assembly3_tools(tmp):
 def test_drawings2_tools(tmp):
     sw = SolidWorksAutomation()
 
-    # 1. Senza documento disegno attivo, tutti i 26 tool gestiscono l'assenza con errore controllato
+    # 1. Senza documento disegno attivo, tutti i tool del lotto gestiscono l'assenza con errore controllato
     sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
     sw._drawing = lambda: (None, {"success": False, "message": "Nessun disegno attivo"})
 
@@ -2225,18 +2194,13 @@ def test_drawings2_tools(tmp):
     r8 = sw.add_flat_pattern_drawing_view()
     r11 = sw.show_exploded_drawing_view()
     r12 = sw.rotate_drawing_view("View1", 45.0)
-    r13 = sw.align_drawing_views("View1", "View2")
     r19 = sw.add_revision_table()
     r21 = sw.add_general_table()
-    r22 = sw.add_centerlines()
     r23 = sw.create_drawing_layer("Annotations")
-    r25 = sw.insert_drawing_block()
     r26 = sw.export_pdf_layers(os.path.join(tmp, "out.pdf"))
 
-    all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r8, r11, r12, r13, r19, r21, r22, r23, r25, r26
-    ))
-    record("drawings2: tutti i 13 tool gestiscono assenza doc disegno con errore pulito", all_failed)
+    all_failed = all((not r['success'] for r in (r1, r2, r3, r8, r11, r12, r19, r21, r23, r26)))
+    record("drawings2: tutti i tool del lotto gestiscono assenza doc disegno con errore pulito", all_failed)
 
     # 2. Mock documento disegno attivo per verificare esecuzione positiva
     class _MockView:                                    # vista del foglio (Position in m, Angle in rad, come SolidWorks)
@@ -2326,24 +2290,19 @@ def test_drawings2_tools(tmp):
            ok_fp["success"] and ok_ex["success"])
 
     ok_rot = sw.rotate_drawing_view("View1", 90.0)
-    ok_alg = sw.align_drawing_views("View1", "View2", "vertical")
-    record("drawings2: rotazione e allineamento viste",
-           ok_rot["success"] and ok_alg["success"])
+    record('drawings2: rotazione viste', ok_rot['success'])
 
     ok_rev = sw.add_revision_table(revision="B", description="Eco release")
     ok_tbl = sw.add_general_table(rows=4, columns=3, title="Tabella Componenti")
     record("drawings2: tabelle revisioni e generiche",
            ok_rev["success"] and ok_tbl["success"])
 
-    ok_cln = sw.add_centerlines()
     ok_lyr = sw.create_drawing_layer("Annotations", color_rgb=[255, 0, 0])
     blk_file = os.path.join(tmp, "stamp.slddrt")         # il blocco deve esistere su disco
     Path(blk_file).write_bytes(b"BLOCK-mock")
-    ok_blk = sw.insert_drawing_block(block_path=blk_file, block_name="Stamp", x=200, y=50)
     pdf_target = os.path.join(tmp, "drawing_layers.pdf")
     ok_pdf = sw.export_pdf_layers(pdf_target, overwrite=True)
-    record("drawings2: assi, livelli CAD (layer), blocchi ed export PDF multilivello",
-           ok_cln["success"] and ok_lyr["success"] and ok_blk["success"] and ok_pdf["success"])
+    record('drawings2: livelli CAD (layer) ed export PDF multilivello', ok_lyr['success'] and ok_pdf['success'])
 
     # Controlli negativi: SolidWorks rifiuta vista lamiera, livello, PDF; vista esplosa inesistente; blocco mancante
     class _FailDrawingDoc(_MockDrawingDoc):
@@ -2357,58 +2316,27 @@ def test_drawings2_tools(tmp):
     neg_lyr = sw.create_drawing_layer("Annotations")
     neg_pdf = sw.export_pdf_layers(os.path.join(tmp, "neg_layers.pdf"))
     neg_exp = sw.show_exploded_drawing_view("VistaInesistente", True)
-    neg_blk = sw.insert_drawing_block(block_path=os.path.join(tmp, "non_esiste.slddrt"))
-    record("drawings2: controllo negativo, vista lamiera/livello/PDF rifiutati, vista o blocco inesistenti -> success=False",
-           (not neg_fp["success"]) and (not neg_lyr["success"]) and (not neg_pdf["success"])
-           and (not neg_exp["success"]) and (not neg_blk["success"]))
+    record('drawings2: controllo negativo, vista lamiera/livello/PDF rifiutati -> success=False', not neg_fp['success'] and (not neg_lyr['success']) and (not neg_pdf['success']) and (not neg_exp['success']))
 
 
 
 def test_features4_tools(tmp):
     sw = SolidWorksAutomation()
 
-    # 1. Senza documento parte attivo, tutti i 33 tool gestiscono l'assenza con errore controllato
+    # 1. Senza documento parte attivo, tutti i tool del lotto gestiscono l'assenza con errore controllato
     sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
     sw._part = lambda: (None, {"success": False, "message": "Nessun pezzo attivo"})
 
-    r1 = sw.extrude_from_surface(depth=10.0)
     r2 = sw.intersect_solid_features(["Body1", "Body2"])
-    r3 = sw.solid_sweep("Tool1", "Path1")
     r4 = sw.variable_section_sweep("Prof1", "Path1")
-    r5 = sw.setback_fillet([0, 0, 0])
-    r6 = sw.curvature_continuous_fillet([[0, 0, 0]])
-    r7 = sw.stud_wizard([0, 0, 0], 8.0, 30.0)
-    r9 = sw.create_reference_curve_from_equation("t", "t", "t")
     r11 = sw.mirror_body_merge(["Body1"], "Top")
-    r12 = sw.core_cavity_split([100, 100, 50])
-    r13 = sw.body_replace_face([[0, 0, 0]], "Surf1")
-    r14 = sw.freeform_surface([0, 0, 0], 2.0)
-    r15 = sw.flatten_surface([0, 0, 0])
-    r16 = sw.radiate_surface([[0, 0, 0]], 15.0)
     r17 = sw.cross_break([0, 0, 0], 1.0)
     r18 = sw.convert_to_sheet_metal(1.5, 2.0, [0, 0, 0])
-    r19 = sw.vent_feature("VentSketch", 2.0)
-    r20 = sw.loft_bend("Prof1", "Prof2", 2.0)
-    r21 = sw.curved_edge_flange([0, 0, 0], 20.0)
-    r22 = sw.cosmetic_weld_bead([0, 0, 0], [10, 0, 0], 4.0)
     r23 = sw.update_cut_list()
     r24 = sw.subweldment_folder("Sub1")
-    r25 = sw.insert_parting_line([0, 0, 1])
-    r26 = sw.insert_shut_off_surfaces()
-    r27 = sw.insert_parting_surface(25.0)
-    r28 = sw.insert_tooling_split([100, 100, 50], [100, 100, 50])
-    r29 = sw.insert_lip_and_groove([[0, 0, 0]], 2.0, 2.0)
-    r30 = sw.insert_snap_hook([0, 0, 0], 15.0, 2.0)
-    r31 = sw.insert_mounting_boss([0, 0, 0], 12.0, 8.0, 3.0)
-    r32 = sw.mesh_brep_converter("MeshBody1")
-    r33 = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1])
 
-    all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r4, r5, r6, r7, r9, r11, r12, r13, r14, r15, r16,
-        r17, r18, r19, r20, r21, r22, r23, r24, r25, r26, r27, r28, r29, r30,
-        r31, r32, r33
-    ))
-    record("features4: tutti i 31 tool gestiscono assenza doc parte con errore pulito", all_failed)
+    all_failed = all((not r['success'] for r in (r2, r4, r11, r17, r18, r23, r24)))
+    record("features4: tutti i tool del lotto gestiscono assenza doc parte con errore pulito", all_failed)
 
     # 2. Mock documento parte attivo per verificare esecuzione positiva
     class _MockPartDoc:
@@ -2472,72 +2400,30 @@ def test_features4_tools(tmp):
     sw._wld_raw = lambda obj, name, *args: (obj.InsertSubWeldFolder2(*args) if name == "InsertSubWeldFolder2"
                                              else ([_MockBody("Body1")] if name == "GetBodies" else True))
 
-    ok_efs = sw.extrude_from_surface(depth=15.0, start_surface_name="Surf1")
     ok_isf = sw.intersect_solid_features(["Body1", "Body2"])
-    record("features4: estrusioni da superficie e intersezioni composite",
-           ok_efs["success"] and ok_isf["success"])
+    record('features4: intersezioni composite', ok_isf['success'])
 
-    ok_ss = sw.solid_sweep("Tool1", "Path1")
     ok_vss = sw.variable_section_sweep("Prof1", "Path1", scale_factor=1.0, twist_angle=45.0)
-    record("features4: sweep con utensile solido e a sezione variabile",
-           ok_ss["success"] and ok_vss["success"])
+    record('features4: sweep a sezione variabile', ok_vss['success'])
 
-    ok_sbf = sw.setback_fillet([0, 0, 0], setback_distances=[2.0, 3.0, 4.0], radius=6.0)
-    ok_ccf = sw.curvature_continuous_fillet([[0, 0, 0]], radius=5.0, rho_conic=0.6)
-    record("features4: raccordi con arretramento vertice e continuita' G2",
-           ok_sbf["success"] and ok_ccf["success"])
 
-    ok_swz = sw.stud_wizard([10, 10, 0], shaft_diameter=8.0, stud_length=30.0, size="M8x1.25")
-    record("features4: prigionieri filettati stud wizard",
-           ok_swz["success"])
 
-    ok_eqc = sw.create_reference_curve_from_equation("50*cos(t)", "50*sin(t)", "10*t", t_start=0, t_end=6.28)
-    record("features4: curve 3D parametriche da equazioni matematiche",
-           ok_eqc["success"])
 
     ok_mbm = sw.mirror_body_merge(["Body1"], "Right", merge_bodies=True)
     record("features4: specchiatura corpi con fusione",
            ok_mbm["success"])
 
-    ok_ccs = sw.core_cavity_split([120, 120, 60], parting_surface_name="PartingSurf")
-    ok_brf = sw.body_replace_face([[0, 0, 0]], "TargetSurf")
-    record("features4: separazione stampo matrice/punzone e sostituzione facce",
-           ok_ccs["success"] and ok_brf["success"])
 
-    ok_ffs = sw.freeform_surface([0, 0, 0], push_distance=3.0)
-    ok_fls = sw.flatten_surface([0, 0, 0], accuracy_level=4)
-    ok_rad = sw.radiate_surface([[0, 0, 0]], radius_distance=20.0)
-    record("features4: superfici deformate freeform, spianate 2D e irradiate",
-           ok_ffs["success"] and ok_fls["success"] and ok_rad["success"])
 
     ok_cb = sw.cross_break([0, 0, 0], depth=1.5)
     ok_csm = sw.convert_to_sheet_metal(2.0, 3.0, [0, 0, 0])
-    ok_vnt = sw.vent_feature("VentBoundary", rib_width=2.5)
-    ok_lb = sw.loft_bend("Profile1", "Profile2", thickness=2.0)
-    ok_cef = sw.curved_edge_flange([0, 0, 0], flange_length=25.0)
-    record("features4: lamiera (cross break, convert, vent, loft bend, flangia curva)",
-           ok_cb["success"] and ok_csm["success"] and ok_vnt["success"] and ok_lb["success"] and ok_cef["success"])
+    record('features4: lamiera (cross break, convert)', ok_cb['success'] and ok_csm['success'])
 
-    ok_cwb = sw.cosmetic_weld_bead([0, 0, 0], [10, 0, 0], bead_size=5.0)
     ok_ucl = sw.update_cut_list()
     ok_swf = sw.subweldment_folder("TrussAssembly", ["Body1"])
-    record("features4: saldature (cordolo cosmetico, distinta taglio, cartelle)",
-           ok_cwb["success"] and ok_ucl["success"] and ok_swf["success"])
+    record('features4: saldature (distinta taglio, cartelle)', ok_ucl['success'] and ok_swf['success'])
 
-    ok_ipl = sw.insert_parting_line([0, 0, 1], draft_angle=1.5)
-    ok_iso = sw.insert_shut_off_surfaces()
-    ok_ips = sw.insert_parting_surface(distance=30.0)
-    ok_its = sw.insert_tooling_split([100, 100, 50], [100, 100, 50])
-    ok_ilg = sw.insert_lip_and_groove([[0, 0, 0]], lip_depth=2.0, groove_width=2.2)
-    ok_ish = sw.insert_snap_hook([0, 0, 0], hook_height=18.0, beam_thickness=2.5)
-    ok_imb = sw.insert_mounting_boss([0, 0, 0], height=15.0, outer_diameter=10.0, inner_hole_diameter=3.5)
-    record("features4: stampi (divisione, chiusura, maschio-femmina, snap hook, boss)",
-           ok_ipl["success"] and ok_iso["success"] and ok_ips["success"] and ok_its["success"] and ok_ilg["success"] and ok_ish["success"] and ok_imb["success"])
 
-    ok_mbc = sw.mesh_brep_converter("FacetBody1", target_type="solid")
-    ok_sda = sw.surface_deviation_analysis([0, 0, 0], [0, 0, 1], samples_count=50)
-    record("features4: conversione mesh B-Rep e analisi deviazione geometrica",
-           ok_mbc["success"] and ok_sda["success"])
 
     # Controlli negativi: SolidWorks non crea alcuna feature (conteggio fermo) e distinta non aggiornata -> success=False
     class _NoFeatDoc(_MockPartDoc):
@@ -2546,23 +2432,18 @@ def test_features4_tools(tmp):
         def UpdateCutList(self): return None
     nofeat_doc = _NoFeatDoc()
     sw._part = lambda: (nofeat_doc, None)
-    neg_ext4 = sw.extrude_from_surface(depth=15.0)
-    neg_swp4 = sw.solid_sweep("Tool1", "Path1")
-    neg_stud4 = sw.stud_wizard([0, 0, 0], 8.0, 30.0)
     neg_cbr4 = sw.cross_break([0, 0, 0], 1.0)
     sw._wld_raw = lambda obj, name, *args: None         # distinta non aggiornata: nessun membro letto
     neg_cut4 = sw.update_cut_list()
     del sw._wld_raw                                    # ripristina il metodo reale
-    record("features4: controllo negativo, nessuna feature creata o distinta non aggiornata -> success=False",
-           (not neg_ext4["success"]) and (not neg_swp4["success"]) and (not neg_stud4["success"])
-           and (not neg_cbr4["success"]) and (not neg_cut4["success"]))
+    record('features4: controllo negativo, nessuna feature creata o distinta non aggiornata -> success=False', not neg_cbr4['success'] and (not neg_cut4['success']))
 
 
 
 def test_data2_tools(tmp):
     sw = SolidWorksAutomation()
 
-    # 1. Senza documento attivo, tutti i 24 tool gestiscono l'assenza con errore controllato
+    # 1. Senza documento attivo, tutti i tool del lotto gestiscono l'assenza con errore controllato
     sw.get_active_doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
     sw._doc = lambda: (None, {"success": False, "message": "Nessun documento attivo"})
     sw._part_or_assembly = lambda: (None, {"success": False, "message": "Nessun pezzo o assieme attivo"})
@@ -2570,33 +2451,16 @@ def test_data2_tools(tmp):
     r1 = sw.get_config_custom_property("Prop1")
     r2 = sw.set_config_custom_property("Prop1", "Val1")
     r3 = sw.set_document_summary_info(title="Test")
-    r4 = sw.create_custom_material("Titanium_Grade5")
     r5 = sw.export_equations_to_file(os.path.join(tmp, "eq.txt"))
-    r6 = sw.insert_design_table()
-    r7 = sw.edit_design_table(1, "D1@Sketch1", "100")
-    r8 = sw.export_design_table(os.path.join(tmp, "table.csv"))
     r9 = sw.create_derived_configuration("VariantB", "Default")
-    r10 = sw.get_projected_area([0, 0, 1])
-    r11 = sw.calculate_clearance_envelope()
-    r12 = sw.export_step_ap242_pmi(os.path.join(tmp, "out.step"))
     r13 = sw.export_dxf_flat_pattern(os.path.join(tmp, "flat.dxf"))
-    r14 = sw.export_jt(os.path.join(tmp, "out.jt"))
     r15 = sw.export_ifc(os.path.join(tmp, "out.ifc"))
     r16 = sw.export_gltf_glb(os.path.join(tmp, "out.glb"))
     r17 = sw.export_3d_pdf(os.path.join(tmp, "out.pdf"))
-    r18 = sw.add_dimxpert_dimension([0, 0, 0])
-    r19 = sw.add_dimxpert_datum([0, 0, 0], "A")
-    r20 = sw.add_dimxpert_geometric_tolerance([0, 0, 0], "flatness", 0.05)
-    r21 = sw.auto_dimension_scheme_dimxpert()
-    r22 = sw.list_dimxpert_annotations()
-    r23 = sw.set_view_background("white")
     r24 = sw.apply_appearance("polished_chrome")
 
-    all_failed = all(not r["success"] for r in (
-        r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16,
-        r17, r18, r19, r20, r21, r22, r23, r24
-    ))
-    record("data2: tutti i 24 tool gestiscono assenza doc con errore pulito", all_failed)
+    all_failed = all((not r['success'] for r in (r1, r2, r3, r5, r9, r13, r15, r16, r17, r24)))
+    record("data2: tutti i tool del lotto gestiscono assenza doc con errore pulito", all_failed)
 
     # 2. Mock documento attivo per verificare esecuzione positiva
     class _MockCPM:
@@ -2698,28 +2562,15 @@ def test_data2_tools(tmp):
     record("data2: proprieta' per configurazione e metadati di riepilogo",
            ok_gcp["success"] and ok_gcp["data"]["value"] == "ABC-123" and ok_scp["success"] and ok_smd["success"])
 
-    ok_cmat = sw.create_custom_material("Titanium_Grade5", density=4430.0, elastic_modulus=114000.0)
-    record("data2: materiali personalizzati con costanti meccaniche",
-           ok_cmat["success"])
 
     eq_out = os.path.join(tmp, "equations_export.txt")
     ok_eqx = sw.export_equations_to_file(eq_out, overwrite=True)
     record("data2: export equazioni sincronizzate in formato testo",
            ok_eqx["success"] and os.path.isfile(eq_out))
 
-    ok_idt = sw.insert_design_table()
-    record("data2: insert_design_table senza il metodo InsertDesignTable e' rifiutato", not ok_idt["success"])
-    ok_edt = sw.edit_design_table(1, "D1@Sketch1", "120")
-    dt_out = os.path.join(tmp, "design_table_out.csv")
-    ok_xdt = sw.export_design_table(dt_out, overwrite=True)
     ok_dcf = sw.create_derived_configuration("Lunga", "Default")
-    record("data2: tabelle di progettazione e configurazioni derivate",
-           ok_edt["success"] and ok_xdt["success"] and ok_dcf["success"] and os.path.isfile(dt_out))
+    record('data2: configurazioni derivate', ok_dcf['success'])
 
-    ok_pja = sw.get_projected_area([0, 0, 1])
-    ok_cle = sw.calculate_clearance_envelope(clearance_offset=10.0)
-    record("data2: area proiettata e clearance envelope",
-           ok_pja["success"] and ok_cle["success"] and ok_cle["data"]["offset_mm"] == 10.0)
 
     def _mock_export_model(filepath, format=None, **k):          # export PDF 3D: stessa strada di export_model (misurata)
         with open(filepath, "wb") as fh:
@@ -2728,11 +2579,7 @@ def test_data2_tools(tmp):
     sw.export_model = _mock_export_model
 
     sw._sw_app = types.SimpleNamespace(GetUserPreferenceIntegerValue=lambda k: 203, SetUserPreferenceIntegerValue=lambda k, v: True)
-    ok_242 = sw.export_step_ap242_pmi(os.path.join(tmp, "model.step"), overwrite=True)
-    record("data2: STEP AP242 rifiutato (SolidWorks scrive AP203)", (not ok_242["success"]) and "AP242" in ok_242["message"])
     ok_dxf = sw.export_dxf_flat_pattern(os.path.join(tmp, "flat.dxf"), overwrite=True)
-    ok_jt = sw.export_jt(os.path.join(tmp, "model.jt"), overwrite=True)
-    record("data2: JT rifiutato, SaveAs errore 256", (not ok_jt["success"]) and "256" in ok_jt["message"])
     ok_ifc = sw.export_ifc(os.path.join(tmp, "model.ifc"), overwrite=True, schema_version="IFC2X3")
     ok_ifc4 = sw.export_ifc(os.path.join(tmp, "model4.ifc"), overwrite=True, schema_version="IFC4")
     record("data2: IFC2X3 scritto, IFC4 richiesto e rifiutato", ok_ifc["success"] and (not ok_ifc4["success"]) and "IFC2X3" in ok_ifc4["message"])
@@ -2741,18 +2588,9 @@ def test_data2_tools(tmp):
     record("data2: esportazioni avanzate (DXF flat, IFC2X3, glTF/GLB, 3D PDF)",
            ok_dxf["success"] and ok_ifc["success"] and ok_glb["success"] and ok_3dp["success"])
 
-    ok_ddm = sw.add_dimxpert_dimension([0, 0, 0])
-    ok_ddt = sw.add_dimxpert_datum([0, 0, 0], "A")
-    ok_dgt = sw.add_dimxpert_geometric_tolerance([0, 0, 0], "flatness", 0.02)
-    ok_ads = sw.auto_dimension_scheme_dimxpert()
-    ok_lda = sw.list_dimxpert_annotations()
-    record("data2: quotatura e tolleramento 3D MBD / DimXpert (PMI)",
-           ok_ddm["success"] and ok_ddt["success"] and ok_dgt["success"] and ok_ads["success"] and ok_lda["success"])
 
-    ok_svb = sw.set_view_background("studio")
     ok_app = sw.apply_appearance("")          # dal 2026-10-24 apply_appearance e' reale (prova dal vivo in test_data2_live)
-    record("data2: sfondo della vista 3D; apply_appearance senza nome rifiutato",
-           ok_svb["success"] and not ok_app["success"])
+    record('data2: apply_appearance senza nome rifiutato', not ok_app['success'])
 
     # Controlli negativi: proprieta' non riletta, riepilogo rifiutato, configurazione non creata, export rifiutato
     class _RefuseDataDoc(_MockDataDoc):
@@ -2776,23 +2614,19 @@ def test_data2_tools(tmp):
     neg_scp = sw.set_config_custom_property("PartNo", "ABC-123")
     neg_smd = sw.set_document_summary_info(title="Staffa")
     neg_dcf = sw.create_derived_configuration("Lunga", "Default")
-    neg_jt = sw.export_jt(os.path.join(tmp, "neg_model.jt"))
-    record("data2: controllo negativo, proprieta' non riletta / riepilogo rifiutato / configurazione assente / export rifiutato -> success=False",
-           (not neg_scp["success"]) and (not neg_smd["success"]) and (not neg_dcf["success"]) and (not neg_jt["success"]))
+    record("data2: controllo negativo, proprieta' non riletta / riepilogo rifiutato / configurazione assente / export rifiutato -> success=False", not neg_scp['success'] and (not neg_smd['success']) and (not neg_dcf['success']))
 
 def test_simulation2_tools(tmp):
     sw = SolidWorksAutomation()
 
     # 1. Creazione studi
-    ok_frq = sw.create_frequency_study("Freq_Test", 5)
     ok_bck = sw.create_buckling_study("Buck_Test", 4)
     ok_thm = sw.create_thermal_study("Therm_Test", transient=False)
     ok_drp = sw.create_drop_test_study("Drop_Test", 1000.0)
     ok_fat = sw.create_fatigue_study("Fat_Test", 100000)
     ok_top = sw.create_topology_study("Topo_Test", 50.0)
     ok_dyn = sw.create_linear_dynamic_study("Dyn_Test", "harmonic")
-    record("simulation2: creazione studi (frequenze, buckling, termico, drop test, fatica, topologia, dinamico)",
-           not ok_frq["success"] and not ok_bck["success"] and not ok_thm["success"] and not ok_drp["success"] and not ok_fat["success"] and not ok_top["success"] and not ok_dyn["success"])
+    record('simulation2: creazione studi (buckling, termico, drop test, fatica, topologia, dinamico)', not ok_bck['success'] and (not ok_thm['success']) and (not ok_drp['success']) and (not ok_fat['success']) and (not ok_top['success']) and (not ok_dyn['success']))
 
     # 2. Vincoli e carichi
     ok_esp = sw.add_elastic_support([0, 0, 0], stiffness=100.0)
@@ -2829,7 +2663,6 @@ def test_simulation2_tools(tmp):
            not ok_shk["success"] and not ok_vwl["success"] and not ok_ort["success"] and not ok_shl["success"] and not ok_bem["success"] and not ok_mqm["success"] and not ok_slv["success"])
 
     # 5. Risultati, sonde e report (compresa gestione overwrite)
-    ok_mod = sw.get_mode_shapes(1)
     ok_bkl = sw.get_buckling_load_factor(1)
     ok_thz = sw.get_thermal_results()
     ok_rct = sw.get_reaction_forces_detail([0, 0, 0])
@@ -2838,8 +2671,7 @@ def test_simulation2_tools(tmp):
     with open(rpt_file, "w") as f:
         f.write("existing")
     ok_ow_fail = sw.export_simulation_report(rpt_file, overwrite=False)
-    record("simulation2: risultati, sonde e protezione overwrite export_simulation_report",
-           not ok_mod["success"] and not ok_bkl["success"] and not ok_thz["success"] and not ok_rct["success"] and not ok_prb["success"] and not ok_ow_fail["success"] and "overwrite=False" in ok_ow_fail["message"])
+    record('simulation2: risultati, sonde e protezione overwrite export_simulation_report', not ok_bkl['success'] and (not ok_thz['success']) and (not ok_rct['success']) and (not ok_prb['success']) and (not ok_ow_fail['success']) and ('overwrite=False' in ok_ow_fail['message']))
 
 
 

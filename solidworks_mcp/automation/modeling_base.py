@@ -112,8 +112,6 @@ class ModelingBase:
         except Exception:
             return 0
 
-    def _clear(self, doc):
-        doc.ClearSelection2(True)
 
     # ------------------------------------------------------------------ massa / volume
     def _mass_props(self, doc):
@@ -284,9 +282,6 @@ class ModelingBase:
             info["volume_delta_mm3"] = round((vol - vol_before) * 1e9, 3)
         return info
 
-    def _feature_error(self, doc, what: str, extra: str = "") -> Dict:
-        msg = f"{what} non riuscito. {extra}".strip()
-        return self._result(False, msg, SwErrors.swFeatureError)
 
     # ------------------------------------------------------------------ corpi / entita'
     def _bodies(self, doc) -> list:

@@ -15,10 +15,8 @@ os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECT
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from solidworks_mcp.not_implemented import NOT_IMPLEMENTED  # noqa: E402
 
-# tool esposti con execute_python attivo: 558 registrati meno quelli nascosti perche' non implementati (revisione 2026-10-23)
-EXPECTED_TOOLS = 558 - len(NOT_IMPLEMENTED)
+EXPECTED_TOOLS = 449   # 2026-11-18: cancellati il codice degli 84 tool nascosti e 25 doppioni (not_implemented.py)
 OUT = ROOT / "test_output"
 OUT.mkdir(exist_ok=True)
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -27,8 +25,8 @@ SERVER = ROOT / "solidworks_mcp_server.py"
 # tool che scrivono file: i file di test_output vengono riscritti a ogni esecuzione (gruppo B)
 OVERWRITE_TOOLS = {
     "save_document", "save_drawing", "export_drawing", "export_model", "export_model_image", "export_simulation_plot",
-    "create_drawing", "export_pdf_layers", "export_equations_to_file", "export_design_table", "export_step_ap242_pmi",
-    "export_dxf_flat_pattern", "export_jt", "export_ifc", "export_gltf_glb", "export_3d_pdf", "export_simulation_report"
+    "create_drawing", "export_pdf_layers", "export_equations_to_file",
+    "export_dxf_flat_pattern", "export_ifc", "export_gltf_glb", "export_3d_pdf", "export_simulation_report"
 }
 
 
@@ -44,7 +42,7 @@ _IT_EN = [
     (r"\bDistanzaLimite(\d+)\b", r"LimitDistance\1"), (r"\bDistanza(\d+)\b", r"Distance\1"), (r"\bOrigine\b", "Origin"),
     (r"\bLega 6061\b", "6061 Alloy"), (r"^alluminio$", "alumin"),
     (r"^Acciaio$", "Steel"), (r"^Plastiche$", "Plastics"), (r"\bABS generico\b", "ABS"),
-    (r"^Bronzo$", "Bronze"),
+    (r"^Bronzo$", "Bronze"), (r"^Alluminio Bronzo$", "Aluminum Bronze"),
     (r"\bRipetizioneCircolare(\d+)\b", r"CirPattern\1"), (r"\bRipetizioneLineare(\d+)\b", r"LPattern\1"),   # set_material cerca per sottostringa: primo bronzo della libreria in entrambe le lingue   # libreria inglese (dal .sldmat)
 ]
 

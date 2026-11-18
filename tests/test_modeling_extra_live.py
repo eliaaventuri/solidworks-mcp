@@ -9,7 +9,7 @@ non viene mai toccata; alla fine si chiude solo il PID lanciato dal test.
   B3  convert_entities, up_to_surface, revolve_cut, loft con guide, sweep di taglio: volumi calcolati a mano
   B4  Hole Wizard: ISO/ANSI metrico/ANSI pollici/DIN/BSI/JIS, fori su cilindri e piani inclinati, diametri e
       profondita' MISURATI sul modello (list_entities) e volume asportato vs formula
-  B5  tool base: open/save/save-as/close, draw_line/rectangle/arc/polygon, cut_extrude, set_units, execute_python
+  B5  tool base: open/save/save-as/close, draw_line/rectangle/arc/polygon, extrude_cut, set_units, execute_python
   B6  close_document sicuro (rifiuta con modifiche, save/discard, documento per titolo o percorso) + protezioni
       (overwrite, delete_feature con confirm) + annotazioni dei tool distruttivi
 
@@ -941,7 +941,7 @@ async def b8_sposta_facce(c):
 
 # ===================================================================================================== B5
 async def b5_tool_base(c):
-    print("\n== B5. Tool base: open/save/close, draw_*, cut_extrude, set_units, execute_python")
+    print("\n== B5. Tool base: open/save/close, draw_*, extrude_cut, set_units, execute_python")
     A, B = OUT / "b5_a.SLDPRT", OUT / "b5_b.SLDPRT"
     for p in (A, B):
         if p.exists():
@@ -952,7 +952,7 @@ async def b5_tool_base(c):
     await need(c, "create_sketch", "B5 create_sketch", plane="Front")
     d = await need(c, "draw_rectangle", "B5 draw_rectangle 20x10", x1=0, y1=0, x2=20, y2=10)
     record("B5 draw_rectangle: restituisce gli id delle entita'", len(d.get("entity_ids", [])) >= 4, str(list(d)[:6]))
-    await need(c, "extrude_sketch", "B5 extrude_sketch 5", depth=5)
+    await need(c, "extrude_boss", "B5 extrude_boss 5", depth=5)
     await veq(c, "B5 rettangolo 20x10 estruso 5", 1000)
     d = await need(c, "save_document", "B5 save_document con nome (Save As)", filepath=str(A))
     record("B5 save_document: file creato su disco", A.exists() and A.stat().st_size > 1000, f"{A.stat().st_size if A.exists() else 0} byte")
@@ -975,17 +975,17 @@ async def b5_tool_base(c):
     n_a = sum(1 for x in l.get("documents", []) if "b5_a" in x["title"].lower())
     record("B5 open_document su file gia' aperto: nessun duplicato", ok and n_a == 1, f"{n_a} copie aperte")
 
-    # ---- cut_extrude: cieco, passante (blocco 20x10, spessore 5, faccia x=5)
+    # ---- extrude_cut: cieco, passante (blocco 20x10, spessore 5, faccia x=5)
     await face_circle(c, [5, 10, 5], (5, 5), 2, "B5 schizzo sulla faccia x=5 con cerchio r=2")
     v_prima = await vol(c)
-    await need(c, "cut_extrude", "B5 cut_extrude cieco 3 mm (r=2)", depth=3)
+    await need(c, "extrude_cut", "B5 extrude_cut cieco 3 mm (r=2)", depth=3)
     got = v_prima - await vol(c)
-    record("B5 cut_extrude cieco: volume asportato = pi r^2 3 = 37.70", abs(got - PI * 4 * 3) < PI * 4 * 3 * TOL, f"asportato {got:.3f}")
+    record("B5 extrude_cut cieco: volume asportato = pi r^2 3 = 37.70", abs(got - PI * 4 * 3) < PI * 4 * 3 * TOL, f"asportato {got:.3f}")
     await face_circle(c, [5, 10, 8], (15, 5), 1.5, "B5 secondo cerchio r=1.5 sulla faccia x=5")
     v_prima = await vol(c)
-    await need(c, "cut_extrude", "B5 cut_extrude through_all (r=1.5, spessore 5)", through_all=True)
+    await need(c, "extrude_cut", "B5 extrude_cut through_all (r=1.5, spessore 5)", end_condition="through_all")
     got = v_prima - await vol(c)
-    record("B5 cut_extrude passante: volume asportato = pi r^2 5 = 35.34", abs(got - PI * 2.25 * 5) < PI * 2.25 * 5 * TOL, f"asportato {got:.3f}")
+    record("B5 extrude_cut passante: volume asportato = pi r^2 5 = 35.34", abs(got - PI * 2.25 * 5) < PI * 2.25 * 5 * TOL, f"asportato {got:.3f}")
     d = await need(c, "save_document", "B5 save_document senza nome (Salva sul file del documento)")
     record("B5 save_document senza nome: salva sul file del documento", d.get("path", "").lower().endswith("b5_a.sldprt"), str(d.get("path")))
     ok, text, _ = await c.call("close_document")
@@ -996,7 +996,7 @@ async def b5_tool_base(c):
 
     # ---- salva con nome: A resta com'era, B e' nuovo
     await face_circle(c, [5, 10, 8], (10, 8.5), 1, "B5 schizzo sulla faccia x=5 (per il Salva con nome)")
-    await need(c, "cut_extrude", "B5 altro taglio (r=1, passante)", through_all=True)
+    await need(c, "extrude_cut", "B5 altro taglio (r=1, passante)", end_condition="through_all")
     v_b = await vol(c)
     await need(c, "save_document", "B5 Salva con nome B", filepath=str(B))
     ok, text, d = await c.call("save_document", filepath=str(A))
@@ -1026,7 +1026,7 @@ async def b5_tool_base(c):
         await new_part(c)
         await c.call("create_sketch", plane="Front")
         await builder()
-        await need(c, "extrude_sketch", f"{label}: estrusione", depth=depth)
+        await need(c, "extrude_boss", f"{label}: estrusione", depth=depth)
         await veq(c, label, exp, tol)
         await discard_all(c)
 
@@ -1062,7 +1062,7 @@ async def b5_tool_base(c):
     record("B5 draw_polygon con 2 lati: rifiutato", not ok, text.split("\n")[0][:100])
     await discard_all(c)
 
-    # ---- cut_extrude: both_directions su blocco centrato sul piano Front
+    # ---- extrude_cut: both_directions su blocco centrato sul piano Front
     await new_part(c)
     await c.call("create_sketch", plane="Front")
     await c.call("draw_rectangle", x1=-20, y1=-20, x2=20, y2=20)
@@ -1070,21 +1070,21 @@ async def b5_tool_base(c):
     await c.call("create_sketch", plane="Front")
     await c.call("draw_circle", x=0, y=0, radius=4)
     v_prima = await vol(c)
-    await need(c, "cut_extrude", "B5 cut_extrude both_directions con depth=3 (piano medio: 3 mm TOTALI)", depth=3, both_directions=True)
+    await need(c, "extrude_cut", "B5 extrude_cut both_directions con depth=3 (piano medio: 3 mm TOTALI)", depth=3, end_condition="mid_plane")
     got = v_prima - await vol(c)
-    record("B5 cut_extrude both_directions + depth: piano medio, asportato pi r^2 3 = 150.80", abs(got - PI * 16 * 3) < PI * 16 * 3 * TOL, f"asportato {got:.3f}")
+    record("B5 extrude_cut both_directions + depth: piano medio, asportato pi r^2 3 = 150.80", abs(got - PI * 16 * 3) < PI * 16 * 3 * TOL, f"asportato {got:.3f}")
     await c.call("create_sketch", plane="Front")
     await c.call("draw_circle", x=10, y=10, radius=2)
     v_prima = await vol(c)
-    await need(c, "cut_extrude", "B5 cut_extrude through_all da un lato solo (blocco x -5..5, schizzo su x=0)", through_all=True)
+    await need(c, "extrude_cut", "B5 extrude_cut through_all da un lato solo (blocco x -5..5, schizzo su x=0)", end_condition="through_all")
     got1 = v_prima - await vol(c)
-    record("B5 cut_extrude through_all (una direzione): asportato pi r^2 5 = 62.83", abs(got1 - PI * 4 * 5) < PI * 4 * 5 * TOL, f"asportato {got1:.3f}")
+    record("B5 extrude_cut through_all (una direzione): asportato pi r^2 5 = 62.83", abs(got1 - PI * 4 * 5) < PI * 4 * 5 * TOL, f"asportato {got1:.3f}")
     await c.call("create_sketch", plane="Front")
     await c.call("draw_circle", x=-10, y=-10, radius=2)
     v_prima = await vol(c)
-    await need(c, "cut_extrude", "B5 cut_extrude through_all + both_directions", through_all=True, both_directions=True)
+    await need(c, "extrude_cut", "B5 extrude_cut through_all + both_directions", end_condition="through_all_both")
     got2 = v_prima - await vol(c)
-    record("B5 cut_extrude through_all + both_directions: asportato pi r^2 10 = 125.66",
+    record("B5 extrude_cut through_all + both_directions: asportato pi r^2 10 = 125.66",
            abs(got2 - PI * 4 * 10) < PI * 4 * 10 * TOL, f"asportato {got2:.3f}")
     await discard_all(c)
 
@@ -1093,14 +1093,14 @@ async def b5_tool_base(c):
     await c.call("create_sketch", plane="Front")
     d = await need(c, "set_units", "B5 set_units inch", unit="inch")
     await c.call("draw_rectangle", x1=0, y1=0, x2=1, y2=1)
-    await c.call("extrude_sketch", depth=0.5)
+    await c.call("extrude_boss", depth=0.5)
     await veq(c, "B5 set_units inch: 1x1 in estruso 0.5 in = 25.4x25.4x12.7 mm", 25.4 * 25.4 * 12.7)
     await need(c, "set_units", "B5 set_units mm (ripristino)", unit="mm")
     await discard_all(c)
     await new_part(c)
     await c.call("create_sketch", plane="Front")
     await c.call("draw_rectangle", x1=0, y1=0, x2=10, y2=10)
-    await c.call("extrude_sketch", depth=2)
+    await c.call("extrude_boss", depth=2)
     await veq(c, "B5 set_units mm ripristinato: 10x10x2", 200)
     await discard_all(c)
 
@@ -1108,7 +1108,7 @@ async def b5_tool_base(c):
     await new_part(c)
     await c.call("create_sketch", plane="Front")
     await c.call("draw_rectangle", x1=0, y1=0, x2=10, y2=10)
-    await c.call("extrude_sketch", depth=3)
+    await c.call("extrude_boss", depth=3)
     ok, text, d = await c.call("execute_python", code="print(6*7)\nresult = math.sqrt(144)")
     record("B5 execute_python: stdout e result catturati", ok and d.get("stdout", "").strip() == "42" and d.get("result") == "12.0", str(d)[:100])
     ok, text, d = await c.call("execute_python", code="result = doc.GetType")
@@ -1161,7 +1161,7 @@ async def b6_sicurezza(c):
     # 2. salvato -> pulito; poi modificato -> sporco
     await need(c, "save_document", "B6 salva il documento", filepath=str(A))
     await face_circle(c, [5, 10, 5], (10, 5), 1)
-    await c.call("cut_extrude", through_all=True)
+    await c.call("extrude_cut", end_condition="through_all")
     v_dirty = await vol(c)
     ok, text, d = await c.call("close_document")
     record("B6 documento salvato e poi modificato: rifiuta", (not ok) and d.get("refused") == "unsaved_changes", text.split("\n")[0][:120])
@@ -1190,7 +1190,7 @@ async def b6_sicurezza(c):
     # 5. discard: le modifiche non finiscono su disco
     await need(c, "open_document", "B6 riapri A", filepath=str(A))
     await face_circle(c, [5, 10, 5], (4, 5), 1)
-    await c.call("cut_extrude", through_all=True)
+    await c.call("extrude_cut", end_condition="through_all")
     ok, text, d = await c.call("close_document", discard=True)
     record("B6 discard=true su documento salvato e modificato", ok and d.get("action") == "discarded", text.split("\n")[0][:120])
     await need(c, "open_document", "B6 riapri A dopo discard", filepath=str(A))

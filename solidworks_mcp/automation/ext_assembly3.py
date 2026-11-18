@@ -186,35 +186,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("set_component_transparency", e)
 
-    # ------------------------------------------------------------------ In-Context e Virtuali
-    def insert_new_virtual_part(self, plane_or_face: str = "Front Plane", part_name: str = None) -> Dict:
-        """Crea una nuova parte virtuale vuota direttamente all'interno dell'assieme."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            doc.ClearSelection2(True)
-            plane = self._std_ref_feature(doc, plane_or_face or "Front Plane")
-            if plane is None or not bool(plane.Select2(False, 0)):
-                doc.ClearSelection2(True)
-                return self._result(False, f"insert_new_virtual_part: piano/faccia '{plane_or_face}' non selezionato", SwErrors.swSelectionError)
-            ent = doc.SelectionManager.GetSelectedObject6(1, -1)
-            doc.ClearSelection2(True)
-            out = self._as_byref("dispatch")
-            try:
-                ret_vp = doc.InsertNewVirtualPart(ent, out)
-            except Exception as e:
-                return self._result(False, f"insert_new_virtual_part: creazione non riuscita: {e}", SwErrors.swFeatureError)
-            res = out.value
-            if res is None:
-                return self._result(False, f"insert_new_virtual_part: SolidWorks non ha creato la parte virtuale (ritorno {ret_vp}, selezione {type(ent).__name__})", SwErrors.swFeatureError)
-            created_name = str(res.Name2) if hasattr(res, "Name2") else None
-            return self._result(
-                True, "Nuova parte virtuale creata nell'assieme.",
-                SwErrors.swSuccess, {"virtual_part": created_name, "ignored_params": ["plane_or_face", "part_name"]}
-            )
-        except Exception as e:
-            return self._as_fail("insert_new_virtual_part", e)
 
     def insert_new_virtual_assembly(self, subassembly_name: str = None) -> Dict:
         """Crea un nuovo sotto-assieme virtuale vuoto all'interno dell'assieme."""
@@ -284,69 +255,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("exit_part_in_context", e)
 
-    def save_virtual_component_external(self, component_name: str, filepath: str, overwrite: bool = False) -> Dict:
-        """Salva un componente virtuale su un file .sldprt esterno su disco."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            path = os.path.abspath(filepath)
-            if os.path.exists(path) and not overwrite:
-                return self._result(False, f"Rifiutato: il file esiste gia' ({path}) e overwrite=False", SwErrors.swFileAlreadyExists)
-            comp, _ = self._as_comp(doc, component_name, False)
-            if comp is None:
-                return self._result(False, f"save_virtual_component_external: '{component_name}' non trovato", SwErrors.swSelectionError)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            pre_mtime = os.path.getmtime(path) if os.path.isfile(path) else None
-            doc.ClearSelection2(True)
-            if not self._as_select_comps(doc, [comp]):
-                doc.ClearSelection2(True)
-                return self._result(False, f"save_virtual_component_external: selezione di '{component_name}' non riuscita", SwErrors.swSelectionError)
-            try:
-                saved = comp.SaveVirtualComponent(path)
-            except Exception as e:
-                doc.ClearSelection2(True)
-                return self._result(False, f"save_virtual_component_external: salvataggio non riuscito: {e}", SwErrors.swExportError)
-            doc.ClearSelection2(True)
-            if not saved:
-                return self._result(False, f"save_virtual_component_external: SolidWorks non ha salvato '{component_name}'", SwErrors.swExportError)
-            written = os.path.isfile(path) and os.path.getsize(path) > 0 and (pre_mtime is None or os.path.getmtime(path) != pre_mtime)
-            if not written:
-                return self._result(False, f"save_virtual_component_external: file non scritto ({path})", SwErrors.swExportError)
-            return self._result(
-                True, f"Componente virtuale '{component_name}' salvato esternamente in {path}.",
-                SwErrors.swSuccess, {"component": str(comp.Name2), "filepath": path}
-            )
-        except Exception as e:
-            return self._as_fail("save_virtual_component_external", e)
-
-    # ------------------------------------------------------------------ Accoppiamenti Speciali & Standard
-    def lock_mate_rotation(self, mate_name: str, locked: bool = True) -> Dict:
-        """Blocca o sblocca la rotazione su un accoppiamento concentrico."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            feat = self._as_mate_by_name(doc, mate_name)
-            if feat is None:
-                return self._result(False, f"lock_mate_rotation: accoppiamento '{mate_name}' non trovato", SwErrors.swSelectionError)
-            mate = self._com(feat, "GetSpecificFeature2")
-            if mate is None or not hasattr(mate, "LockRotation"):
-                return self._result(False, f"lock_mate_rotation: '{mate_name}' non supporta il blocco rotazione", SwErrors.swFeatureError)
-            try:
-                mate.LockRotation = bool(locked)
-                feat.ModifyDefinition(mate, doc, None)
-            except Exception as e:
-                return self._result(False, f"lock_mate_rotation: modifica non riuscita: {e}", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            if bool(self._com(feat, "GetSpecificFeature2").LockRotation) != bool(locked):
-                return self._result(False, f"lock_mate_rotation: blocco rotazione di '{mate_name}' non applicato", SwErrors.swFeatureError)
-            return self._result(
-                True, f"Rotazione per accoppiamento '{mate_name}' impostata a bloccata={locked}.",
-                SwErrors.swSuccess, {"mate_name": mate_name, "locked": bool(locked)}
-            )
-        except Exception as e:
-            return self._as_fail("lock_mate_rotation", e)
 
     def add_concentric_mate_with_tolerance(self, entity1, entity2, tolerance: float = 0.0, align: str = "aligned", unit: str = None) -> Dict:
         """Aggiunge un accoppiamento concentrico con compensazione delle tolleranze di allineamento."""
@@ -363,36 +271,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("add_concentric_mate_with_tolerance", e)
 
-    def flip_mate_alignment(self, mate_name: str) -> Dict:
-        """Inverte l'allineamento (allineato / anti-allineato) di un accoppiamento esistente."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            feat = self._as_mate_by_name(doc, mate_name)
-            if feat is None:
-                return self._result(False, f"flip_mate_alignment: accoppiamento '{mate_name}' non trovato", SwErrors.swSelectionError)
-            mate = self._com(feat, "GetSpecificFeature2")
-            if mate is None or not hasattr(mate, "Flipped"):
-                return self._result(False, f"flip_mate_alignment: '{mate_name}' non ha allineamento invertibile", SwErrors.swFeatureError)
-            if not bool(mate.CanBeFlipped):
-                return self._result(False, f"flip_mate_alignment: '{mate_name}' non si puo' invertire", SwErrors.swFeatureError)
-            cur = bool(mate.Flipped)
-            try:
-                mate.Flipped = not cur
-                feat.ModifyDefinition(mate, doc, None)
-            except Exception as e:
-                return self._result(False, f"flip_mate_alignment: modifica non riuscita: {e}", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            if bool(self._com(feat, "GetSpecificFeature2").Flipped) == cur:
-                return self._result(False, f"flip_mate_alignment: allineamento di '{mate_name}' non invertito", SwErrors.swFeatureError)
-            new_align = "anti_aligned" if not cur else "aligned"
-            return self._result(
-                True, f"Allineamento accoppiamento '{mate_name}' invertito ({new_align}).",
-                SwErrors.swSuccess, {"mate_name": mate_name, "alignment": new_align}
-            )
-        except Exception as e:
-            return self._as_fail("flip_mate_alignment", e)
 
     def add_gear_mate(self, entity1, entity2, ratio_num: float = 1.0, ratio_den: float = 1.0, reverse: bool = False) -> Dict:
         """Aggiunge un accoppiamento meccanico ad ingranaggi tra due assi o facce con rapporto specificato."""
@@ -407,100 +285,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("add_gear_mate", e)
 
-    def add_rack_pinion_mate(self, rack_entity, pinion_entity, pitch_diameter: float = 50.0, reverse: bool = False, unit: str = None) -> Dict:
-        """Aggiunge un accoppiamento meccanico a pignone e cremagliera (conversione rotazione/traslazione)."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            doc.ClearSelection2(True)
-            i1, e1 = self._as_select_entity(doc, rack_entity, unit, mark=1, append=True)
-            if e1:
-                return self._result(False, f"add_rack_pinion_mate: cremagliera non selezionata: {e1}", SwErrors.swSelectionError)
-            i2, e2 = self._as_select_entity(doc, pinion_entity, unit, mark=1, append=True)
-            if e2:
-                return self._result(False, f"add_rack_pinion_mate: pignone non selezionato: {e2}", SwErrors.swSelectionError)
-            pd_m = self._mmu(pitch_diameter, unit)
-            try:
-                err_var = self._as_err_var()
-                mate_feat = doc.AddMate5(13, 0, bool(reverse), pd_m, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception as e:
-                return self._result(False, f"add_rack_pinion_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
-            doc.ClearSelection2(True)
-            motivo = self._as_addmate_err(mate_feat, err_var)
-            if motivo:
-                return self._result(False, f"add_rack_pinion_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            return self._result(
-                True, f"Accoppiamento pignone-cremagliera aggiunto (diametro primitivo: {pitch_diameter} mm).",
-                SwErrors.swSuccess, {"rack": i1 or rack_entity, "pinion": i2 or pinion_entity, "pitch_diameter": pitch_diameter, "reverse": reverse}
-            )
-        except Exception as e:
-            return self._as_fail("add_rack_pinion_mate", e)
-
-    def add_cam_mate(self, cam_faces: list, follower_face) -> Dict:
-        """Aggiunge un accoppiamento meccanico camma-punteria con superfici tangenti continue."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            if not cam_faces:
-                return self._result(False, "add_cam_mate: serve almeno una faccia di camma", SwErrors.swInvalidInput)
-            doc.ClearSelection2(True)
-            for cf in cam_faces:
-                _, e_cf = self._as_select_entity(doc, cf, None, mark=1, append=True)
-                if e_cf:
-                    return self._result(False, f"add_cam_mate: faccia di camma non selezionata: {e_cf}", SwErrors.swSelectionError)
-            i_f, e_f = self._as_select_entity(doc, follower_face, None, mark=1, append=True)
-            if e_f:
-                return self._result(False, f"add_cam_mate: punteria non selezionata: {e_f}", SwErrors.swSelectionError)
-            try:
-                err_var = self._as_err_var()
-                mate_feat = doc.AddMate5(9, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception as e:
-                return self._result(False, f"add_cam_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
-            doc.ClearSelection2(True)
-            motivo = self._as_addmate_err(mate_feat, err_var)
-            if motivo:
-                return self._result(False, f"add_cam_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            return self._result(
-                True, f"Accoppiamento camma-punteria creato su {len(cam_faces or [])} facce di camma.",
-                SwErrors.swSuccess, {"cam_faces_count": len(cam_faces or []), "follower": i_f or follower_face}
-            )
-        except Exception as e:
-            return self._as_fail("add_cam_mate", e)
-
-    def add_slot_mate(self, slot_entity, pin_entity, constraint_type: str = "center", distance: float = 0.0, percent: float = 50.0, unit: str = None) -> Dict:
-        """Aggiunge un accoppiamento meccanico asola-perno (libero, al centro, distanza, o percentuale)."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            doc.ClearSelection2(True)
-            i1, e1 = self._as_select_entity(doc, slot_entity, unit, mark=1, append=True)
-            if e1:
-                return self._result(False, f"add_slot_mate: asola non selezionata: {e1}", SwErrors.swSelectionError)
-            i2, e2 = self._as_select_entity(doc, pin_entity, unit, mark=1, append=True)
-            if e2:
-                return self._result(False, f"add_slot_mate: perno non selezionato: {e2}", SwErrors.swSelectionError)
-            try:
-                err_var = self._as_err_var()
-                mate_feat = doc.AddMate5(21, 0, False, 0, 0, 0, 1.0, 1.0, 0, 0, 0, False, False, 0, err_var)
-            except Exception as e:
-                return self._result(False, f"add_slot_mate: creazione non riuscita: {e}", SwErrors.swFeatureError)
-            doc.ClearSelection2(True)
-            motivo = self._as_addmate_err(mate_feat, err_var)
-            if motivo:
-                return self._result(False, f"add_slot_mate: accoppiamento non creato: {motivo}", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            return self._result(
-                True, "Accoppiamento asola creato.",
-                SwErrors.swSuccess, {"slot": i1 or slot_entity, "pin": i2 or pin_entity,
-                                     "ignored_params": ["constraint_type", "distance", "percent"]}
-            )
-        except Exception as e:
-            return self._as_fail("add_slot_mate", e)
 
     def add_hinge_mate(self, concentric_entity1, concentric_entity2, coincident_face1, coincident_face2, min_angle: float = None, max_angle: float = None) -> Dict:
         """Aggiunge un accoppiamento meccanico a cerniera completo di asse e piani con limiti angolari opzionali."""
@@ -718,31 +502,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("set_subassembly_flexible", e)
 
-    def promote_subassembly_component(self, component_name: str) -> Dict:
-        """Sposta un componente fuori da un sottoassieme promuovendolo al livello assieme superiore."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            return self._result(
-                True, f"Componente '{component_name}' promosso all'assieme di livello superiore.",
-                SwErrors.swSuccess, {"component": component_name}
-            )
-        except Exception as e:
-            return self._as_fail("promote_subassembly_component", e)
-
-    def demote_subassembly_component(self, component_name: str, target_subassembly: str) -> Dict:
-        """Sposta un componente di primo livello all'interno di un sotto-assieme esistente."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            return self._result(
-                True, f"Componente '{component_name}' spostato all'interno del sotto-assieme '{target_subassembly}'.",
-                SwErrors.swSuccess, {"component": component_name, "target_subassembly": target_subassembly}
-            )
-        except Exception as e:
-            return self._as_fail("demote_subassembly_component", e)
 
     # ------------------------------------------------------------------ Ispezione & Manutenzione
     def isolate_components(self, components: list, transparent_others: bool = False) -> Dict:
@@ -907,28 +666,6 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("create_speedpak", e)
 
-    def set_envelope_component(self, component_name: str, is_envelope: bool = True) -> Dict:
-        """Contrassegna un componente come Busta (escluso da distinta base e massa globale)."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            comp, _ = self._as_comp(doc, component_name, False)
-            if comp is None:
-                return self._result(False, f"set_envelope_component: '{component_name}' non trovato", SwErrors.swSelectionError)
-            try:
-                comp.Envelope = bool(is_envelope)
-            except Exception as e:
-                return self._result(False, f"set_envelope_component: proprieta' envelope non impostabile: {e}", SwErrors.swFeatureError)
-            if bool(comp.Envelope) != bool(is_envelope):
-                return self._result(False, f"set_envelope_component: stato Busta di '{component_name}' non applicato", SwErrors.swFeatureError)
-            self._as_rebuild(doc)
-            return self._result(
-                True, f"Stato Busta per componente '{component_name}' impostato a {is_envelope}.",
-                SwErrors.swSuccess, {"component": str(comp.Name2), "is_envelope": bool(is_envelope)}
-            )
-        except Exception as e:
-            return self._as_fail("set_envelope_component", e)
 
     def insert_cavity_feature(self, tooling_components: list, scale_percentage: float = 0.0) -> Dict:
         """Crea una feature di cavita'/impronta nella parte attiva usando componenti stampo come utensili."""
@@ -988,17 +725,3 @@ class Assembly3Operations:
         except Exception as e:
             return self._as_fail("insert_join_feature", e)
 
-    def create_smart_component(self, component_name: str, associated_features: list = None) -> Dict:
-        """Converte un componente in Smart Component associando feature e componenti di fissaggio automatici."""
-        try:
-            doc, err = self._asm()
-            if err:
-                return err
-            comp, _ = self._as_comp(doc, component_name, False)
-            cname = str(comp.Name2) if comp is not None else component_name
-            return self._result(
-                True, f"Componente Intelligente (Smart Component) configurato per '{component_name}'.",
-                SwErrors.swSuccess, {"component": cname, "features": associated_features or []}
-            )
-        except Exception as e:
-            return self._as_fail("create_smart_component", e)

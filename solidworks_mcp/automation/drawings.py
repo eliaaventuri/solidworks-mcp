@@ -277,16 +277,6 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 return p
         return getattr(self, "_drawing_model_path", "") or ""
 
-    def _model_box(self, mdoc) -> Tuple[float, float, float]:
-        """Bounding box size (dx, dy, dz) in m; falls back to 0.1."""
-        for call in (lambda: mdoc.GetPartBox(True), lambda: mdoc.GetBox(0)):
-            try:
-                b = call()
-                if b and len(b) >= 6:
-                    return abs(b[3] - b[0]), abs(b[4] - b[1]), abs(b[5] - b[2])
-            except Exception:
-                continue
-        return 0.1, 0.1, 0.1
 
     def _sheet_format_path(self, paper: str, orientation: str, style: str = "iso") -> str:
         if style in ("none", "", None):

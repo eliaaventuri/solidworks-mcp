@@ -63,7 +63,7 @@ class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOper
         sw.create_new_part()
         sw.create_sketch("Front")
         sw.draw_circle(0, 0, 25)
-        sw.extrude_sketch(10)
+        sw.extrude_boss(depth=10)
         sw.save_document("C:/Parts/MyPart.sldprt")
     """
     pass

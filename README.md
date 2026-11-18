@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-8.4.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-473-green)
+![tools](https://img.shields.io/badge/MCP%20tools-448-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -25,9 +25,9 @@
 
 An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **473 tools** (474 with `execute_python` enabled). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
-The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 400 of the 473 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
+The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 390 of the 448 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
 
-Another 84 tools are registered in the code but **hidden**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one has its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition).
+84 more tools were tried and **removed**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one keeps its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition), and calling it returns that reason. 25 duplicate tools (two names for the same operation, such as `extrude_sketch` and `extrude_boss`) were also removed: the old name returns an error that names the tool to use.
 
 ## Features
 
@@ -148,7 +148,7 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 473 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 448 tools |
 | `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
 
 ## Safety
@@ -188,6 +188,6 @@ The live tests build parts **only through the MCP tools** and compare the measur
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 473 working tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 448 working tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.

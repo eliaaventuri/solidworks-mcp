@@ -34,15 +34,6 @@ TOOLS = {
         },
         ["x", "y"],
     ),
-    "delete_spline_point": (
-        "delete_spline_point",
-        "Delete an existing control or through-point from a sketch spline by its point index.",
-        {
-            "point_index": (N, "1-based index of the spline point to remove (index, default 1)"),
-            "spline_entity": (S, "Optional spline segment ID; if omitted, targets the selected or most recent spline"),
-        },
-        [],
-    ),
     "edit_spline_handle": (
         "edit_spline_handle",
         "Adjust tangent magnitude, radial/polar angle, or curvature value of a specific spline handle.",
@@ -128,25 +119,6 @@ TOOLS = {
         },
         ["angle_deg"],
     ),
-    "merge_sketch_points": (
-        "merge_sketch_points",
-        "Merge sketch points that are coincident within a specified geometric distance tolerance.",
-        {
-            "distance": (N, "Maximum merge distance tolerance in `unit` (default 0.01 mm)"),
-            "unit": _UNIT,
-        },
-        [],
-    ),
-    "save_sketch_block_to_file": (
-        "save_sketch_block_to_file",
-        "Export and save an existing 2D sketch block definition to an external .sldblk file for reuse.",
-        {
-            "block_name": (S, "Name of the sketch block definition to export"),
-            "filepath": (S, "Destination file path (.sldblk)"),
-            "overwrite": (B, "true = overwrite destination file if it already exists (default false)"),
-        },
-        ["block_name", "filepath"],
-    ),
     "set_sketch_performance_mode": (
         "set_sketch_performance_mode",
         "Toggle high-speed batch sketching mode (AddToDB, AutoSolve, AutoInference) to generate complex sketches rapidly. "
@@ -164,9 +136,7 @@ TOOLS = {
 
 DESTRUCTIVE = {
     "delete_all_sketch_relations": "Deletes all geometric relations and dimensions from the active sketch",
-    "delete_spline_point": "Removes a through-point from a sketch spline",
 }
 
 OVERWRITE = {
-    "save_sketch_block_to_file": "filepath",
 }

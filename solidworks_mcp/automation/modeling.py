@@ -31,7 +31,6 @@ from typing import Optional, Dict, List, Any
 from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 from .modeling_base import ModelingBase, r8_array, null_variant
 from .sketch_constraints import SketchConstraintOperations
-from ..utils.sw_lang import lang_folders
 
 logger = logging.getLogger(__name__)
 
@@ -209,49 +208,6 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             logger.error(f"get_mass_properties: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    def _material_db(self):
-        """File .sldmat del database materiali di SolidWorks (lingua dell'interfaccia, altrimenti inglese)."""
-        import os
-        try:
-            base = self._com(self._sw_app, "GetExecutablePath")
-            if base.lower().endswith(".exe"):
-                base = os.path.dirname(base)
-        except Exception:
-            base = r"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS"
-        for sub in [os.path.join("lang", lg, "sldmaterials") for lg in lang_folders(self._ui_language())] + ["sldmaterials"]:
-            p = os.path.join(base, sub, "solidworks materials.sldmat")
-            if os.path.exists(p):
-                return p
-        return None
-
-    def set_material(self, material: str = "AISI 1020") -> Dict:
-        """Assegna un materiale del database SolidWorks (nome come nell'interfaccia, anche parziale):
-        serve a ottenere la massa corretta in get_mass_properties."""
-        try:
-            import re
-            doc, err = self._part()
-            if err:
-                return err
-            db = self._material_db()
-            if not db:
-                return self._result(False, "Database materiali non trovato", SwErrors.swUnknownError)
-            txt = open(db, "rb").read().decode("utf-16", errors="ignore")
-            names = re.findall(r'<material name="([^"]+)"', txt)
-            low = material.lower()
-            match = next((n for n in names if n.lower() == low), None) or                 next((n for n in names if low in n.lower()), None)
-            if not match:
-                return self._result(False, f"Materiale '{material}' non trovato ({len(names)} nel database).",
-                                    SwErrors.swInvalidInput)
-            cfg = self._com(self._com(doc.ConfigurationManager, "ActiveConfiguration"), "Name")
-            doc.SetMaterialPropertyName2(cfg, db, match)
-            doc.EditRebuild3
-            mp = self._mass_props(doc)
-            dens = float(self._com(mp, "Density")) if mp is not None else 0.0
-            return self._result(True, f"Materiale {match} (densita' {dens:.0f} kg/m3)", SwErrors.swSuccess,
-                                {"material": match, "density_kg_m3": dens, "database": db})
-        except Exception as e:
-            logger.error(f"set_material: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     # ------------------------------------------------------------------ estrusioni avanzate
     START_CONDITIONS = {"sketch_plane": 0, "surface": 1, "face": 1, "vertex": 2, "offset": 3}

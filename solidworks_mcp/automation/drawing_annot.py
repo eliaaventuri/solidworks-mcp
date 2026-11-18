@@ -133,8 +133,6 @@ class DrawingAnnotMixin:
             return self._fail("add_hole_table", e)
 
 
-
-
     def _an_retag(self, doc) -> int:
         """Riposiziona le etichette dei fori gia' inserite (dopo che quote/viste nuove hanno occupato altro spazio)."""
         st = getattr(self, "_tag_state", {}).get(self._get_doc_title(doc))
@@ -503,9 +501,6 @@ class DrawingAnnotMixin:
         except Exception as e:
             return self._fail("add_general_roughness", e)
 
-    @staticmethod
-    def _rect_hit(a, b) -> bool:
-        return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
     def _an_obstacles(self, doc) -> List[Tuple[float, float, float, float]]:
         """Viste, cartiglio, zone riservate e riquadri di tutte le annotazioni gia' presenti (_occupied le include)."""

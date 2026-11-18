@@ -230,8 +230,6 @@ class SketchConstraintOperations:
         ok = bool(obj.Select4(append, self._sd(doc, mark)))
         return ok, f"selezione di '{desc}' rifiutata"
 
-    def _ent_desc(self, sk, ref, unit=None):
-        return self._resolve_entity(None, sk, ref, unit)
 
     def _entity_info(self, s) -> Dict:
         t = int(s.GetType)
@@ -1008,6 +1006,10 @@ class SketchConstraintOperations:
                                       self._mmu(x2, unit), self._mmu(y2, unit), 0)
             if seg is None:
                 return self._result(False, "CreateCenterLine fallito", SwErrors.swSketchError)
+            # (revisione 2026-11-12) riletta: una linea normale non fa da asse per rivoluzioni e simmetrie
+            if not bool(self._com(seg, "ConstructionGeometry")):
+                return self._result(False, "SolidWorks ha creato una linea che non e' di costruzione: non e' un asse di "
+                                           "mezzeria", SwErrors.swSketchError)
             return self._ent_result(seg, "Asse di mezzeria")
         except Exception as e:
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)

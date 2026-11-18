@@ -1,6 +1,6 @@
 """Lotto SUPERFICI 2: schemi dei tool -> automation/ext_surfaces2.py (Surfaces2Operations)."""
 
-from ._common import N, B, A, UNIT, PT3
+from ._common import N, B, UNIT, PT3
 
 TOOLS = {
     "thicken_cut": (
@@ -13,25 +13,6 @@ TOOLS = {
             "unit": UNIT,
         },
         ["face_point", "thickness"],
-    ),
-    "curve_through_reference_points": (
-        "curve_through_reference_points",
-        "Create an associative 3D curve passing through existing model vertices and sketch points.",
-        {
-            "points": (A, "List of 3D reference point coordinates [[x,y,z],...] (`unit`)"),
-            "closed": (B, "Whether the 3D curve should form a closed loop (default false)"),
-            "unit": UNIT,
-        },
-        ["points"],
-    ),
-    "reverse_surface_normal": (
-        "reverse_surface_normal",
-        "Reverse the surface normal vector orientation of a surface body.",
-        {
-            "face_point": PT3,
-            "unit": UNIT,
-        },
-        ["face_point"],
     ),
     "find_open_surface_edges": (
         "find_open_surface_edges",

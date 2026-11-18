@@ -47,32 +47,6 @@ class SwDocumentTypes(IntEnum):
 
 
 # ============================================================================
-# Plane Names
-# ============================================================================
-
-class SwPlanes:
-    """Standard SolidWorks plane names"""
-    FRONT = "Front Plane"
-    TOP = "Top Plane"
-    RIGHT = "Right Plane"
-    
-    @classmethod
-    def get(cls, name: str) -> str:
-        """Get plane name from short name"""
-        plane_map = {
-            "front": cls.FRONT,
-            "top": cls.TOP,
-            "right": cls.RIGHT,
-        }
-        return plane_map.get(name.lower(), cls.FRONT)
-    
-    @classmethod
-    def all(cls) -> list:
-        """Get all plane names"""
-        return [cls.FRONT, cls.TOP, cls.RIGHT]
-
-
-# ============================================================================
 # Feature End Conditions
 # ============================================================================
 
@@ -103,39 +77,6 @@ class SwMateTypes(IntEnum):
     swMateANGLE = 6
     swMateLOCK = 16
     swMateWIDTH = 18
-
-
-# ============================================================================
-# View Types
-# ============================================================================
-
-class SwViews:
-    """Standard view orientations"""
-    FRONT = ("*Front", 1)
-    BACK = ("*Back", 2)
-    LEFT = ("*Left", 3)
-    RIGHT = ("*Right", 4)
-    TOP = ("*Top", 5)
-    BOTTOM = ("*Bottom", 6)
-    ISOMETRIC = ("*Isometric", 7)
-    TRIMETRIC = ("*Trimetric", 8)
-    DIMETRIC = ("*Dimetric", 9)
-    
-    @classmethod
-    def get(cls, name: str):
-        """Get view tuple from name"""
-        view_map = {
-            "front": cls.FRONT,
-            "back": cls.BACK,
-            "left": cls.LEFT,
-            "right": cls.RIGHT,
-            "top": cls.TOP,
-            "bottom": cls.BOTTOM,
-            "isometric": cls.ISOMETRIC,
-            "trimetric": cls.TRIMETRIC,
-            "dimetric": cls.DIMETRIC,
-        }
-        return view_map.get(name.lower(), cls.ISOMETRIC)
 
 
 # ============================================================================
@@ -188,24 +129,6 @@ class SwSelectType:
     BODYFEATURE = "BODYFEATURE"
     COMPONENT = "COMPONENT"
     EXTSKETCHSEGMENT = "EXTSKETCHSEGMENT"
-
-
-# ============================================================================
-# Default Values
-# ============================================================================
-
-class Defaults:
-    """Default values for operations"""
-    EXTRUDE_DEPTH_MM = 10.0
-    FILLET_RADIUS_MM = 2.0
-    CHAMFER_DISTANCE_MM = 2.0
-    CIRCLE_RADIUS_MM = 25.0
-    RECTANGLE_WIDTH_MM = 100.0
-    RECTANGLE_HEIGHT_MM = 50.0
-    
-    CONNECTION_TIMEOUT = 120  # seconds
-    RETRY_INTERVAL = 5  # seconds
-    MAX_RETRIES = 3
 
 
 # Cartelle di sistema dell'albero (GetTypeName2, uguali in ogni lingua di SolidWorks): Commenti, Preferiti, Cronologia,

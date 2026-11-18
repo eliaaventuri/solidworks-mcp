@@ -225,11 +225,6 @@ class AssemblyExplodeMixin:
             made.append(row)
         return made, None
 
-    def _ex_step_specs(self, doc, st: Dict, unit):
-        comps, e = self._as_comps(doc, st.get("components"), True)
-        if e:
-            return None, e
-        return comps, None
 
     def _ex_new_view(self, doc):
         names0 = set(self._ex_names(doc))

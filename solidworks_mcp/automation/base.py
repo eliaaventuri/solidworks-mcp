@@ -445,17 +445,6 @@ class SolidWorksAutomation:
             return self._result(False, f"Connection error: {e}",
                               SwErrors.swConnectionError)
     
-    def disconnect(self) -> Dict:
-        """
-        Disconnect from SolidWorks (does not close SolidWorks)
-        
-        Returns:
-            Result dictionary
-        """
-        self._sw_app = None
-        self._connected = False
-        logger.info("Disconnected from SolidWorks")
-        return self._result(True, "Disconnected from SolidWorks")
     
     # ========================================================================
     # Document Methods
@@ -524,10 +513,6 @@ class SolidWorksAutomation:
             logger.debug(f"GetErrorCode2 non letto: {e}")
             return None, False
 
-    def _select_std_plane(self, doc, plane: str) -> bool:
-        """Select Front/Top/Right plane by position in the tree (works in any UI language)"""
-        feat = self._std_ref_feature(doc, plane)
-        return bool(feat is not None and feat.Select2(False, 0))
 
     def _std_ref_feature(self, owner, name: str):
         """Piano standard (front/top/right, 'Piano frontale', 'Front Plane'...) o origine di un documento o di un componente,
