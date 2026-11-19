@@ -39,6 +39,7 @@ from .simulation_tools import SIMULATION_TOOLS, SIMULATION_DISPATCH
 from .safety import decorate_tools, check_call
 from .tools_ext import EXT_GROUP
 from .utils import com_cache
+from .utils import messages
 
 com_cache.install()     # ottimizzazione 2026-11-18: descrizioni COM tenute per interfaccia (SW_MCP_COM_CACHE=0 per disattivare)
 from .resources import RESOURCES, read_resource_content
@@ -460,13 +461,18 @@ async def list_tools() -> list[Tool]:
 def format_result(r: Dict) -> str:
     """Format result dictionary as readable text"""
     status = "SUCCESS" if r["success"] else "ERROR"
-    lines = [f"[{status}] {r['message']}"]
-    
+    lines = [f"[{status}] {messages.tr(r['message'])}"]
+
     if not r["success"]:
         lines.append(f"Error Code: {r['error_code']} ({r['error_name']})")
-    
+
     if r.get("data"):
-        lines.append("Details: " + json.dumps(r["data"], indent=2))
+        data = r["data"]
+        steps = data.get("results") if isinstance(data, dict) else None
+        if isinstance(steps, list) and messages.lang() == "en":     # passi di execute_tool_sequence
+            data = dict(data, results=[dict(s, message=messages.tr(s.get("message"))) if isinstance(s, dict) else s
+                                       for s in steps])
+        lines.append("Details: " + json.dumps(data, indent=2))
     
     return "\n".join(lines)
 

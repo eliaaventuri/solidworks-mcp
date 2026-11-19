@@ -355,6 +355,12 @@ class DrawingAuxMixin:
                 msg += " - ATTENZIONE: nessuno spazio libero sul foglio, la vista si sovrappone"
             elif not on_line:
                 msg += " (non sulla perpendicolare allo spigolo: li' non c'era posto)"
+            try:                       # stessa scala della madre, riletta (prima un errore qui era ingoiato)
+                info["same_scale_as_parent"] = abs(float(av.ScaleDecimal) - float(parent.ScaleDecimal)) < 1e-6
+            except Exception:
+                info["same_scale_as_parent"] = False
+            if not info["same_scale_as_parent"]:
+                msg += " - ATTENZIONE: scala diversa da quella della vista madre"
             return self._result(True, msg, SwErrors.swSuccess, info)
         except Exception as e:
             return self._fail("add_auxiliary_view", e)

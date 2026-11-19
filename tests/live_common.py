@@ -16,7 +16,8 @@ os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECT
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-EXPECTED_TOOLS = 455   # 2026-11-19: tolto gaussian_curvature_display, aggiunti superfici 3 (4), tavole 3 (2), undo (revisione sez. 5)
+EXPECTED_TOOLS = 446   # 2026-11-19 sera: -9 tool (anche copy_with_mates, pack_and_go) senza API (close_sketch_to_model, boundary_boss/cut, defeature_model, solid_sweep_cut, sm_corner_trim, sm_swept_flange)
+os.environ.setdefault("SW_MCP_LANG", "it")   # i test controllano frasi italiane: messaggi non tradotti (utils/messages.py)
 OUT = ROOT / "test_output"
 OUT.mkdir(exist_ok=True)
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -76,7 +77,28 @@ def sw_pids():
         parts = [p.strip('"') for p in line.split('","')]
         if len(parts) > 1 and parts[0].strip('"').lower() == "sldworks.exe":
             pids.add(int(parts[1]))
+    root = os.environ.get("SW_TEST_PARALLEL_ROOT")
+    if root:                                     # regressione con --jobs: le istanze degli ALTRI test non sono orfani
+        pids = {p for p in pids if not _sibling_instance(p, int(root))}
     return pids
+
+
+def _sibling_instance(pid, root):
+    """(run_all.py --jobs=N) True se il SolidWorks `pid` e' l'istanza dedicata di un altro test che sta girando: i suoi
+    antenati vivi (server, test) arrivano a run_all senza passare da questo processo. Un'istanza col server morto
+    (orfana vera) o lanciata da questo test resta nell'elenco; quella di Elia non ha run_all fra gli antenati."""
+    try:
+        import psutil
+        p = psutil.Process(pid).parent()
+        for _ in range(10):
+            if p is None or p.pid == os.getpid():
+                return False
+            if p.pid == root:
+                return True
+            p = p.parent()
+    except Exception:
+        pass
+    return False
 
 
 class Client:

@@ -9,6 +9,18 @@ _WHY_NO_API_PLASTIC = "nessuna API nella type library di SolidWorks 2026: niente
 _WHY_FIXED = "il metodo restituisce valori fissi, non misurati da SolidWorks"
 
 NOT_IMPLEMENTED = {
+    # revisione 2026-11-19 (prove dal vivo dei tool senza test)
+    "copy_with_mates": "chiamava CopyWithMates senza componenti ne' riferimenti (tutti None) e ignorava mate_references: non poteva copiare nulla (dal vivo il 2026-11-19 la selezione per nome falliva gia'); CopyWithMates2 con i riferimenti non e' implementato",
+    "pack_and_go": "IModelDocExtension.GetPackAndGo risponde 'Parametro non facoltativo' (dispid 207, 0 parametri nella type library) su assieme e pezzo salvati: misurato il 2026-11-19 con SolidWorks 2026 SP4.1 Student",
+    # revisione 2026-11-19 (prove dal vivo dei tool senza test)
+    "sm_jog": "IModelDoc2.InsertSheetMetalJog non crea nulla: 18 combinazioni di quota, piega e lunghezza fissa, con e senza faccia fissa, schizzo con la linea selezionato (misurato il 2026-11-19); swFeatureNameID_e non ha un codice per lo scalino",
+    "close_sketch_to_model": "nessuna API: ISketchManager non ha CloseSketchToModel (type library 2026, provato dal vivo il 2026-11-19: AttributeError); il comando esiste solo nell'interfaccia",
+    "boundary_boss": "nessuna API per creare la feature di contorno: IFeatureManager non ha InsertBoundaryBoss* (GetIDsOfNames dal vivo il 2026-11-19) e swFeatureNameID_e non ha un codice per CreateDefinition; il tool falliva sempre",
+    "boundary_cut": "nessuna API per il taglio di contorno: IFeatureManager non ha InsertBoundaryCut* (GetIDsOfNames dal vivo il 2026-11-19); il tool falliva sempre",
+    "defeature_model": "IModelDocExtension.SaveDeFeaturedFile BLOCCA SolidWorks (chiamata appesa oltre 150 s, misurato il 2026-11-19: aspetta la finestra Semplifica); pericoloso per il server",
+    "solid_sweep_cut": "InsertCutSwept5 con corpo utensile (mark 1) e percorso (mark 4) restituisce None e lascia il modello alterato (volume 48282,7 -> 282,7 mm3, misurato il 2026-11-19); l'opzione corpo utensile non e' esposta dall'API",
+    "sm_corner_trim": "era un doppione di sm_break_corner (alias); per spezzare gli angoli della lamiera usare sm_break_corner",
+    "sm_swept_flange": "IFeatureManager non ha InsertSheetMetalSweptFlange (GetIDsOfNames dal vivo il 2026-11-19): il tool falliva sempre; la via ISweptFlangeFeatureData (CreateDefinition 117) non e' implementata",
     # disegni 2
     "add_predefined_view": "InsertModelInPredefinedView risponde True ma non crea viste: i formati di SolidWorks e del server non hanno viste predefinite (provato dal vivo 2026-10-24); usare add_model_view",
     "add_half_section_view": "nessuna API per la semisezione delle tavole (solo l enum della freccia); un percorso a L come sezione a gradini mostra solo la meta sezionata, senza la meta in vista (provato dal vivo 2026-10-24)",

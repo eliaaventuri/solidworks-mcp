@@ -35,7 +35,9 @@ ORDER = ["offline", "modeling", "modeling_extra", "assembly", "assembly_extra", 
          # correzioni della revisione 2026-11-12 (falsi successi [V] e sicurezza)
          "review_v",
          # restanti gravi della sezione 1 (punto 4, 2026-11-18)
-         "revisione"]
+         "revisione",
+         # i tool che nessun test usava (2026-11-19)
+         "copertura"]
 TEST_TIMEOUT_S = 2400
 PASS_RE = re.compile(r"(\d+)/(\d+) PASS")
 
@@ -152,6 +154,27 @@ def main(argv):
         print("Worker di sviluppo fermato (scripts_tmp/cmd/QUIT).")
     baseline = sw_pids()
     results, orphans_by_test = [], {}
+    jobs = next((int(a.split("=", 1)[1]) for a in argv if a.startswith("--jobs=")), 1)
+    if jobs > 1:
+        # piu' test insieme, ognuno con la SUA istanza dedicata (cleanup chiude solo il PID del test): i processi rimasti
+        # si contano una volta sola alla fine, quando nessun test gira piu'
+        from concurrent.futures import ThreadPoolExecutor
+        print(f"== {len(names)} test, {jobs} alla volta", flush=True)
+        os.environ["SW_TEST_PARALLEL_ROOT"] = str(os.getpid())   # i test non contano come orfani le istanze degli altri
+
+        def one(n):
+            print(f"== {test_file(n).name} ...", flush=True)
+            r = run_one(n, OUT)
+            s_ = f"{r['summary'][0]}/{r['summary'][1]}" if r["summary"] else "nessun riepilogo"
+            print(f"   {n}: {r['status']}  {s_}  {r['seconds']} s", flush=True)
+            return r
+        with ThreadPoolExecutor(max_workers=jobs) as ex:
+            results = list(ex.map(one, names))
+        time.sleep(5)
+        left = sorted(sw_pids() - baseline)
+        if left:
+            orphans_by_test["(fine)"] = left
+        names = []
     for n in names:
         print(f"== {test_file(n).name} ...", flush=True)
         r = run_one(n, OUT)

@@ -29,15 +29,19 @@ TOOLS = {
     "sm_edge_flange": ("sm_edge_flange",
         "Edge flange on a straight sheet-metal edge picked by coordinates. The flange profile is a rectangle on the edge, "
         "`length` high (measured from the picked edge along the flange). Reports volume and bounding box before/after. "
+        "Several edges: edge_points (one flange per edge, in order; if one fails the ones already made are removed). "
+        "Several edges: edge_points (one flange per edge, in order; if one fails the ones already made are removed). "
         "Example: {\"edge_point\":[0,50,15],\"length\":20,\"angle\":90,\"bend_radius\":2}.",
         {"edge_point": (A, "Point [x,y,z] (`unit`) ON a straight edge of the sheet (list_entities kind=edge)"),
+         "edge_points": (A, "Several edges: list of points [[x,y,z], ...] ON straight edges (instead of edge_point)"),
+         "edge_points": (A, "Several edges: list of points [[x,y,z], ...] ON straight edges (instead of edge_point)"),
          "length": (N, "Flange profile height from the edge (`unit`, mm, default 20)"),
          "angle": (N, "Flange angle (degrees, 0 to 180, default 90)"),
          "bend_radius": (N, "Inside bend radius (`unit`, mm; omitted = sheet-metal default radius)"),
          "position": (S, "material_inside (default) | material_outside | bend_outside"),
          "flip": (B, "Flip the flange to the other side of the sheet (boolean, default false)"),
          "unit": UNIT},
-        ["edge_point"]),
+        []),
     "sm_sketched_bend": ("sm_sketched_bend",
         "Sheet-metal bend along a straight line of a sketch placed on a face of the sheet (the sketch line is the bend "
         "line; the fixed side is chosen by SolidWorks). Example: {\"sketch\":\"Sketch2\",\"angle\":90,\"bend_radius\":2}.",

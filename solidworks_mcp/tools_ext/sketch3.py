@@ -52,7 +52,7 @@ TOOLS = {
     ),
     "set_dynamic_mirror_sketch": (
         "set_dynamic_mirror_sketch",
-        "Enable or disable dynamic mirroring in sketch about a centerline.",
+        "Enable or disable dynamic mirroring about a sketch line (every entity drawn afterwards gets its mirror copy). The state is verified with a probe line that is drawn, counted and removed.",
         {
             "enable": (B, "True to enable dynamic mirroring, false to disable"),
             "centerline": (None, "Centerline entity ID or '@x,y' (required when enabling)"),
@@ -63,7 +63,7 @@ TOOLS = {
     ),
     "draw_style_spline": (
         "draw_style_spline",
-        "Draw a style spline (Bézier curve governed by control vertex polygon) for smooth G2/G3 continuity.",
+        "Draw the B-spline (a Bezier when points = degree+1) defined by control vertices. SolidWorks has no API for its style spline: a spline through points follows the curve within 0.001 mm; deviation and length are measured.",
         {
             "points": (A, "List of control vertex coordinates [[x,y],...] (`unit`)"),
             "closed": (B, "Whether the style spline is closed (default false)"),
@@ -74,7 +74,7 @@ TOOLS = {
     ),
     "fit_spline": (
         "fit_spline",
-        "Fit a single continuous spline through selected lines, arcs, or splines.",
+        "Replace a connected chain of lines and arcs with one spline that follows it within `tolerance` (deviation measured). Originals become construction geometry, or are deleted with delete_original.",
         {
             "entities": (A, "List of sketch entity IDs or '@x,y' references to fit together"),
             "tolerance": (N, "Fitting tolerance in mm (length unit, default 0.01)"),
@@ -167,25 +167,25 @@ TOOLS = {
     ),
     "draw_3d_arc": (
         "draw_3d_arc",
-        "Draw a 3D arc through three 3D points [x,y,z] in the active 3D sketch.",
+        "Draw a 3D arc from p1 to p3 passing through p2 (points [x,y,z]) in the active 3D sketch; center and radius are read back.",
         {
             "p1": (A, "First point [x,y,z] in mm (`unit`)"),
-            "p2": (A, "Second point [x,y,z] in mm (`unit`)"),
-            "p3": (A, "Third point [x,y,z] in mm (`unit`)"),
+            "p2": (A, "Point the arc passes through [x,y,z] in mm (`unit`)"),
+            "p3": (A, "End point [x,y,z] in mm (`unit`)"),
             "unit": UNIT,
         },
         ["p1", "p2", "p3"],
     ),
     "create_3d_sketch_plane": (
         "create_3d_sketch_plane",
-        "Create an embedded local work plane inside an active 3D sketch.",
+        "Create a work plane inside the active 3D sketch, constrained to 1-3 references. Checked by the sketch relations it adds.",
         {
-            "ref1": (None, "First reference entity (plane, face, or edge name/point)"),
+            "ref1": (None, "First reference (required): plane name ('Front'/'Top'/'Right' or feature name) or {\"face\":[x,y,z]} / {\"edge\":[x,y,z]}"),
             "ref2": (None, "Optional second reference entity"),
             "ref3": (None, "Optional third reference entity"),
-            "relation1": (N, "First relation code index (count, default 1 for coincident)"),
-            "relation2": (N, "Second relation code index (count, default 0)"),
-            "relation3": (N, "Third relation code index (count, default 0)"),
+            "relation1": (N, "Relation to ref1 (code index): 4 coincident (default), 1 parallel, 2 perpendicular, 8 distance, 16 angle"),
+            "relation2": (N, "Relation to ref2 (code index, same codes, default 0)"),
+            "relation3": (N, "Relation to ref3 (code index, same codes, default 0)"),
         },
         [],
     ),
@@ -204,7 +204,7 @@ TOOLS = {
     ),
     "edit_sketch_block": (
         "edit_sketch_block",
-        "Open a sketch block definition for editing or exit edit mode.",
+        "Open the definition of a block instance of the active sketch for editing (entities drawn next go into the block); call again with block_name \"\" to close and get the definition entity counts before/after.",
         {
             "block_name": (S, "Name of the sketch block definition (or empty string to finish editing)"),
         },
@@ -234,15 +234,6 @@ TOOLS = {
         {
             "feature_type": (S, "Target feature: 'base_extrude' (default) | 'boss_revolve' | 'cut_extrude' | 'sweep'"),
             "sketch": SK,
-        },
-        [],
-    ),
-    "close_sketch_to_model": (
-        "close_sketch_to_model",
-        "Automatically close an open sketch contour by extending it onto adjacent model edges.",
-        {
-            "direction": (S, "Direction to extend: 'x' (default) | 'y' | 'z'"),
-            "reverse": (B, "Reverse extension direction (default false)"),
         },
         [],
     ),

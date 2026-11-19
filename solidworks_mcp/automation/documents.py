@@ -155,10 +155,22 @@ class DocumentOperations:
                                   SwErrors.swFileLoadError)
             
             title = self._get_doc_title(doc)
-            
-            return self._result(True, f"Opened: {title}",
+            # (revisione 19/11) un documento GIA' aperto (es. pezzo caricato da un assieme) tornava "Opened" ma restava
+            # attivo quello di prima: i tool successivi lavoravano sul documento sbagliato. Ora si attiva e si rilegge.
+            act_err = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+            try:
+                self._sw_app.ActivateDoc3(title, False, 0, act_err)
+            except Exception:
+                pass
+            active = self._com(self._sw_app, "ActiveDoc")
+            want = os.path.normcase(os.path.abspath(filepath))
+            now = os.path.normcase(os.path.abspath(str(self._com(active, "GetPathName") or ""))) if active is not None else ""
+            if now != want:
+                return self._result(False, f"{title} aperto ma non attivabile (attivo: {now or 'nessuno'}).",
+                                    SwErrors.swFileLoadError, {"name": title, "path": filepath, "active_path": now})
+            return self._result(True, f"Opened: {title} (attivo)",
                               SwErrors.swSuccess,
-                              {"name": title, "path": filepath})
+                              {"name": title, "path": filepath, "active": True})
             
         except Exception as e:
             logger.error(f"Open document error: {e}\n{traceback.format_exc()}")

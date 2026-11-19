@@ -335,8 +335,15 @@ class ModelingBase:
             return []
 
     def _body_entities(self, doc, kind: str) -> list:
+        """Facce/spigoli/vertici dei corpi SOLIDI e poi di quelli di SUPERFICIE (19/11: prima solo i solidi, e una faccia di
+        superficie non si poteva indicare per punto: thicken_cut e i controlli delle superfici non la trovavano). A pari
+        distanza vince il solido, che viene prima."""
         out = []
-        for body in self._bodies(doc):
+        try:
+            sheets = list(doc.GetBodies2(1, False) or [])        # swSheetBody
+        except Exception:
+            sheets = []
+        for body in self._bodies(doc) + sheets:
             try:
                 items = self._com(body, {"face": "GetFaces", "edge": "GetEdges"}.get(kind, "GetVertices"))
             except Exception:

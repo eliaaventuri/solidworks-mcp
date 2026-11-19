@@ -3,16 +3,6 @@
 from ._common import S, B, A
 
 TOOLS = {
-    "copy_with_mates": (
-        "copy_with_mates",
-        "Duplicate an assembly component while replicating its mates on new geometric references.",
-        {
-            "component": (S, "Source component name to copy"),
-            "mate_references": (A, "List of new target entity references for each mate"),
-            "repeat_mates": (A, "Optional list of booleans indicating which mates keep existing references"),
-        },
-        ["component", "mate_references"],
-    ),
     "form_new_subassembly": (
         "form_new_subassembly",
         "Group selected assembly components into a new nested subassembly.",
@@ -39,19 +29,6 @@ TOOLS = {
         },
         ["name"],
     ),
-    "pack_and_go": (
-        "pack_and_go",
-        "Collect assembly and all referenced part, drawing, and simulation files into a folder or ZIP.",
-        {
-            "output_folder": (S, "Destination folder path (if saving to directory)"),
-            "zip_filepath": (S, "Destination ZIP file path (if saving to compressed archive)"),
-            "include_drawings": (B, "Include associated 2D drawing files (default true)"),
-            "include_simulation": (B, "Include simulation result files (default false)"),
-            "flatten": (B, "Flatten directory structure into single folder (default false)"),
-            "overwrite": (B, "Overwrite existing destination file or folder (default false)"),
-        },
-        [],
-    ),
 }
 
 DESTRUCTIVE = {
@@ -59,5 +36,4 @@ DESTRUCTIVE = {
 }
 
 OVERWRITE = {
-    "pack_and_go": "zip_filepath",
 }

@@ -1927,8 +1927,8 @@ class DataExportOperations:
                     try:
                         doc.Extension.SetUserPreferenceToggle(198, 0, hide_all_old)
                         doc.GraphicsRedraw2()
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        notes.append(f"visibilita' dei riferimenti non ripristinata: {ex}")
                 notes.extend(self._dx_restore_prefs(app, {("i", k): v for k, v in saved_prefs.items()}))
                 if persp_added:
                     try:
@@ -1947,8 +1947,8 @@ class DataExportOperations:
                 if old_mode:
                     try:
                         mv.DisplayMode = old_mode
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        notes.append(f"modo di visualizzazione non ripristinato: {ex}")
             exists = os.path.exists(filepath) and os.path.getsize(filepath) > 0
             data = {"filepath": filepath, "view": view, "style": style, "hide_reference": hide_reference,
                     "hidden_items": len([1 for i in items if i[2]]), "white_background": white_background,

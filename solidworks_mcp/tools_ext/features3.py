@@ -3,54 +3,18 @@
 from ._common import S, B, A, UNIT, PT3
 
 TOOLS = {
-    "boundary_boss": (
-        "boundary_boss",
-        "Create a solid boundary feature defined by curves in Direction 1 and optional Direction 2.",
-        {
-            "direction1_curves": (A, "List of sketch curve/edge names in Direction 1"),
-            "direction2_curves": (A, "Optional list of guide curve/edge names in Direction 2"),
-        },
-        ["direction1_curves"],
-    ),
-    "boundary_cut": (
-        "boundary_cut",
-        "Cut solid material using boundary curves in Direction 1 and optional Direction 2.",
-        {
-            "direction1_curves": (A, "List of sketch curve/edge names in Direction 1"),
-            "direction2_curves": (A, "Optional list of guide curve/edge names in Direction 2"),
-        },
-        ["direction1_curves"],
-    ),
-    "solid_sweep_cut": (
-        "solid_sweep_cut",
-        "Simulate machining / milling cut by sweeping a solid tool body along a path.",
-        {
-            "tool_body_point": PT3,
-            "path_sketch": (S, "Path sketch or trajectory curve name"),
-            "guide_sketches": (A, "Optional list of guide curves"),
-            "unit": UNIT,
-        },
-        ["tool_body_point", "path_sketch"],
-    ),
     "insert_library_feature": (
         "insert_library_feature",
-        "Insert a pre-configured library feature (.sldlfp) onto the active model.",
+        "Insert a library feature (.sldlfp, e.g. from the SolidWorks design library) on a planar face or plane. The file "
+        "decides how many locating references it needs (their names are reported when the count is wrong). Rebuild errors "
+        "and volume are checked; on failure the created features are removed.",
         {
             "feature_file": (S, "Path to the .sldlfp library feature file"),
-            "placement_plane": (S, "Target placement plane or planar face"),
-            "references": (A, "Optional list of reference entities to bind library feature parameters"),
+            "placement_plane": (None, "Placement: planar face {\"face\":[x,y,z]} or plane name"),
+            "references": (A, "Locating references required by the file, in order: edges [x,y,z] or {\"edge\":[x,y,z]}"),
+            "unit": UNIT,
         },
         ["feature_file"],
-    ),
-    "defeature_model": (
-        "defeature_model",
-        "Simplify model geometry by removing small features and internal cavities for lightweight export.",
-        {
-            "output_filepath": (S, "Optional path to save the defeatured model file"),
-            "keep_features": (A, "List of important feature names to preserve"),
-            "remove_internal_bodies": (B, "Remove internal closed bodies (default true)"),
-        },
-        [],
     ),
     "set_rollback_bar": (
         "set_rollback_bar",
@@ -73,11 +37,7 @@ TOOLS = {
 }
 
 DESTRUCTIVE = {
-    "boundary_cut": "Cuts solid material using boundary curves",
-    "solid_sweep_cut": "Cuts solid material using a tool body",
-    "defeature_model": "Removes features and internal cavities to simplify geometry",
 }
 
 OVERWRITE = {
-    "defeature_model": "output_filepath",
 }

@@ -259,27 +259,34 @@ class Sketch5Operations:
                 return self._result(False, "source_entity e target_entity obbligatori", SwErrors.swInvalidInput)
 
             sm = doc.SketchManager
+            src, e1 = self._s2_resolve(doc, _sk, source_entity, None)       # id 'S0-1-2' oppure '@x,y'
+            tgt, e2 = self._s2_resolve(doc, _sk, target_entity, None)
+            if e1 or e2:
+                return self._result(False, f"replace_sketch_entity: {e1 or e2}", SwErrors.swSelectionError)
+            sid, tid = self._seg_id(src), self._seg_id(tgt)
+            if sid == tid:
+                return self._result(False, "Sorgente e destinazione sono la stessa entita'.", SwErrors.swInvalidInput)
+            # prima: SelectByID2 con il callout None (Incompatibilita' tra tipi) -> il tool falliva sempre
             doc.ClearSelection2(True)
-            sel_src = bool(doc.Extension.SelectByID2(source_entity, "SKETCHSEGMENT", 0, 0, 0, False, 1, None, 0))
-            sel_tgt = bool(doc.Extension.SelectByID2(target_entity, "SKETCHSEGMENT", 0, 0, 0, True, 2, None, 0))
-            if not (sel_src and sel_tgt):
-                return self._result(False, f"replace_sketch_entity: '{source_entity}' o '{target_entity}' non trovata/non selezionabile.", SwErrors.swSelectionError)
-
+            if not (bool(src.Select4(False, self._sd(doc, 1))) and bool(tgt.Select4(True, self._sd(doc, 2)))):
+                return self._result(False, "replace_sketch_entity: selezione non riuscita.", SwErrors.swSelectionError)
             try:
                 ok = bool(sm.SketchReplace2(bool(make_construction), bool(make_contour)))
             except Exception as ex:
                 return self._result(False, f"replace_sketch_entity: sostituzione non riuscita: {ex}", SwErrors.swSketchError)
-            if not ok:
-                return self._result(False, "replace_sketch_entity: SolidWorks non ha sostituito l'entità.", SwErrors.swSketchError)
-
-            msg = f"Sostituzione entità '{source_entity}' -> '{target_entity}' completata."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "source_entity": source_entity,
-                "target_entity": target_entity,
-                "replaced": True,
-                "make_construction": bool(make_construction),
-                "make_contour": bool(make_contour)
-            })
+            doc.ClearSelection2(True)
+            after = {g["id"]: g for g in self._s2_snap(doc)}
+            src_now = after.get(sid)
+            data = {"source_entity": sid, "target_entity": tid, "make_construction": bool(make_construction),
+                    "make_contour": bool(make_contour), "api_result": ok,
+                    "source_now": "costruzione" if src_now and src_now["construction"] else ("normale" if src_now else "eliminata"),
+                    "target_present": tid in after}
+            want = "costruzione" if make_construction else "eliminata"
+            if not ok or data["source_now"] != want or not data["target_present"]:
+                return self._result(False, f"Sostituzione non come chiesta: sorgente {data['source_now']} (atteso {want}), "
+                                    f"destinazione {'presente' if data['target_present'] else 'sparita'}.",
+                                    SwErrors.swSketchError, data)
+            return self._result(True, f"{sid} sostituita da {tid}: sorgente {want}", SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"replace_sketch_entity: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
@@ -399,13 +406,21 @@ class Sketch5Operations:
             if entities:
                 doc.ClearSelection2(True)
                 by_id = {self._safe_seg_id(s): s for s in segs}
+                not_sel = []
                 for i, ent_id in enumerate(entities):
                     s = by_id.get(ent_id)
+                    ok_sel = False
                     if s:
                         try:
-                            s.Select4(i > 0, sd)
+                            ok_sel = bool(s.Select4(i > 0, sd))
                         except Exception:
-                            pass
+                            ok_sel = False
+                    if not ok_sel:
+                        not_sel.append(ent_id)
+                if not_sel:     # prima un'entita' non selezionata era ignorata: le relazioni erano di un'altra selezione
+                    doc.ClearSelection2(True)
+                    return self._result(False, f"Entita' non trovate o non selezionabili: {not_sel}",
+                                        SwErrors.swSelectionError, {"not_selected": not_sel})
 
             allowed_ids = ()
             try:

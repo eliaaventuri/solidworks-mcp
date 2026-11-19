@@ -194,14 +194,42 @@ class SheetMetalOperations:
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     # ----------------------------------------------------------------------------------------- 2b. flangia sul bordo
-    def sm_edge_flange(self, edge_point, length: float = 20.0, angle: float = 90.0, bend_radius: float = None,
-                       position: str = "material_inside", flip: bool = False, unit: str = None) -> Dict:
+    def _sm_edge_flanges(self, points, length, angle, bend_radius, position, flip, unit) -> Dict:
+        """Una flangia per spigolo, nell'ordine; se una fallisce si tolgono quelle gia' fatte (modello com'era)."""
+        doc, err = self._part()
+        if err:
+            return err
+        before = self._names(doc)
+        v0 = self._volume_m3(doc)
+        rows = []
+        for pt in points:
+            r = self.sm_edge_flange(pt, length, angle, bend_radius, position, flip, unit)
+            if not r.get("success"):
+                made = [x["name"] for x in self._new_features(doc, before)]
+                if made:
+                    self._delete_features(doc, made)
+                return self._result(False, f"Flangia sullo spigolo {pt} non riuscita ({r.get('message')}); tolte le "
+                                    f"{len(rows)} gia' fatte.", SwErrors.swFeatureError, {"done_before_failure": rows})
+            d = r.get("data") or {}
+            rows.append({"edge_point": pt, "feature": d.get("feature"), "volume_delta_mm3": d.get("volume_delta_mm3")})
+        v1 = self._volume_m3(doc)
+        return self._result(True, f"{len(rows)} flange sui bordi: volume {(v1 - v0) * 1e9:+.3f} mm3", SwErrors.swSuccess,
+                            {"flanges": rows, "volume_delta_mm3": round((v1 - v0) * 1e9, 4)})
+
+    def sm_edge_flange(self, edge_point=None, length: float = 20.0, angle: float = 90.0, bend_radius: float = None,
+                       position: str = "material_inside", flip: bool = False, unit: str = None,
+                       edge_points: list = None) -> Dict:
         """Flangia sul bordo. Misurato (2026-10-19, laboratorio opus): InsertSheetMetalEdgeFlange2 crea la feature solo con
         uno schizzo del profilo nell'array SketchFeats; lo schizzo si crea con doc.InsertSketchForEdgeFlange(spigolo, angolo,
         flip) (metodo da marcare con _FlagAsMethod), che pero' lo lascia VUOTO (flangia lunga zero). Si modifica allora lo
         schizzo della flangia e si disegna il profilo: rettangolo con il lato inferiore sullo spigolo e altezza `length`
         lungo +y dello schizzo (che e' il verso della flangia). Lamiera 50x30x2, r 2, K 0,5, length 20 a 90 gradi:
         volume 4122,743 = t*w*((50-(r+t)) + (22-(r+t)) + pi/2*(r+t/2))."""
+        if edge_points:
+            return self._sm_edge_flanges(list(edge_points), length, angle, bend_radius, position, flip, unit)
+        if edge_point is None:
+            return self._result(False, "Serve edge_point (uno spigolo) oppure edge_points (piu' spigoli).",
+                                SwErrors.swInvalidInput)
         try:
             pos = _BEND_POSITIONS.get(str(position).lower())
             if pos is None:

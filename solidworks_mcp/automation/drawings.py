@@ -614,6 +614,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 else:
                     n, d = parsed or STD_SCALES[-1]
             sheet.SetScale(int(n), int(d), True, True)
+            iso_bad = []
             for k, v in objs.items():
                 if int(v.Type) == 7:
                     try:
@@ -623,8 +624,17 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                             v.UseSheetScale = True
                     except Exception:
                         pass
+                    if iso_scale and k in iso_keys:     # riletta: la scala dichiarata e' quella che SolidWorks ha
+                        try:
+                            ok_sc = abs(float(v.ScaleDecimal) - iso_scale[0] / iso_scale[1]) < 1e-6
+                        except Exception:
+                            ok_sc = False
+                        if not ok_sc:
+                            iso_bad.append(str(self._com(v, "GetName2")))
             if iso_scale:
                 paper_note += f", viste pittoriche in scala {iso_scale[0]}:{iso_scale[1]}"
+                if iso_bad:
+                    paper_note += f" - ATTENZIONE: scala NON applicata a {iso_bad}"
             # 3) final positions from the real outlines
             real = {k: (self._view_rect(v)[2] - self._view_rect(v)[0],
                         self._view_rect(v)[3] - self._view_rect(v)[1]) for k, v in objs.items()}
@@ -977,6 +987,10 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 doc.ForceRebuild3(False)
             except Exception:
                 pass
+            try:                                  # riletta: se SolidWorks non l'ha presa lo si dice
+                scale_ok = abs(float(dv.ScaleDecimal) - n / d) < 1e-6
+            except Exception:
+                scale_ok = False
             if not hasattr(self, "_detail_circles"):
                 self._detail_circles = {}
             self._detail_circles.setdefault(self._get_doc_title(doc), []).append(
@@ -985,8 +999,10 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             if view_x is None and view_y is None:
                 placed, used = self._fit_view_free(doc, dv, (ppos[0] + 0.15, ppos[1]), sc)
             return self._result(True, f"Dettaglio {label}: {self._com(dv, 'GetName2')}" +
-                                ("" if placed else " - ATTENZIONE: nessuno spazio libero, la vista si sovrappone"),
-                                SwErrors.swSuccess, {**self._view_info(dv), "placed_in_free_space": placed})
+                                ("" if placed else " - ATTENZIONE: nessuno spazio libero, la vista si sovrappone") +
+                                ("" if scale_ok else f" - ATTENZIONE: scala {int(n)}:{int(d)} NON applicata"),
+                                SwErrors.swSuccess, {**self._view_info(dv), "placed_in_free_space": placed,
+                                                     "scale_applied": scale_ok})
         except Exception as e:
             return self._fail("add_detail_view", e)
 
@@ -1346,7 +1362,15 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     r.GetAnnotation.SetPosition2(self._m(x, unit), self._m(y, unit), 0)
                 except Exception:
                     pass
-            return self._result(True, f"Finitura superficiale Ra {roughness} inserita", SwErrors.swSuccess)
+            data, note = {}, ""
+            try:           # posizione riletta (prima un errore di SetPosition2 era ingoiato)
+                pos = [float(v) for v in r.GetAnnotation.GetPosition]
+                data["position"] = [round(self._from_m(pos[0], unit), 4), round(self._from_m(pos[1], unit), 4)]
+                if not leader and (abs(pos[0] - self._m(x, unit)) > 1e-4 or abs(pos[1] - self._m(y, unit)) > 1e-4):
+                    note = f" - ATTENZIONE: il simbolo e' in {data['position']} e non nel punto chiesto"
+            except Exception as ex:
+                data["position_unreadable"] = str(ex)
+            return self._result(True, f"Finitura superficiale Ra {roughness} inserita{note}", SwErrors.swSuccess, data)
         except Exception as e:
             return self._fail("add_surface_finish", e)
 

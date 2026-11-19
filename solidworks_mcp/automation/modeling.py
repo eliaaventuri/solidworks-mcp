@@ -144,6 +144,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         if extra:
             info.update(extra)
         msg = f"{label}: {info.get('feature')} (volume {info['volume_mm3']:.1f} mm3, delta {info['volume_delta_mm3']:+.1f})"
+        if info.get("rebuild_error_code") and not info.get("rebuild_warning"):
+            # (revisione 19/11) prima una feature IN ERRORE contava come successo (il codice era solo nei dati)
+            return self._result(False, msg + f" - feature IN ERRORE (codice {info['rebuild_error_code']}).",
+                                SwErrors.swFeatureError, info)
         if require_volume_change and abs(info["volume_delta_mm3"]) < 1e-6:
             return self._result(False, msg + " - il volume non e' cambiato: feature senza effetto.",
                                 SwErrors.swFeatureError, info)
@@ -163,6 +167,48 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
         except Exception:
             pass
         return out
+
+    def _create_checked(self, doc, label: str, create, expect_volume=None, need_volume_change: bool = True,
+                        tol_mm3: float = 1e-3, extra: Dict = None) -> Dict:
+        """Helper unico "crea, rileggi, confronta, annulla se sbagliato" (revisione sez. 5, 19/11).
+        create(): chiama SolidWorks (puo' restituire la feature o niente: si cercano le feature nuove).
+        Rilegge: feature nuove, errori di ricostruzione, volume. Confronta: volume cambiato (need_volume_change) e,
+        se dato, uguale a expect_volume(v0_mm3, v1_mm3) -> valore atteso del delta in mm3 (None = non confrontare).
+        Se qualcosa non va, cancella le feature nuove: il modello torna com'era e il risultato lo dice."""
+        before = self._names(doc)
+        v0 = self._volume_m3(doc)
+        feat = create()
+        doc.ClearSelection2(True)
+        new = self._new_features(doc, before)
+        v1 = self._volume_m3(doc)
+        delta = (v1 - v0) * 1e9
+        if feat is None and new:
+            feat = self._find_feature(doc, new[-1]["name"])
+        code, warn = self._feat_error(feat) if feat is not None else (None, False)
+        data = {"features": [f["name"] for f in new], "volume_mm3": round(v1 * 1e9, 4),
+                "volume_delta_mm3": round(delta, 4), **(extra or {})}
+        why = None
+        if not new:
+            why = "SolidWorks non ha creato nessuna feature"
+        elif code and not warn:
+            why = f"feature IN ERRORE (codice {code})"
+            data["rebuild_error_code"] = int(code)
+        elif need_volume_change and abs(delta) <= tol_mm3:
+            why = "il volume non e' cambiato"
+        elif expect_volume is not None:
+            exp = expect_volume(v0 * 1e9, v1 * 1e9)
+            if exp is not None:
+                data["expected_volume_delta_mm3"] = round(exp, 4)
+                if abs(delta - exp) > max(tol_mm3, 1e-4 * abs(exp)):
+                    why = f"volume cambiato di {delta:+.4f} mm3 invece di {exp:+.4f}"
+        if why:
+            if new:
+                self._delete_features(doc, [f["name"] for f in new])
+                data["removed"] = True
+            return self._result(False, f"{label}: {why}" + ("; feature tolte, modello com'era." if new else "."),
+                                SwErrors.swFeatureError, data)
+        return self._result(True, f"{label}: {', '.join(data['features'])} (volume {delta:+.3f} mm3)",
+                            SwErrors.swSuccess, data)
 
     def _delete_features(self, doc, names: List[str]):
         doc.ClearSelection2(True)
@@ -2590,7 +2636,8 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             try:
                 kids = [k.Name for k in (feat.GetChildren or ())]
             except Exception:
-                pass
+                # figli non leggibili: si tratta come se ce ne fossero (serve delete_children=true), mai "nessun figlio"
+                kids = ["(figli non leggibili)"]
             if not confirm:
                 return self._result(False,
                     f"Rifiutato: eliminare '{name}' e' irreversibile (nessun annulla). Ripeti con confirm=true"

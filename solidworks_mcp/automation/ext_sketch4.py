@@ -83,33 +83,61 @@ class Sketch4Operations:
                 return "seg"
 
 
-    def sketch_offset_on_surface(self, distance: float = 5.0, reverse: bool = False,
-                                 geodesic: bool = True, unit: str = None) -> Dict:
-        """Offset geodetico o euclideo di spigoli su superficie 3D curva."""
+    def sketch_offset_on_surface(self, edges: list = None, distance: float = 5.0, reverse: bool = False,
+                                 unit: str = None) -> Dict:
+        """Curva a distanza `distance` da spigoli del modello, SULLA faccia adiacente (Offset su superficie), in uno
+        schizzo 3D (aperto se manca). IModelDocExtension.SketchOffsetOnSurface(distanza, inverti, UseFront=True, False):
+        misurato 19/11 su un blocco: lo spigolo superiore va a 5 mm sulla faccia di sopra, con reverse sulla faccia di
+        lato; con UseFront=False non crea nulla. Ogni curva nuova si controlla: il suo punto medio sta a `distance`
+        dallo spigolo."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, err = self._part()
             if err:
                 return err
-
+            if not edges:
+                return self._result(False, "Servono gli spigoli: edges = [[x,y,z], ...] (punti SUGLI spigoli).",
+                                    SwErrors.swInvalidInput)
             sm = doc.SketchManager
-            dist_m = self._mmu(distance, unit)
-
-            try:
-                ok = bool(sm.InsertOffsetOnSurface(dist_m, bool(reverse), bool(geodesic), False))
-            except Exception as ex:
-                return self._result(False, f"sketch_offset_on_surface: offset su superficie non riuscito: {ex}", SwErrors.swSketchError)
-            if not ok:
-                return self._result(False, "sketch_offset_on_surface: SolidWorks non ha applicato l'offset.", SwErrors.swSketchError)
-
-            u = unit or "mm"
-            dist_disp = distance if unit else round(dist_m * 1000.0, 4)
-            msg = f"Offset su superficie ({dist_disp} {u}, {'geodetico' if geodesic else 'euclideo'}) applicato."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "offset_applied": True,
-                "distance": dist_disp,
-                "geodesic": bool(geodesic),
-                "reverse": bool(reverse)
-            })
+            sk = self._com(sm, "ActiveSketch")
+            opened = False
+            if sk is None:
+                sm.Insert3DSketch(True)
+                sk, opened = self._com(sm, "ActiveSketch"), True
+            elif not self._s2_is3d(sk):
+                return self._result(False, "Serve uno schizzo 3D (o nessuno schizzo aperto): lo schizzo attivo e' 2D.",
+                                    SwErrors.swSketchError)
+            doc.ClearSelection2(True)
+            picked = []
+            for i, pt in enumerate(edges):
+                ok, info = self._select_point(doc, "edge", pt, unit, i > 0, 0)
+                if not ok:
+                    return self._result(False, f"Spigolo {pt}: {info.get('error')}", SwErrors.swSelectionError)
+                picked.append(doc.SelectionManager.GetSelectedObject6(i + 1, -1))
+            d_m = self._mmu(distance, unit)
+            before = {self._seg_id(x) for x in self._segments(sk)}
+            ok = bool(doc.Extension.SketchOffsetOnSurface(d_m, bool(reverse), True, False))
+            doc.ClearSelection2(True)
+            new = [x for x in self._segments(sk) if self._seg_id(x) not in before]
+            rows, bad = [], []
+            for x in new:
+                try:
+                    c = list(x.GetCurve.GetClosestPointOn(0.0, 0.0, 0.0))[:3]        # un punto della curva nuova
+                    a, b2 = x.GetStartPoint2, x.GetEndPoint2
+                    mid = [(a.X + b2.X) / 2, (a.Y + b2.Y) / 2, (a.Z + b2.Z) / 2] if int(x.GetType) == 0 else c
+                    dist = min(math.dist(mid, list(e.GetClosestPointOn(*mid))[:3]) for e in picked)
+                except Exception:
+                    dist = None
+                rows.append({"id": self._seg_id(x), "length": round(self._from_m(float(x.GetLength), unit), 5),
+                             "distance_from_edge": None if dist is None else round(self._from_m(dist, unit), 5)})
+                if dist is None or abs(dist - d_m) > 1e-6:
+                    bad.append(rows[-1]["id"])
+            data = {"sketch": self._s2_name(doc, sk), "sketch_opened": opened, "curves": rows, "distance": distance,
+                    "reverse": bool(reverse)}
+            if not ok or not new or bad:
+                return self._result(False, f"Offset su superficie non come chiesto: {len(new)} curve nuove"
+                                    + (f", a distanza sbagliata: {bad}" if bad else ""), SwErrors.swSketchError, data)
+            return self._result(True, f"{len(new)} curve a {distance} dallo spigolo sulla faccia (schizzo {data['sketch']})",
+                                SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"sketch_offset_on_surface: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
@@ -431,98 +459,132 @@ class Sketch4Operations:
             bx_m = self._mmu(base_x, unit)
             by_m = self._mmu(base_y, unit)
 
-            segs = self._s4_segs(doc)
-            by_id = {self._safe_seg_id(s): s for s in segs}
-
+            chosen = []
+            for ent_id in entities or []:
+                s, e = self._s2_resolve(doc, _sk, ent_id, unit)    # id 'S0-1-2' oppure '@x,y'
+                if e:
+                    return self._result(False, f"stretch_sketch_entities: {e}", SwErrors.swSelectionError)
+                chosen.append(s)
+            ids = [self._seg_id(s) for s in chosen]
+            before = {g["id"]: g for g in self._s2_snap(doc)}
+            doc.ClearSelection2(True)
             selected_count = 0
-            if entities:
-                for ent_id in entities:
-                    s = by_id.get(ent_id)
-                    if s is None:
-                        return self._result(False, f"stretch_sketch_entities: '{ent_id}' non trovata", SwErrors.swSelectionError)
+            if chosen:
+                for ent_id, s in zip(ids, chosen):
                     if not bool(s.Select4(selected_count > 0, self._s4_sd(doc, 0))):
                         return self._result(False, f"stretch_sketch_entities: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
                     selected_count += 1
             if selected_count == 0:
                 return self._result(False, "stretch_sketch_entities: nessuna entità selezionata da stirare.", SwErrors.swSelectionError)
 
-            try:
-                ok = bool(sm.StretchEntities(bx_m, by_m, 0, bx_m + dx_m, by_m + dy_m, 0))
-            except Exception as ex:
-                return self._result(False, f"stretch_sketch_entities: stiramento non riuscito: {ex}", SwErrors.swSketchError)
-            if not ok:
-                return self._result(False, "stretch_sketch_entities: SolidWorks non ha stirato le entità.", SwErrors.swSketchError)
-
+            # IModelDocExtension.Stretch e MoveOrCopy non muovono nulla (misurato 19/11, con e senza KeepRelations): si
+            # spostano i PUNTI delle entita' scelte (posizione assoluta, due passate per il risolutore); le entita'
+            # collegate seguono e si allungano, come Stira entita'
+            pts = {}
+            for s0 in chosen:
+                for getter in ("GetStartPoint2", "GetEndPoint2", "GetCenterPoint2"):
+                    try:
+                        q = getattr(s0, getter)
+                    except Exception:
+                        continue
+                    if q is None or self._pt_id(q) in pts:
+                        continue
+                    pts[self._pt_id(q)] = (q, float(q.X) + dx_m, float(q.Y) + dy_m)
+            doc.ClearSelection2(True)
+            for _pass in range(2):
+                for q, tx, ty in pts.values():
+                    q.X, q.Y = tx, ty
+            # (revisione) riletto: ogni entita' scelta deve essersi spostata di (dx, dy)
+            doc.ClearSelection2(True)
+            after = {g["id"]: g for g in self._s2_snap(doc)}
+            dmm = (self._from_m(dx_m, "mm"), self._from_m(dy_m, "mm"))
+            wrong = []
+            for i in ids:
+                b, a = before.get(i), after.get(i)
+                if not b or not a or "s" not in a or "s" not in b:
+                    wrong.append(f"{i}: non piu' leggibile")
+                    continue
+                for k in ("s", "e"):
+                    if abs(a[k][0] - b[k][0] - dmm[0]) > 1e-3 or abs(a[k][1] - b[k][1] - dmm[1]) > 1e-3:
+                        wrong.append(f"{i}: {k} da {[round(v, 4) for v in b[k][:2]]} a {[round(v, 4) for v in a[k][:2]]}")
+                        break
+            moved = [i for i in after if i in before and before[i].get("s") != after[i].get("s")]
+            data = {"dx": dx, "dy": dy, "entities_count": selected_count, "entities_moved_or_stretched": moved}
+            if wrong:
+                return self._result(False, "Stiramento non come chiesto: " + "; ".join(wrong), SwErrors.swSketchError, data)
             u = unit or "mm"
-            msg = f"Stiramento entità applicato (dx={dx}, dy={dy} {u})."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "stretched": True,
-                "dx": dx,
-                "dy": dy,
-                "entities_count": selected_count
-            })
+            msg = f"Entita' {ids} spostate di ({dx}, {dy}) {u}; toccate in tutto: {moved}"
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"stretch_sketch_entities: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def align_sketch_entities(self, source_points: list, target_points: list,
                               entities: list = None, unit: str = None) -> Dict:
-        """Allinea entità 2D o 3D tramite coppie di punti di corrispondenza (1, 2 o 3 punti)."""
+        """Allinea entita' di uno schizzo 2D con 1 coppia di punti (spostamento) o 2 coppie (spostamento + rotazione:
+        il primo punto va sul primo bersaglio, la direzione 1->2 su quella dei bersagli; la distanza non si scala).
+        SolidWorks non ha un'API "allinea": si usa MoveOrCopy/RotateOrCopy (centro portato nell'origine, vedi ext_sketch2)
+        e si rilegge la posizione di ogni entita' confrontandola con la trasformazione calcolata."""
         try:
-            doc, _sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
-
             if not source_points or not target_points or len(source_points) != len(target_points):
-                return self._result(False, "source_points e target_points devono contenere lo stesso numero di punti.", SwErrors.swInvalidInput)
+                return self._result(False, "source_points e target_points devono contenere lo stesso numero di punti.",
+                                    SwErrors.swInvalidInput)
+            n = len(source_points)
+            if n not in (1, 2):
+                return self._result(False, f"Allineamento con {n} punti non supportato (1 o 2, schizzo 2D).",
+                                    SwErrors.swInvalidInput)
+            if any(len(q) > 2 and abs(float(q[2])) > 1e-9 for q in list(source_points) + list(target_points)):
+                return self._result(False, "Solo schizzi 2D: i punti hanno una Z diversa da 0.", SwErrors.swInvalidInput)
+            if not entities:
+                return self._result(False, "Indica le entita' da allineare (id o '@x,y').", SwErrors.swInvalidInput)
+            segs = []
+            for ref in entities:
+                seg, e = self._s2_resolve(doc, sk, ref, unit)
+                if e:
+                    return self._result(False, f"align_sketch_entities: {e}", SwErrors.swSelectionError)
+                segs.append(seg)
+            mm = lambda q: (self._from_m(self._mmu(float(q[0]), unit), "mm"), self._from_m(self._mmu(float(q[1]), unit), "mm"))
+            s1, t1 = mm(source_points[0]), mm(target_points[0])
+            ang = 0.0
+            if n == 2:
+                s2, t2 = mm(source_points[1]), mm(target_points[1])
+                ang = math.atan2(t2[1] - t1[1], t2[0] - t1[0]) - math.atan2(s2[1] - s1[1], s2[0] - s1[0])
+            ids = [self._seg_id(x) for x in segs]
+            before = {g["id"]: g for g in self._s2_snap(doc)}
+            self._s2_select(doc, segs)
+            doc.Extension.MoveOrCopy(False, 0, False, s1[0] / 1000, s1[1] / 1000, 0.0, 0.0, 0.0, 0.0)
+            if abs(ang) > 1e-12:
+                self._s2_select(doc, segs)
+                doc.Extension.RotateOrCopy(False, 0, False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, ang)
+            self._s2_select(doc, segs)
+            doc.Extension.MoveOrCopy(False, 0, False, 0.0, 0.0, 0.0, t1[0] / 1000, t1[1] / 1000, 0.0)
+            doc.ClearSelection2(True)
+            after = {g["id"]: g for g in self._s2_snap(doc)}
+            c, sn = math.cos(ang), math.sin(ang)
 
-            num_pts = len(source_points)
-            if num_pts not in (1, 2):
-                return self._result(False, f"align_sketch_entities: allineamento con {num_pts} punti non supportato (1 o 2).", SwErrors.swInvalidInput)
-
-            sm = doc.SketchManager
-            segs = self._s4_segs(doc)
-            by_id = {self._safe_seg_id(s): s for s in segs}
-
-            if entities:
-                sel_n = 0
-                for ent_id in entities:
-                    s = by_id.get(ent_id)
-                    if s is None:
-                        return self._result(False, f"align_sketch_entities: '{ent_id}' non trovata", SwErrors.swSelectionError)
-                    if not bool(s.Select4(sel_n > 0, self._s4_sd(doc, 0))):
-                        return self._result(False, f"align_sketch_entities: selezione '{ent_id}' non riuscita.", SwErrors.swSelectionError)
-                    sel_n += 1
-
-            ok = False
-            mode = f"{num_pts}_point"
-
-            try:
-                if num_pts == 1:
-                    p1s = [self._mmu(v, unit) for v in source_points[0]]
-                    p1t = [self._mmu(v, unit) for v in target_points[0]]
-                    ok = bool(sm.AlignEntities1Point(p1s[0], p1s[1], p1s[2] if len(p1s) > 2 else 0,
-                                                     p1t[0], p1t[1], p1t[2] if len(p1t) > 2 else 0))
-                elif num_pts == 2:
-                    p1s = [self._mmu(v, unit) for v in source_points[0]]
-                    p2s = [self._mmu(v, unit) for v in source_points[1]]
-                    p1t = [self._mmu(v, unit) for v in target_points[0]]
-                    p2t = [self._mmu(v, unit) for v in target_points[1]]
-                    ok = bool(sm.AlignEntities2Point(p1s[0], p1s[1], p1s[2] if len(p1s) > 2 else 0,
-                                                     p2s[0], p2s[1], p2s[2] if len(p2s) > 2 else 0,
-                                                     p1t[0], p1t[1], p1t[2] if len(p1t) > 2 else 0,
-                                                     p2t[0], p2t[1], p2t[2] if len(p2t) > 2 else 0))
-            except Exception as ex:
-                return self._result(False, f"align_sketch_entities: allineamento non riuscito: {ex}", SwErrors.swSketchError)
-            if not ok:
-                return self._result(False, f"align_sketch_entities: SolidWorks non ha allineato le entità ({mode}).", SwErrors.swSketchError)
-
-            msg = f"Allineamento entità eseguito in modalità {mode} ({num_pts} punti)."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "aligned": True,
-                "mode": mode,
-                "points_count": num_pts
-            })
+            def tf(q):
+                x, y = q[0] - s1[0], q[1] - s1[1]
+                return (t1[0] + c * x - sn * y, t1[1] + sn * x + c * y)
+            wrong = []
+            for i in ids:
+                b0, a0 = before.get(i), after.get(i)
+                if not b0 or not a0 or "s" not in a0:
+                    wrong.append(f"{i}: non piu' leggibile")
+                    continue
+                for k in ("s", "e"):
+                    want = tf(b0[k])
+                    if math.dist(want, a0[k][:2]) > 1e-3:
+                        wrong.append(f"{i}: {k} in {[round(v, 4) for v in a0[k][:2]]} invece di {[round(v, 4) for v in want]}")
+                        break
+            data = {"mode": f"{n}_point", "entities": ids, "rotation_deg": round(math.degrees(ang), 6),
+                    "translation_mm": [round(t1[0] - s1[0], 6), round(t1[1] - s1[1], 6)]}
+            if wrong:
+                return self._result(False, "Allineamento non come chiesto: " + "; ".join(wrong), SwErrors.swSketchError, data)
+            return self._result(True, f"{len(ids)} entita' allineate ({n} punti, rotazione {data['rotation_deg']} gradi)",
+                                SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"align_sketch_entities: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
@@ -629,29 +691,80 @@ class Sketch4Operations:
             if pic is None:
                 return self._result(False, "insert_sketch_picture: SolidWorks non ha inserito l'immagine.", SwErrors.swSketchError)
 
-            if pic is not None:
-                try:
-                    pic.SetOrigin(x_m, y_m)
-                    if width is not None and height is not None:
-                        pic.SetSize(self._mmu(width, unit), self._mmu(height, unit), True)
-                    if angle:
-                        pic.Angle = math.radians(float(angle))
-                except Exception:
-                    pass
+            def r8():
+                return win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_R8, 0.0)
 
+            def pair(getter):
+                a, b = r8(), r8()
+                getattr(pic, getter)(a, b)
+                return float(a.value), float(b.value)
+
+            # (revisione 2026-11-12) prima ogni errore qui era ingoiato e il risultato ripeteva i valori chiesti: ora
+            # si applica, si rilegge da SolidWorks e si confronta
+            errors = []
+            for what, fn in (("origine", lambda: pic.SetOrigin(x_m, y_m)),
+                             ("dimensioni", lambda: self._pic_set_size(pic, pair, width, height, unit)),
+                             ("angolo", lambda: setattr(pic, "Angle", math.radians(float(angle))) if angle else None),
+                             ("trasparenza", lambda: pic.SetTransparency(3, float(transparency), 0, 0.0)
+                              if transparency else None)):
+                try:
+                    fn()
+                except Exception as ex:
+                    errors.append(f"{what}: {ex}")
+            data = {"filepath": path, "picture_loaded": True}
+            bad = []
+            try:
+                ox, oy = pair("GetOrigin")
+                data["origin"] = [round(self._from_m(ox, unit), 4), round(self._from_m(oy, unit), 4)]
+                if abs(ox - x_m) > 1e-6 or abs(oy - y_m) > 1e-6:
+                    bad.append(f"origine {data['origin']} invece di [{x}, {y}]")
+            except Exception as ex:
+                bad.append(f"origine non leggibile ({ex})")
+            try:
+                w_m, h_m = pair("GetSize")
+                data["width"] = round(self._from_m(w_m, unit), 4)
+                data["height"] = round(self._from_m(h_m, unit), 4)
+                for k, want in (("width", width), ("height", height)):
+                    if want is not None and abs(data[k] - float(want)) > 1e-3 * max(1.0, abs(float(want))):
+                        bad.append(f"{k} {data[k]} invece di {want}")
+            except Exception as ex:
+                bad.append(f"dimensioni non leggibili ({ex})")
+            try:
+                data["angle_deg"] = round(math.degrees(float(pic.Angle)), 4)
+                if abs(data["angle_deg"] - float(angle or 0.0)) > 1e-3:
+                    bad.append(f"angolo {data['angle_deg']} invece di {angle}")
+            except Exception as ex:
+                bad.append(f"angolo non leggibile ({ex})")
+            if transparency:
+                try:
+                    st, tr = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0), r8()
+                    pic.GetTransparency(st, tr, win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0), r8())
+                    data["transparency"] = round(float(tr.value), 4)
+                    if abs(data["transparency"] - float(transparency)) > 0.6 / 255:   # SolidWorks la tiene in 1/255
+                        bad.append(f"trasparenza {data['transparency']} invece di {transparency}")
+                except Exception as ex:
+                    bad.append(f"trasparenza non leggibile ({ex})")
+            if errors:
+                data["set_errors"] = errors
+            if bad:
+                data["mismatch"] = bad
+                return self._result(False, "Immagine inserita ma non come chiesto: " + "; ".join(bad)
+                                    + " (undo per toglierla)", SwErrors.swSketchError, data)
             u = unit or "mm"
-            msg = f"Immagine di schizzo inserita: {os.path.basename(path)} in ({x}, {y} {u})."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "filepath": path,
-                "picture_loaded": True,
-                "x": x,
-                "y": y,
-                "angle_deg": float(angle or 0.0),
-                "ignored_params": ["transparency"]
-            })
+            msg = f"Immagine di schizzo inserita: {os.path.basename(path)} in ({x}, {y} {u}), {data['width']} x {data['height']} {u}."
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"insert_sketch_picture: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
+    def _pic_set_size(self, pic, pair, width, height, unit):
+        """Dimensioni dell'immagine: con un solo valore l'altro segue le proporzioni attuali."""
+        if width is None and height is None:
+            return
+        w0, h0 = pair("GetSize")
+        w = self._mmu(width, unit) if width is not None else w0 * self._mmu(height, unit) / h0
+        h = self._mmu(height, unit) if height is not None else h0 * self._mmu(width, unit) / w0
+        pic.SetSize(w, h, False)
 
     def insert_sketch_block_from_file(self, filepath: str, x: float = 0.0, y: float = 0.0,
                                       scale: float = 1.0, angle: float = 0.0, unit: str = None) -> Dict:
@@ -669,32 +782,38 @@ class Sketch4Operations:
             x_m = self._mmu(x, unit)
             y_m = self._mmu(y, unit)
 
-            pt = None
+            before = {str(self._com(i, "Name")) for i in (self._com(_sk, "GetSketchBlockInstances") or ())}
+            sc = float(scale or 1.0)
+            ang_rad = math.radians(float(angle or 0.0))
             try:
-                mu = self._as_utility() if hasattr(self, "_as_utility") else None
-                if mu:
-                    pt = mu.CreatePoint([x_m, y_m, 0.0])
-            except Exception:
-                pass
-
-            block_inst = None
-            try:
-                ang_rad = math.radians(float(angle or 0.0))
-                sc = float(scale or 1.0)
-                block_inst = sm.MakeSketchBlockFromFile(pt, path, False, sc, ang_rad)
+                pt = self._math_point([x_m, y_m, 0.0])
+                sm.MakeSketchBlockFromFile(pt, path, False, sc, ang_rad)
             except Exception as ex:
                 return self._result(False, f"insert_sketch_block_from_file: inserimento blocco non riuscito: {ex}", SwErrors.swSketchError)
-            if block_inst is None:
+            # (revisione) prima il punto d'inserimento falliva in silenzio e il risultato ripeteva i valori chiesti: ora
+            # si rilegge l'istanza nuova (posizione, scala, angolo)
+            new = [i for i in (self._com(_sk, "GetSketchBlockInstances") or ()) if str(self._com(i, "Name")) not in before]
+            if not new:
                 return self._result(False, "insert_sketch_block_from_file: SolidWorks non ha inserito il blocco.", SwErrors.swSketchError)
-
-            msg = f"Blocco di schizzo inserito da {os.path.basename(path)} (scala {scale}, angolo {angle}°)."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "filepath": path,
-                "block_created": True,
-                "insertion_point": [x, y],
-                "scale": float(scale or 1.0),
-                "angle_deg": float(angle or 0.0)
-            })
+            inst = new[0]
+            pos = [float(v) for v in list(self._com(self._com(inst, "InstancePosition"), "ArrayData"))[:2]]
+            data = {"filepath": path, "instance": str(self._com(inst, "Name")),
+                    "insertion_point": [round(self._from_m(pos[0], unit), 4), round(self._from_m(pos[1], unit), 4)],
+                    "scale": round(float(self._com(inst, "Scale")), 6),
+                    "angle_deg": round(math.degrees(float(self._com(inst, "Angle"))), 4)}
+            bad = []
+            if math.hypot(pos[0] - x_m, pos[1] - y_m) > 1e-6:
+                bad.append(f"posizione {data['insertion_point']} invece di [{x}, {y}]")
+            if abs(data["scale"] - sc) > 1e-6:
+                bad.append(f"scala {data['scale']} invece di {sc}")
+            if abs((data["angle_deg"] - float(angle or 0.0) + 180) % 360 - 180) > 1e-3:
+                bad.append(f"angolo {data['angle_deg']} invece di {angle}")
+            if bad:
+                return self._result(False, "Blocco inserito ma non come chiesto: " + "; ".join(bad) + " (undo per toglierlo)",
+                                    SwErrors.swSketchError, data)
+            msg = (f"Blocco {data['instance']} da {os.path.basename(path)} in {data['insertion_point']}, scala "
+                   f"{data['scale']}, angolo {data['angle_deg']} gradi")
+            return self._result(True, msg, SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"insert_sketch_block_from_file: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)

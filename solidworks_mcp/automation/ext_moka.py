@@ -397,13 +397,17 @@ class MokaOperations:
                 else:
                     data["instances"] = 1 + int(round((faces1 - faces0) / per))
                 data["instances_note"] = "contate dalle facce create / facce di una istanza (seme incluso)"
+            code, warn = 0, False
             try:
                 fo = self._find_feature(doc, data["feature"])
-                code, _warn = self._feat_error(fo)
+                code, warn = self._feat_error(fo)
                 if code:
                     data["rebuild_error_code"] = int(code)
-            except Exception:
-                pass
+            except Exception as ex:
+                data["rebuild_error_unreadable"] = str(ex)
+            if code and not warn:
+                return self._result(False, f"Ripetizione di riempimento {data['feature']} creata ma IN ERRORE "
+                                    f"(codice {code})", SwErrors.swFeatureError, data)
             return self._result(True, f"Ripetizione di riempimento {data['feature']}: {data.get('instances', '?')} istanze, volume "
                                 f"{v0 * 1e9:.1f} -> {vol * 1e9:.1f} mm3", SwErrors.swSuccess, data)
         except Exception as e:

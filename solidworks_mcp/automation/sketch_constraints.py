@@ -465,12 +465,15 @@ class SketchConstraintOperations:
             if dim_obj is None:
                 return self._result(False, "Quota creata ma non recuperabile", SwErrors.swSketchError)
             full = self._com(dim_obj, "FullName")
+            name_note = ""
             if name:
                 try:
                     dim_obj.Name = name
                     full = self._com(dim_obj, "FullName")
                 except Exception:
                     pass
+                if not str(full or "").startswith(str(name) + "@"):
+                    name_note = f" (ATTENZIONE: nome '{name}' non accettato da SolidWorks)"
             try:
                 driven = int(self._com(dim_obj, "DrivenState")) == 1
             except Exception:
@@ -493,7 +496,7 @@ class SketchConstraintOperations:
             short = full.rsplit("@", 1)[0] if full.count("@") >= 2 else full
             status = int(self._com(sk, "GetConstrainedStatus"))
             return self._result(True, f"Quota {short} = {shown:.4f} {'deg' if kind == 'angle' else self._unit_name(unit)}"
-                                f" (schizzo {STATUS_NAMES.get(status)})", SwErrors.swSuccess,
+                                f" (schizzo {STATUS_NAMES.get(status)}){name_note}", SwErrors.swSuccess,
                                 {"dimension": short, "full_name": full, "value": round(shown, 6),
                                  "unit": "deg" if kind == "angle" else self._unit_name(unit),
                                  "sketch": sk_name, "sketch_status": STATUS_NAMES.get(status),
@@ -619,7 +622,11 @@ class SketchConstraintOperations:
             segs = {self._seg_id(s): s for s in self._segments(sk)}
             changed = []
             for ent in entities or []:
-                seg = segs.get(ent)
+                seg = segs.get(ent) if isinstance(ent, str) else None
+                if seg is None:                       # anche '@x,y' come gli altri tool di schizzo
+                    obj, _d, e = self._resolve_entity(doc, sk, ent, None)
+                    seg = obj if (not e and hasattr(obj, "GetLength")) else None
+                    ent = self._seg_id(seg) if seg is not None else ent
                 if seg is None:
                     return self._result(False, f"Entita' '{ent}' non trovata in {sk_name} (usa list_sketch_entities).",
                                         SwErrors.swSelectionError)

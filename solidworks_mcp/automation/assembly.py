@@ -119,6 +119,14 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
     def _as_utility(self):
         return self._com(self._sw_app, "GetMathUtility")
 
+    def _math_point(self, xyz):
+        """IMathPoint da [x, y, z] in metri (come CreateTransform, in late binding va chiamato con Invoke diretto:
+        `mu.CreatePoint(...)` solleva un'eccezione del server, misurato 19/11)."""
+        mu = self._as_utility()
+        arr = win32com.client.VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, tuple(float(v) for v in xyz))
+        did = mu._oleobj_.GetIDsOfNames("CreatePoint")
+        return win32com.client.Dispatch(mu._oleobj_.Invoke(did, 0, pythoncom.DISPATCH_METHOD, True, arr))
+
     def _as_transform(self, M, t):
         """MathTransform da matrice (colonna) e traslazione [m]."""
         mu = self._as_utility()

@@ -15,6 +15,7 @@ Uso:  python tests/test_offline.py          (oppure .venv\\Scripts\\python.exe t
 """
 
 import os
+os.environ.setdefault("SW_MCP_LANG", "it")   # messaggi italiani nei controlli (utils/messages.py)
 import re
 import sys
 import json
@@ -81,7 +82,7 @@ if not STUBBED:
                                                                         SwErrors.swConnectionError)
 
 RESULTS = []
-EXPECTED_TOOLS = 454                       # 455 registrati meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON);
+EXPECTED_TOOLS = 445                       # 446 registrati meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON);
                                            # 2026-11-18: cancellato il codice degli 84 tool nascosti (erano 558 registrati)
                                            # e tolti 25 doppioni (REPLACED_BY in not_implemented.py)
 from solidworks_mcp.not_implemented import NOT_IMPLEMENTED
@@ -1958,14 +1959,16 @@ def test_sketch4_tools():
     sw._part = lambda: (mock_doc, None)
 
     # Test esecuzione mock per i tool principali
-    ok_off = sw.sketch_offset_on_surface(5.0)
+    ok_off = sw.sketch_offset_on_surface(distance=5.0)
     ok_chn = sw.make_sketch_chain(["Line1"])
     ok_seg = sw.segment_sketch_entity("Line1", count=5, is_segments=True)
     ok_slt = sw.draw_3point_arc_slot(0, 0, 20, 0, 10, 5, width=4)
     ok_curv = sw.show_sketch_curvature("Line1", scale=15.0, density=30, visible=True)
     ok_eq3d = sw.draw_equation_curve_3d("10*cos(t)", "10*sin(t)", "2*t", start=0, end=3.14, samples=20)
 
-    record("sketch4: sketch_offset_on_surface calcola distanza e geodetica", ok_off["success"] and ok_off["data"]["geodesic"])
+    # revisione 2026-11-19: servono gli spigoli (prima il tool non li chiedeva e l'offset non poteva funzionare)
+    record("sketch4: sketch_offset_on_surface senza spigoli -> errore che lo dice", not ok_off["success"]
+           and "spigoli" in ok_off["message"], ok_off["message"][:80])
     record("sketch4: make_sketch_chain combina segmenti", ok_chn["success"] and ok_chn["data"]["segment_count"] == 1)
     record("sketch4: segment_sketch_entity su una spline -> rifiutato (punti non calcolabili sulla curva)",
            not ok_seg["success"] and "solo linee" in ok_seg["message"], ok_seg["message"][:90])
@@ -2151,8 +2154,10 @@ def test_sketch5_tools():
     _MockOleStub.ignore_put = False
     record("sketch5: edit_spline_handle con valore non applicato da SolidWorks -> errore",
            not ko_hnd["success"] and "magnitude" in ko_hnd["message"], ko_hnd["message"][:100])
-    record("sketch5: replace_sketch_entity e create_sketch_belt eseguiti con successo",
-           ok_rep["success"] and ok_rep["data"]["replaced"] and ok_blt["success"])
+    # revisione 2026-11-19: la sostituzione rilegge lo schizzo (sorgente costruzione/eliminata, destinazione presente):
+    # col finto schizzo le entita' non si trovano e il tool deve dirlo (la prova vera e' in test_copertura_live.py)
+    record("sketch5: replace_sketch_entity senza entita' leggibili -> errore; create_sketch_belt riuscito",
+           not ok_rep["success"] and ok_blt["success"], ok_rep["message"][:80])
     record("sketch5: relazioni (suppress, get_allowed, delete_all) analizzate correttamente",
            ok_sup["success"] and len(ok_alw["data"]["allowed_relations"]) == 3 and ok_dar["success"])
     record("sketch5: regioni, rotazione 3D e modalita' performance validi", ok_reg['success'] and ok_r3d['data']['copy'] and ok_prf['data']['add_to_db'])
@@ -3812,6 +3817,31 @@ def test_review_v_fixes(tmp):
     record("add_equation: equazione sana -> resta", r["success"] is True and len(em.eqs) == 1, r["message"][:80])
 
 
+def test_messages_en():
+    """Messaggi in inglese in uscita (utils/messages.py, revisione sez. 5, 19/11)."""
+    from solidworks_mcp.utils import messages as m
+    old = os.environ.get("SW_MCP_LANG")
+    try:
+        os.environ["SW_MCP_LANG"] = "en"
+        t = m.tr("Nessuna faccia entro 0,5 mm da [-20, 30, 10]")
+        record("messaggi: frase italiana tradotta, numeri intatti", t.startswith("No face") and "[-20, 30, 10]" in t, t)
+        t = m.tr("Sketch created on Front (Piano frontale)")
+        record("messaggi: nomi di SolidWorks fra parentesi non toccati", "Piano frontale" in t, t)
+        r = srv.format_result({"success": False, "message": "Nessuna faccia entro 0,5 mm da [1, 2, 3]", "error_code": 1,
+                               "error_name": "x", "data": {"results": [{"message": "Nessuna faccia entro 0,5 mm da [1, 2, 3]"}]}})
+        record("messaggi: format_result traduce messaggio e passi della sequenza", r.count("No face") == 2, r[:120])
+        os.environ["SW_MCP_LANG"] = "it"
+        t = m.tr("Nessuna faccia entro 0,5 mm da [-20, 30, 10]")
+        record("messaggi: SW_MCP_LANG=it lascia l'italiano", t.startswith("Nessuna faccia"), t)
+        n = len(m._load()["map"])
+        record("messaggi: tabella inglese caricata (> 1500 frammenti)", n > 1500, str(n))
+    finally:
+        if old is None:
+            os.environ.pop("SW_MCP_LANG", None)
+        else:
+            os.environ["SW_MCP_LANG"] = old
+
+
 def main():
     print(f"Test offline (COM {'simulato' if STUBBED else 'reale: pywin32 presente, SolidWorks non usato'})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -3830,7 +3860,7 @@ def main():
                          ("revisione sicurezza e file", lambda: test_review_fixes(tmp)),
                          ("revisione sezione 2, resto", lambda: test_review_sec2_rest(tmp)),
                          ("revisione falsi successi [V]", lambda: test_review_v_fixes(tmp)),
-                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp)), ("correzioni dal rapporto", test_report_fix_tools)):
+                         ("batch sequence", lambda: test_execute_tool_sequence(tmp)), ("image content", lambda: test_image_content(tmp)), ("diagnostica e ricerca", test_diagnostics_and_search), ("audit e collisioni", test_audit_and_collision), ("lotto sketch4", test_sketch4_tools), ("lotto sketch5", test_sketch5_tools), ("lotto assembly3", lambda: test_assembly3_tools(tmp)), ("lotto drawings2", lambda: test_drawings2_tools(tmp)), ("lotto features4", lambda: test_features4_tools(tmp)), ("lotto data2", lambda: test_data2_tools(tmp)), ("lotto simulation2", lambda: test_simulation2_tools(tmp)), ("correzioni dal rapporto", test_report_fix_tools), ("messaggi in inglese", test_messages_en)):
             try:
                 fn()
             except Exception as e:

@@ -3,8 +3,8 @@
 **Let Claude drive SOLIDWORKS.** Describe a part, an assembly, a drawing or a simulation in plain words, and the model builds it in SOLIDWORKS for you, then checks the result with real numbers.
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
-![version](https://img.shields.io/badge/version-8.4.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-454-green)
+![version](https://img.shields.io/badge/version-8.5.0-blue)
+![tools](https://img.shields.io/badge/MCP%20tools-445-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -23,9 +23,9 @@
 
 ## What is this?
 
-An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **473 tools** (474 with `execute_python` enabled). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
+An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **445 tools** (446 with `execute_python` enabled). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
-The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 390 of the 454 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
+The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. Every one of the 445 tools is exercised by at least one live test. Tools whose SOLIDWORKS API turned out not to work were removed; each one is listed, with the measured reason, in `solidworks_mcp/not_implemented.py`.
 
 85 more tools were tried and **removed**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one keeps its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition), and calling it returns that reason. 25 duplicate tools (two names for the same operation, such as `extrude_sketch` and `extrude_boss`) were also removed: the old name returns an error that names the tool to use.
 
@@ -148,11 +148,12 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
 | `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base` - 35 tools, always on - `modeling` 204, `drawings` 56, `assembly` 65, `data` 41, `simulation` 53). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 454 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 445 tools |
 | `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
 | `SW_MCP_COM_CACHE=0` | Disable the light COM wrappers (default on: no type description is fetched for each object SOLIDWORKS returns) |
 | `SW_MCP_COM_POOL=0` | Disable the COM object pool (default on: returned objects are released after the answer is sent, not during the tool) |
 | `SW_MCP_PREWARM=0` | Do not start the dedicated instance when the server starts (default on: it starts in the background right away) |
+| `SW_MCP_LANG=it` | Result messages in Italian (default `en`: the code writes them in Italian and the server translates them on the way out; data fields are never translated) |
 | `SW_MCP_FREEZE_UI=1` | Experimental: suspend graphics and FeatureManager tree updates of the active document during each tool |
 
 ### Speed

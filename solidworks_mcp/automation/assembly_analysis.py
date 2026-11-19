@@ -609,6 +609,7 @@ class AssemblyAnalysisMixin:
             area = float(self._com(mp, "SurfaceArea"))
             com = [round(v * 1000, 4) for v in self._com(mp, "CenterOfMass")]
             by_file: Dict[str, Dict] = {}
+            skipped: List[str] = []
             for c in self._as_top_components(doc, False):
                 try:
                     if int(self._com(c, "GetSuppression")) == 0:
@@ -620,7 +621,8 @@ class AssemblyAnalysisMixin:
                     row = by_file.setdefault(path, {"file": os.path.basename(path), "count": 0,
                                                     "unit_mass_kg": self._model_mass(c)})
                     row["count"] += 1
-                except Exception:
+                except Exception as ex:          # dichiarato: la tabella per file non lo conta
+                    skipped.append(f"{self._com(c, 'Name2')}: {ex}")
                     continue
             rows = sorted(by_file.values(), key=lambda r: r["file"])
             summed = sum((r["unit_mass_kg"] or 0.0) * r["count"] for r in rows)
@@ -629,7 +631,7 @@ class AssemblyAnalysisMixin:
             return self._result(True, f"Massa {mass:.5f} kg, volume {vol * 1e9:.1f} mm3", SwErrors.swSuccess,
                                 {"mass_kg": mass, "volume_mm3": round(vol * 1e9, 4), "surface_area_mm2": round(area * 1e6, 4),
                                  "center_of_mass_mm": com, "sum_of_components_kg": summed,
-                                 "difference_kg": mass - summed, "files": rows})
+                                 "difference_kg": mass - summed, "files": rows, "components_not_counted": skipped})
         except Exception as e:
             return self._as_fail("get_assembly_mass_properties", e)
 
@@ -718,10 +720,18 @@ class AssemblyAnalysisMixin:
             comp, e = self._as_comp(doc, component, True)
             if e:
                 return self._result(False, e, SwErrors.swSelectionError)
+            before = str(comp.ReferencedConfiguration)
             comp.ReferencedConfiguration = str(configuration)
             doc.ForceRebuild2(False)
             now = str(comp.ReferencedConfiguration)
-            return self._result(now == configuration, f"{component}: configurazione {now}",
-                                SwErrors.swSuccess if now == configuration else SwErrors.swFeatureError, {"configuration": now})
+            if now != configuration:
+                # misurato 19/11: con un nome inesistente SolidWorks passa alla configurazione predefinita: si rimette
+                # quella di prima, cosi' un errore non cambia l'assieme
+                comp.ReferencedConfiguration = before
+                doc.ForceRebuild2(False)
+                now = str(comp.ReferencedConfiguration)
+                return self._result(False, f"{component}: configurazione '{configuration}' non applicata (il pezzo non "
+                                    f"la ha?); resta '{now}'.", SwErrors.swFeatureError, {"configuration": now})
+            return self._result(True, f"{component}: configurazione {now} (riletta)", SwErrors.swSuccess, {"configuration": now})
         except Exception as e:
             return self._as_fail("set_component_configuration", e)

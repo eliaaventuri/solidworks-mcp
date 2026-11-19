@@ -6,14 +6,15 @@ _UNIT = (S, "Length unit ('mm' | 'm' | 'in' | 'ft', default from document)")
 TOOLS = {
     "sketch_offset_on_surface": (
         "sketch_offset_on_surface",
-        "Create a geodesic or Euclidean 3D offset curve directly on a curved model face from selected edges.",
+        "Offset model edges by `distance` ON the adjacent face (Offset on Surface), in a 3D sketch (opened if none is "
+        "active). Each new curve is checked: its midpoint lies at `distance` from the edge.",
         {
+            "edges": (A, "Model edges to offset: points [[x,y,z], ...] ON the edges (`unit`)"),
             "distance": (N, "Offset distance in `unit` (default 5.0 mm)"),
-            "reverse": (B, "true = reverse offset direction along face (default false)"),
-            "geodesic": (B, "true = shortest distance along curved surface; false = Euclidean distance (default true)"),
+            "reverse": (B, "true = offset onto the other face of the edge (default false)"),
             "unit": _UNIT,
         },
-        [],
+        ["edges"],
     ),
     "make_sketch_chain": (
         "make_sketch_chain",
@@ -77,9 +78,9 @@ TOOLS = {
     ),
     "stretch_sketch_entities": (
         "stretch_sketch_entities",
-        "Stretch and deform selected sketch entities by moving vertices from a base point by delta (dx, dy).",
+        "Stretch: move the chosen entities (ids or '@x,y') by (dx, dy); connected entities stretch to follow. Positions are read back.",
         {
-            "entities": (A, "Array of sketch segment IDs to stretch"),
+            "entities": (A, "Entities to move: ids ('S0-1-2') or '@x,y'"),
             "base_x": (N, "Reference base point X in `unit` (default 0.0)"),
             "base_y": (N, "Reference base point Y in `unit` (default 0.0)"),
             "dx": (N, "Displacement delta X in `unit`"),
@@ -90,10 +91,10 @@ TOOLS = {
     ),
     "align_sketch_entities": (
         "align_sketch_entities",
-        "Align 2D or 3D sketch geometry using 1, 2, or 3 correspondence point pairs (translates, rotates, and orients entities).",
+        "Align 2D sketch entities with 1 point pair (move) or 2 pairs (move + rotate, no scaling). Positions are read back.",
         {
-            "entities": (A, "Array of sketch segment IDs to align"),
-            "source_points": (A, "List of source points [[x,y],...] or [[x,y,z],...]"),
+            "entities": (A, "Entities to align: ids or '@x,y' (required)"),
+            "source_points": (A, "1 or 2 source points [[x,y],...]"),
             "target_points": (A, "List of target destination points [[x,y],...] or [[x,y,z],...]"),
             "unit": _UNIT,
         },
