@@ -47,7 +47,6 @@ TOOLS = {
         "Create a topology optimization study (needs the matching license; fails if SolidWorks refuses). The mass target is not settable via API.",
         {
             "study_name": (S, "Name of the topology optimization study (default 'Topology 1')"),
-            "target_mass_percent": (N, "Desired mass target percent (NOT applied: reported for the user to set in SolidWorks)"),
         },
         [],
     ),
@@ -262,7 +261,7 @@ TOOLS = {
     ),
     "get_mesh_quality_metrics": (
         "get_mesh_quality_metrics",
-        "Check mesh element quality diagnostics (Jacobian aspect ratio, collapsed elements, % high quality).",
+        "Mesh diagnostics of a study: node and element counts, MAXIMUM aspect ratio, worst Jacobian ratio, mesh quality (draft/high) and mesher type. (No per-element distribution: the API does not expose it.)",
         {
             "study_name": (S, "Study name (or active study if omitted)"),
         },
@@ -292,7 +291,7 @@ TOOLS = {
     ),
     "get_thermal_results": (
         "get_thermal_results",
-        "Extract minimum and maximum nodal temperatures in Celsius and resultant thermal heat flux vectors.",
+        "Thermal study results: min/max nodal temperature in Celsius (with locations), temperature gradient min/max, resultant heat flux min/max in W/m2 (location of the max) and min/max of each flux component.",
         {
             "study_name": (S, "Study name (or active study if omitted)"),
         },
@@ -304,6 +303,7 @@ TOOLS = {
         {
             "face_point": (A, "Point [x,y,z] mm ON a restrained face, or a list of points"),
             "study_name": (S, "Study name (or active study if omitted)"),
+            "step": (N, "Solution step (count, default 1; linear static studies have 1)"),
         },
         ["face_point"],
     ),
@@ -315,6 +315,7 @@ TOOLS = {
             "y": (N, "Y in mm"),
             "z": (N, "Z in mm"),
             "study_name": (S, "Study name (or active study if omitted)"),
+            "step": (N, "Solution step (count, default 1; linear static studies have 1)"),
         },
         ["x", "y", "z"],
     ),

@@ -593,7 +593,7 @@ class AssemblyAnalysisMixin:
         except Exception:
             return None
 
-    def get_assembly_mass_properties(self, unit: str = None) -> Dict:
+    def get_assembly_mass_properties(self) -> Dict:
         """Massa, volume, area, baricentro dell'assieme + massa di ogni file (per istanza) e verifica massa = somma componenti."""
         try:
             doc, err = self._asm()

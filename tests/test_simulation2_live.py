@@ -254,7 +254,7 @@ async def scenario(c):
     ok, txt, d = await c.call("create_fatigue_study", study_name="Fat_Live", event_cycles=75000, static_study="Elast_Live")
     record("create_fatigue_study: tipo 7, evento da 75000 cicli", ok and d.get("analysis_type") == 7 and d.get("events") == 1
            and d.get("cycles") == 75000.0, txt)
-    ok, txt, d = await c.call("create_topology_study", study_name="Topo_Live", target_mass_percent=45.0)
+    ok, txt, d = await c.call("create_topology_study", study_name="Topo_Live")
     record("create_topology_study: tipo 13 oppure rifiuto esplicito della licenza", (ok and d.get("analysis_type") == 13)
            or (not ok and "errore 3" in txt), txt[:110])
     ok, txt, d = await c.call("create_linear_dynamic_study", study_name="Dyn_Live", dynamic_type="harmonic")

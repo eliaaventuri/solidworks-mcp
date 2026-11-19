@@ -39,7 +39,7 @@ TOOLS = {
         "Adjust tangent magnitude, radial/polar angle, or curvature value of a specific spline handle.",
         {
             "point_index": (N, "0-based index of the spline point / handle to edit (index, default 0)"),
-            "magnitude": (N, "Tangent vector magnitude factor (scale, e.g. 1.5)"),
+            "magnitude": (N, "Tangent vector magnitude factor (scale). Measured on SW 2026: SolidWorks recomputes it (1.5 reads back 0.55), so the tool reports the value read and fails"),
             "radial_angle_deg": (N, "Radial direction angle in degrees (degrees)"),
             "polar_angle_deg": (N, "Polar direction angle in degrees (degrees)"),
             "curvature": (N, "Target curvature value to impose at handle (ratio)"),

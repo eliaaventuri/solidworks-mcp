@@ -415,7 +415,7 @@ class DrawingLayoutMixin:
                     seen.add(key)
                     dup += int(isdup)
                     rows.append({"view": vname, "pictorial_view": pict, "name": i["name"],
-                                 "value_mm": round(i["value"] * 1000, 4), "type": i["type"],
+                                 "value_mm": round(i["value"], 4), "type": i["type"],   # IDimension.Value e' gia' in mm (era x1000)
                                  "hole_callout": i["callout"], "duplicate": isdup,
                                  "x_mm": self._mm(i["pos"][0]), "y_mm": self._mm(i["pos"][1])})
             return self._result(True, f"{len(rows)} quote, {dup} duplicate", SwErrors.swSuccess,
@@ -426,10 +426,11 @@ class DrawingLayoutMixin:
 
 
     # ------------------------------------------------------------------ N. DISEGNO del cartiglio (A8)
-    def _fit_title_number(self, doc) -> Dict:
+    def _fit_title_number(self, doc, apply: bool = True) -> Dict:
         """(A8) Il formato ISO scrive il nome file (N. DISEGNO) in carattere da 6,35 mm in una cella larga ~70 mm:
         con nomi lunghi esce dalla cella. Riduce l'altezza del carattere della nota (e se anche 2 mm non bastano
-        lo dichiara). Restituisce {'text','height_mm','fits'}."""
+        lo dichiara). Restituisce {'text','height_mm','fits'}. apply=False: solo il controllo, nessuna modifica
+        (audit_drawing non deve scrivere nel documento)."""
         out = {"text": None, "height_mm": None, "fits": True}
         try:
             W, H, _ = self._sheet_dims(doc)
@@ -455,7 +456,8 @@ class DrawingLayoutMixin:
                                 want = min(0.00635, cell / (0.70 * max(n, 1)))
                                 new_h = max(want, 0.0015)
                                 out.update({"text": txt, "height_mm": round(new_h * 1000, 2), "fits": want >= 0.0015})
-                                if new_h < h - 1e-6:
+                                out["current_height_mm"] = round(h * 1000, 2)
+                                if apply and new_h < h - 1e-6:
                                     tf.CharHeight = new_h
                                     a.SetTextFormat(0, False, tf)
                                 break

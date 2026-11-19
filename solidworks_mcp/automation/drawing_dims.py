@@ -311,7 +311,7 @@ class DrawingDimsMixin:
 
     def _dq_cleanup(self, doc, views: List[Any], remove_chamfer_dims: bool = True) -> Dict:
         """Duplicati (anche fra viste), quote di smusso e quote inutilmente piccole. Restituisce statistiche."""
-        stats = {"duplicates": 0, "chamfer": 0, "tiny": 0, "chamfer_note": []}
+        stats = {"duplicates": 0, "chamfer": 0, "tiny": 0, "chamfer_note": [], "chamfer_dims": []}
         infos = []
         for v in views:
             for dd in self._dq_view_dims(v):
@@ -347,12 +347,15 @@ class DrawingDimsMixin:
                                        for a in ang):
                     label = f"{lin[0]['value']:g}x45°"          # IDimension.Value e' nell'unita' del documento (mm)
                     stats["chamfer_note"].append(label)
+                    # (revisione 2026-11-12) prima le quote di smusso si cancellavano QUI, prima della nota: se la nota non
+                    # si creava (gia' presente, niente posto) erano perse. Ora si cancellano in _dq_run solo a nota fatta.
                     for d in ds:
-                        mark(d, "chamfer")
+                        if not any(d is t for t in stats["chamfer_dims"]):
+                            stats["chamfer_dims"].append(d)
         # 2) duplicati: stessa chiave (valore, tipo, punti di riferimento del modello) -> teniamo la vista preferita
         groups: Dict[Tuple, List[Dict]] = {}
         for i in infos:
-            if any(i is t for t in to_delete):
+            if any(i is t for t in to_delete) or any(i is t for t in stats["chamfer_dims"]):
                 continue
             if i["refpts"] and i["kind"] in (KIND_LIN, KIND_ANG, KIND_RAD, KIND_DIA):
                 pts = tuple(sorted(i["refpts"]))
@@ -710,8 +713,12 @@ class DrawingDimsMixin:
         if not arcs:
             return False
         a = arcs[0]
-        cx, cy = a[0], a[1]
-        math.hypot(a[5] - cx, a[6] - cy) if len(a) > 6 else 0.0
+        # (revisione 2026-11-12) GetArcAtIndex2: [0:4] limiti fittizi (~ +-1000 m, vedi A10), [10:13] centro. Prima qui si
+        # usava a[0], a[1] come centro e il testo finiva fuori posto.
+        if len(a) >= 13:
+            cx, cy = a[10], a[11]
+        else:
+            return False
         an = i["dd"].GetAnnotation
         pos = tuple(float(t) for t in an.GetPosition)
         # direzione dal vertice verso la posizione attuale del testo
@@ -871,10 +878,24 @@ class DrawingDimsMixin:
         views_sorted = sorted(views, key=lambda v: (self._dq_has_circle_dims(v), -self._count_dims(v)))
         for v in views_sorted:
             results.append(self._dq_arrange_view(doc, v, placed, pitch, first))
-        try:
-            self._dq_chamfer_note(doc, stats.get("chamfer_note", []))
-        except Exception as e:
-            logger.debug(f"chamfer note: {e}")
+        chamfer_dims = stats.pop("chamfer_dims", [])
+        if chamfer_dims:
+            try:
+                note = self._dq_chamfer_note(doc, stats.get("chamfer_note", []))
+            except Exception as e:
+                logger.debug(f"chamfer note: {e}")
+                note = "failed"
+            stats["chamfer_note_status"] = note
+            if note in ("created", "exists"):
+                for i in chamfer_dims:
+                    if self._delete_dim_full(doc, i["sel"]):
+                        stats["chamfer"] += 1
+                # le quote tolte lasciano righe vuote: secondo passaggio di impilamento
+                placed = []
+                results = [self._dq_arrange_view(doc, v, placed, pitch, first) for v in views_sorted]
+            else:
+                stats["chamfer_kept"] = stats.get("chamfer_note", [])
+                stats["chamfer_note"] = []
         try:
             self._an_retag(doc)
         except Exception as e:
@@ -882,7 +903,7 @@ class DrawingDimsMixin:
         return {"cleanup": stats, "views": results}
 
     def arrange_drawing_dimensions(self, view: str = None, pitch: float = None, first_offset: float = None,
-                                   cleanup: bool = True, unit: str = None) -> Dict:
+                                   cleanup: bool = True) -> Dict:
         """Riordina le quote del foglio attivo (o di una vista): rimuove duplicati (anche fra viste) e quote di
         smusso, poi le impila secondo ISO 129 (orizzontali sopra/sotto, verticali a destra/sinistra, passo
         costante, dalla piu' corta alla piu' lunga, senza incroci); angolari con arco contenuto.
@@ -908,11 +929,15 @@ class DrawingDimsMixin:
             msg = f"Quote riordinate: {moved} spostate, {out['cleanup']['duplicates']} duplicati rimossi"
             if out["cleanup"]["chamfer"]:
                 msg += f", {out['cleanup']['chamfer']} quote di smusso -> nota"
+            if out["cleanup"].get("chamfer_kept"):
+                warns.append(f"nota degli smussi non creata ({out['cleanup'].get('chamfer_note_status')}): quote di smusso "
+                             f"{out['cleanup']['chamfer_kept']} LASCIATE nelle viste")
             if warns:
                 msg += " - ATTENZIONE: " + "; ".join(warns)
             return self._result(True, msg, SwErrors.swSuccess, {
                 "moved": moved, "duplicates_removed": out["cleanup"]["duplicates"],
                 "chamfer_dims_removed": out["cleanup"]["chamfer"], "chamfer_note": out["cleanup"]["chamfer_note"],
+                "chamfer_dims_kept": out["cleanup"].get("chamfer_kept", []),
                 "warnings": warns, "views": [{k: r[k] for k in ("view", "moved", "rows")} for r in out["views"]]})
         except Exception as e:
             return self._fail("arrange_drawing_dimensions", e)

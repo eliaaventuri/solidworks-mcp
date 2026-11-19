@@ -129,9 +129,15 @@ class SketchOperations:
             z_m = self._units.to_meters(z, unit)
             unit_str = unit or self._units.default_unit.value
             
-            # Clear any selection
+            # (revisione 2026-11-12) uno schizzo gia' aperto si chiude prima: InsertSketch2 alterna apri/chiudi, quindi con
+            # uno schizzo aperto la chiamata lo CHIUDEVA e la risposta diceva "Sketch created on face"
+            try:
+                if self._com(doc.SketchManager, "ActiveSketch") is not None:
+                    doc.SketchManager.InsertSketch(True)
+            except Exception:
+                pass
             doc.ClearSelection2(True)
-            
+
             # Select face at the given coordinates (selezione geometrica; fallback su SelectByID2)
             selected = False
             try:
@@ -152,7 +158,10 @@ class SketchOperations:
             
             # Insert sketch on the selected face
             doc.InsertSketch2(True)
-            
+            if self._com(doc.SketchManager, "ActiveSketch") is None:
+                return self._result(False, f"SolidWorks non ha aperto lo schizzo sulla faccia in ({x}, {y}, {z}) {unit_str}: "
+                                    "la faccia deve essere piana", SwErrors.swSketchError)
+
             try:
                 axes = self._sketch_plane_info(doc)
             except Exception:

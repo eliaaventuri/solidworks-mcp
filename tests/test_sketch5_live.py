@@ -67,8 +67,12 @@ async def run():
                 ok_smp, _, _ = await c.call("simplify_sketch_spline", tolerance=0.1)
                 record("simplify_sketch_spline", ok_smp)
 
-                ok_hnd, _, data_hnd = await c.call("edit_spline_handle", point_index=0, magnitude=1.5)
-                record("edit_spline_handle", ok_hnd, f"edited: {data_hnd.get('edited')}")
+                # revisione 2026-11-19: la magnitudine viene ricalcolata da SolidWorks (misurato 1,5 -> 0,546) e il tool lo
+                # dichiara come errore; la direzione radiale invece si scrive e si rilegge
+                ok_hnd, _, data_hnd = await c.call("edit_spline_handle", point_index=0, radial_angle_deg=20)
+                record("edit_spline_handle: direzione radiale 20 gradi riletta", ok_hnd
+                       and abs(((data_hnd.get("read_back") or {}).get("radial_angle_deg") or 0) - 20) < 0.01,
+                       f"read_back: {data_hnd.get('read_back')}")
 
                 ok_del, text_del, _ = await c.call("delete_spline_point", point_index=1)
                 record("delete_spline_point: rifiutato perche' non implementato", (not ok_del) and "non e' implementato" in text_del, text_del[:80])

@@ -16,7 +16,7 @@ os.environ.setdefault("SW_MCP_ALLOW_PYTHON", "1")   # i test live contano EXPECT
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-EXPECTED_TOOLS = 449   # 2026-11-18: cancellati il codice degli 84 tool nascosti e 25 doppioni (not_implemented.py)
+EXPECTED_TOOLS = 455   # 2026-11-19: tolto gaussian_curvature_display, aggiunti superfici 3 (4), tavole 3 (2), undo (revisione sez. 5)
 OUT = ROOT / "test_output"
 OUT.mkdir(exist_ok=True)
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -98,8 +98,12 @@ class Client:
         if "Details: " in text:
             try:
                 data = json.loads(text.split("Details: ", 1)[1])
-            except Exception:
-                data = {}
+            except Exception as e:
+                # (revisione 2026-11-12, sez. 5) prima il JSON rotto diventava {} in silenzio e i controlli fallivano senza
+                # motivo visibile: ora lo si dice nel log e la chiamata conta come fallita
+                print(f"    !! {tool_name}: dati JSON illeggibili ({e}): {text[:200]}")
+                data = {"_json_error": str(e)}
+                ok = False
         if os.environ.get("SW_TEST_TRACE"):              # diagnosi: ogni risposta dei tool nel log
             print(f"    <- {tool_name}: {text[:260]}")
         if tool_name == "connect_solidworks" and ok:

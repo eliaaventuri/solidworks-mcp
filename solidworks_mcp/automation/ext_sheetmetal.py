@@ -122,7 +122,35 @@ class SheetMetalOperations:
             feat = fm.CreateFeature(dd)
             doc.ClearSelection2(True)
             extra = {"sketch": name, "thickness_mm": round(t * 1000, 4), "bend_radius_mm": round(r * 1000, 4),
-                     "k_factor": k, "depth_mm": round(d * 1000, 4)}
+                     "k_factor_requested": k, "depth_mm": round(d * 1000, 4)}
+            # (revisione 2026-11-12) prima il risultato riportava il K chiesto anche se SolidWorks non lo teneva (vedi note in
+            # testa: KFactor non si persiste). Ora K, spessore e raggio sono riletti dalla feature Lamiera.
+            if feat is not None or self._new_features(doc, before):
+                try:
+                    sh = [f for n_, t_, f in self._features(doc) if t_ == "SheetMetal"]
+                    sd = sh[-1].GetDefinition
+                    sd.AccessSelections(doc, self._sm_null())
+                    got = self._sm_read_sheet(sd)
+                    sd.ReleaseSelectionAccess()
+                except Exception as ex:
+                    got = {"error": str(ex)}
+                extra["read_back"] = got
+                wrong = []
+                if "error" in got:
+                    wrong.append(f"lamiera non rileggibile ({got['error']})")
+                else:
+                    if abs(got["k_factor"] - k) > 1e-4:
+                        wrong.append(f"K {got['k_factor']} invece di {k} (SolidWorks non tiene il K impostato via API: ometti "
+                                     f"k_factor per usare {_K_DEFAULT})")
+                    if abs(got["thickness_mm"] - t * 1000) > 1e-4:
+                        wrong.append(f"spessore {got['thickness_mm']} mm invece di {round(t * 1000, 4)}")
+                    if abs(got["bend_radius_mm"] - r * 1000) > 1e-4:
+                        wrong.append(f"raggio {got['bend_radius_mm']} mm invece di {round(r * 1000, 4)}")
+                if wrong:
+                    self._delete_features(doc, [x["name"] for x in self._new_features(doc, before)])
+                    return self._result(False, "Flangia base creata ma diversa dalla richiesta: " + "; ".join(wrong)
+                                        + ". Eliminata.", SwErrors.swFeatureError, extra)
+                extra["k_factor"] = got["k_factor"]
             return self._finish(doc, "Flangia base lamiera", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"sm_base_flange: {e}\n{traceback.format_exc()}")
@@ -434,8 +462,16 @@ class SheetMetalOperations:
             sd2.ReleaseSelectionAccess()
             data["updated_base_flanges"] = updated
             data["volume_mm3"] = round(self._volume_m3(doc) * 1e9, 4)
-            return self._result(True, f"Parametri modificati: spessore {data['thickness_mm']} mm, volume "
-                                f"{data['volume_mm3']} mm3", SwErrors.swSuccess, data)
+            # (revisione 2026-11-12) prima "modificati" senza confrontare i valori riletti con quelli chiesti
+            wrong = []
+            if t is not None and abs(data["thickness_mm"] - t * 1000) > 1e-4:
+                wrong.append(f"spessore {data['thickness_mm']} mm invece di {round(t * 1000, 4)}")
+            if r is not None and abs(data["bend_radius_mm"] - r * 1000) > 1e-4:
+                wrong.append(f"raggio {data['bend_radius_mm']} mm invece di {round(r * 1000, 4)}")
+            if wrong:
+                return self._result(False, "SolidWorks non ha applicato i parametri: " + "; ".join(wrong), SwErrors.swFeatureError, data)
+            return self._result(True, f"Parametri modificati (riletti): spessore {data['thickness_mm']} mm, raggio "
+                                f"{data['bend_radius_mm']} mm, volume {data['volume_mm3']} mm3", SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"sm_parameters: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)

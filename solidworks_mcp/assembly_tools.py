@@ -135,8 +135,10 @@ _TOOLS = {
          "max_value": (N, "Maximum limit in mm / degrees"),
          "min_value": (N, "Minimum limit in mm / degrees"), "unit": _UNIT}, ["name"]),
     "get_assembly_status": ("get_assembly_status",
-        "Constraint status: fully defined or not, under/over-defined components, degrees of freedom, mates in error.",
-        {"probe_dof": (B, "true = measure free motion of under-defined components (default true; nudges and restores them)")},
+        "Constraint status: fully defined or not, under/over-defined components, degrees of freedom, mates in error; also the "
+        "mates in error INSIDE each sub-assembly (subassemblies=true, default).",
+        {"probe_dof": (B, "true = measure free motion of under-defined components (default true; nudges and restores them)"),
+         "subassemblies": (B, "Also check the mates inside every sub-assembly (default true)")},
         []),
     # ---------------------------------------------------------------- vista esplosa
     "create_exploded_view": ("create_exploded_view",
@@ -214,7 +216,7 @@ _TOOLS = {
         {"entity1": _ENT, "entity2": _ENT, "unit": _UNIT}, ["entity1", "entity2"]),
     "get_assembly_mass_properties": ("get_assembly_mass_properties",
         "Mass, volume, area, centroid of the assembly, mass per file, and a check that mass = sum of components.",
-        {"unit": _UNIT}, []),
+        {}, []),
     "count_components": ("count_components", "Count components per file (instances, suppressed).",
         {"top_level_only": (B, "true = first level only")}, []),
     # ---------------------------------------------------------------- configurazioni

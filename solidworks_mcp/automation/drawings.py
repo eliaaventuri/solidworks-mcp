@@ -696,38 +696,65 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             if auto:
                 self._place_free(doc, v, (px, py))
                 if not getattr(self, "_last_place_ok", True) and new_sheet_if_full:
-                    # foglio affollato: elimino la vista e la ricreo su un nuovo foglio
+                    # foglio affollato: la vista si ricrea su un nuovo foglio. (revisione 2026-11-12) prima la vista veniva
+                    # CANCELLATA prima di sapere se il nuovo foglio e la nuova vista si potevano creare, e un'eccezione finiva
+                    # solo nel log: la vista poteva sparire con la risposta "Vista creata". Ora: nuovo foglio, nuova vista,
+                    # e solo dopo il successo si cancella la vecchia (riletto); ogni errore e' un errore.
+                    v_old = v
+                    old_name = str(self._com(v_old, "GetName2"))
+                    sh_old = self._com(doc, "GetCurrentSheet")
+                    old_sheet = str(self._com(sh_old, "GetName"))
                     try:
-                        sh_old = self._com(doc, "GetCurrentSheet")
                         pr = sh_old.GetProperties2
                         paper, orient = self._sheet_paper_name(doc)
                         scale_txt = f"{pr[2]:g}:{pr[3]:g}"
                         proj = "first" if bool(pr[4]) else "third"
-                        self._com(sh_old, "GetName")
-                        self._select_view(doc, v)
-                        doc.Extension.DeleteSelection2(0)
-                        doc.ClearSelection2(True)
                         names = list(self._com(doc, "GetSheetNames") or ())
                         r_ns = self.add_sheet(name=f"Foglio{len(names) + 1}", paper_size=paper, orientation=orient,
                                               projection=proj, scale=scale_txt)
-                        if not r_ns["success"]:
-                            return r_ns
-                        new_sheet = self._com(self._com(doc, "GetCurrentSheet"), "GetName")
-                        W2, H2, _ = self._sheet_dims(doc)
-                        px, py = (W2 / 2 if x is None else px), (H2 / 2 if y is None else py)
-                        v = doc.CreateDrawViewFromModelView3(mpath, vname, px, py, 0)
-                        if v is None:
-                            return self._result(False, "Creazione vista sul nuovo foglio fallita", SwErrors.swUnknownError)
-                        if parsed:
-                            self._set_view_scale(v, *parsed)
-                        else:
-                            v.UseSheetScale = True
-                        if exploded:
-                            self._show_exploded(v, True)
-                        self._place_free(doc, v, (px, py))
-                        self._sheet_ann_cache = None
                     except Exception as e:
-                        logger.warning(f"new sheet fallback: {e}")
+                        r_ns = {"success": False, "message": str(e)}
+                    if not r_ns["success"]:
+                        doc.ActivateSheet(old_sheet)
+                        return self._result(False, f"Foglio '{old_sheet}' pieno e nuovo foglio non creato ({r_ns['message']}): la "
+                                            f"vista {old_name} resta sul foglio originale, sovrapposta.", SwErrors.swUnknownError,
+                                            {**self._view_info(v_old), "sheet": old_sheet})
+                    new_sheet = self._com(self._com(doc, "GetCurrentSheet"), "GetName")
+                    W2, H2, _ = self._sheet_dims(doc)
+                    px, py = (W2 / 2 if x is None else px), (H2 / 2 if y is None else py)
+                    v = doc.CreateDrawViewFromModelView3(mpath, vname, px, py, 0)
+                    if v is None:
+                        doc.ActivateSheet(old_sheet)
+                        return self._result(False, f"Foglio '{old_sheet}' pieno e vista non creata sul nuovo foglio {new_sheet}: la "
+                                            f"vista {old_name} resta sul foglio originale, sovrapposta.", SwErrors.swUnknownError,
+                                            {"sheet": old_sheet, "new_sheet": new_sheet})
+                    if parsed:
+                        self._set_view_scale(v, *parsed)
+                    else:
+                        v.UseSheetScale = True
+                    if exploded:
+                        self._show_exploded(v, True)
+                    self._place_free(doc, v, (px, py))
+                    self._sheet_ann_cache = None
+                    # la vecchia vista si cancella sul suo foglio, poi si torna al nuovo
+                    gone = False
+                    try:
+                        doc.ActivateSheet(old_sheet)
+                        doc.ClearSelection2(True)
+                        self._select_view(doc, v_old)
+                        doc.Extension.DeleteSelection2(0)
+                        doc.ClearSelection2(True)
+                        sh = self._com(doc, "GetCurrentSheet")
+                        left = [str(self._com(x_, "GetName2")) for x_ in (self._com(sh, "GetViews") or ())]
+                        gone = old_name not in left
+                    except Exception as e:
+                        logger.warning(f"add_model_view: cancellazione della vista sul foglio pieno: {e}")
+                    doc.ActivateSheet(new_sheet)
+                    if not gone:
+                        return self._result(False, f"Vista creata sul nuovo foglio {new_sheet}, ma la copia {old_name} sul foglio "
+                                            f"pieno '{old_sheet}' non si e' cancellata: toglila con delete_view.",
+                                            SwErrors.swUnknownError, {**self._view_info(v), "new_sheet": new_sheet,
+                                                                       "leftover_view": old_name, "leftover_sheet": old_sheet})
             doc.ClearSelection2(True)
             return self._result(True, f"Vista creata: {self._com(v, 'GetName2')}" +
                                 (f" (foglio pieno: creato il foglio {new_sheet})" if new_sheet else ""),
@@ -1688,7 +1715,12 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 names = list(self._com(doc, "GetSheetNames") or ())
                 if sheet not in names:
                     return self._result(False, f"Foglio '{sheet}' non trovato. Fogli: {names}", SwErrors.swInvalidInput)
+                # (revisione 2026-11-12) ActivateSheet non era controllato: le modifiche andavano al foglio sbagliato
                 doc.ActivateSheet(sheet)
+                cur = str(self._com(self._com(doc, "GetCurrentSheet"), "GetName"))
+                if cur != sheet:
+                    return self._result(False, f"Foglio '{sheet}' non attivabile (attivo: '{cur}'): nessuna modifica.",
+                                        SwErrors.swInvalidInput)
             sh = self._com(doc, "GetCurrentSheet")
             p = sh.GetProperties2
             w, h, first = float(p[5]), float(p[6]), bool(p[4])
@@ -1704,16 +1736,28 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 first = projection.lower().startswith(("first", "primo", "1", "iso", "eur"))
             if scale is not None:
                 parsed = self._parse_scale(scale)
-                if parsed:
-                    n, d = float(parsed[0]), float(parsed[1])
+                if not parsed:
+                    return self._result(False, f"Scala non riconosciuta: {scale!r} (es. '1:2' o 0.5).", SwErrors.swInvalidInput)
+                n, d = float(parsed[0]), float(parsed[1])
             sh.SetProperties2(12, 12, n, d, bool(first), w, h, True)
             if new_name:
                 sh.SetName(new_name)
             q = sh.GetProperties2
-            return self._result(True, "Proprieta del foglio aggiornate", SwErrors.swSuccess,
-                                {"name": self._com(sh, "GetName"), "scale": f"{q[2]:g}:{q[3]:g}",
-                                 "width_mm": self._mm(q[5]), "height_mm": self._mm(q[6]),
-                                 "projection": "first_angle" if q[4] else "third_angle"})
+            data = {"name": self._com(sh, "GetName"), "scale": f"{q[2]:g}:{q[3]:g}",
+                    "width_mm": self._mm(q[5]), "height_mm": self._mm(q[6]),
+                    "projection": "first_angle" if q[4] else "third_angle"}
+            wrong = []
+            if abs(float(q[2]) / float(q[3]) - n / d) > 1e-9:
+                wrong.append(f"scala {data['scale']} invece di {n:g}:{d:g}")
+            if abs(float(q[5]) - w) > 1e-6 or abs(float(q[6]) - h) > 1e-6:
+                wrong.append(f"formato {data['width_mm']}x{data['height_mm']} mm invece di {self._mm(w)}x{self._mm(h)}")
+            if bool(q[4]) != bool(first):
+                wrong.append(f"proiezione {data['projection']}")
+            if new_name and str(data["name"]) != str(new_name):
+                wrong.append(f"nome '{data['name']}' invece di '{new_name}'")
+            if wrong:
+                return self._result(False, "SolidWorks non ha applicato: " + "; ".join(wrong), SwErrors.swUnknownError, data)
+            return self._result(True, "Proprieta del foglio aggiornate (rilette)", SwErrors.swSuccess, data)
         except Exception as e:
             return self._fail("set_sheet_properties", e)
 
@@ -2038,27 +2082,45 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             if err:
                 return err
 
+            # (revisione 2026-11-12) prima: "has_format" leggeva il flag di PROIEZIONE, il controllo del N. DISEGNO RIDUCEVA
+            # l'altezza del testo (un audit che scrive nel documento) e il foglio attivo restava cambiato. Ora sola lettura:
+            # formato = file del formato del foglio (GetTemplateName), testo misurato senza modificarlo, foglio ripristinato.
             current_sheet = self._com(doc, "GetCurrentSheet")
-            if sheet and str(self._com(current_sheet, "GetName")) != sheet:
+            start_sheet = str(self._com(current_sheet, "GetName"))
+            if sheet and start_sheet != sheet:
                 if not doc.ActivateSheet(sheet):
                     return self._result(False, f"Foglio '{sheet}' non trovato", SwErrors.swInvalidInput)
                 current_sheet = self._com(doc, "GetCurrentSheet")
+            try:
+                return self._audit_sheet(doc, current_sheet)
+            finally:
+                if str(self._com(self._com(doc, "GetCurrentSheet"), "GetName")) != start_sheet:
+                    doc.ActivateSheet(start_sheet)
+        except Exception as e:
+            return self._fail("audit_drawing", e)
 
+    def _audit_sheet(self, doc, current_sheet) -> Dict:
+        """Corpo di audit_drawing sul foglio attivo (sola lettura)."""
+        if True:
             sheet_name = str(self._com(current_sheet, "GetName") or "Sheet1")
-            W, H, sheet_format = self._sheet_dims(doc)  # in meters
+            try:
+                sheet_format = str(self._com(current_sheet, "GetTemplateName") or "").strip()
+            except Exception:
+                sheet_format = ""
 
             issues = []
             warnings = []
             score = 100
 
             # 1. Cartiglio e Proprieta'
-            title_block_status = {"has_format": bool(sheet_format), "drawing_number": None, "fits": True}
+            title_block_status = {"has_format": bool(sheet_format), "format_file": sheet_format or None,
+                                  "drawing_number": None, "fits": True}
             if not sheet_format:
                 warnings.append("Formato foglio non caricato o cartiglio assente.")
                 score -= 10
             else:
                 try:
-                    fit = self._fit_title_number(doc)
+                    fit = self._fit_title_number(doc, apply=False)
                     title_block_status["drawing_number"] = fit.get("text")
                     title_block_status["fits"] = fit.get("fits", True)
                     if not fit.get("fits", True):
@@ -2200,5 +2262,3 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 }
             }
             return self._result(True, msg, SwErrors.swSuccess, data)
-        except Exception as e:
-            return self._fail("audit_drawing", e)

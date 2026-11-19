@@ -100,6 +100,8 @@ NOT_IMPLEMENTED = {
     "merge_sketch_points": "MergePoints restituisce False e i punti restano 22 (2 prove dal vivo, anche con punti coincidenti)",
     # superfici 2
     "reverse_surface_normal": _WHY_NO_COM,
+    "gaussian_curvature_display": "ViewDisplayCurvature COMMUTA la mappa e lo stato non si legge da nessuna proprieta' (cercato "
+                                  "in IModelDoc2/IModelView, 2026-11-18): enable non era applicabile e min/max erano ignorati",
     "curve_through_reference_points": "non creava una curva per i punti",
 }
 

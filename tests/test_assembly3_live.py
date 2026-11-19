@@ -295,12 +295,18 @@ async def run():
                 record("check_mate_redundancy: pose e accoppiamenti ripristinati",
                        (d_rd or {}).get("poses_restored") is True and not (d_rd or {}).get("still_suppressed"),
                        f"spostati {(d_rd or {}).get('moved_mm')}")
-                ok_ds, text_ds, _ = await c.call("add_mate", mate_type="distance", entity1=F_TOP_B, entity2=F_PEND1, distance=5)
-                record("add_mate: distanza 5 mm in conflitto con il coincidente segnalata in errore", not ok_ds, text_ds[:90])
+                _, _, lm0 = await c.call("list_mates")
+                ok_ds, text_ds, d_ds = await c.call("add_mate", mate_type="distance", entity1=F_TOP_B, entity2=F_PEND1, distance=5)
+                record("add_mate: distanza 5 mm in conflitto con il coincidente segnalata in errore (codice 47)",
+                       not ok_ds and (d_ds or {}).get("error_code") == 47, text_ds[:90])
+                _, _, lm1 = await c.call("list_mates")
+                # (revisione 2026-11-12) l'accoppiamento in errore non resta nel modello
+                record("add_mate in errore: accoppiamento eliminato, numero di accoppiamenti invariato",
+                       (d_ds or {}).get("deleted") is True and (lm1 or {}).get("count") == (lm0 or {}).get("count"),
+                       f"{(lm0 or {}).get('count')} -> {(lm1 or {}).get('count')}")
                 ok_r2, text_r2, d_r2 = await c.call("check_mate_redundancy")
                 conf = (d_r2 or {}).get("conflicting_mates") or []
-                record("check_mate_redundancy: 1 accoppiamento in conflitto (distanza, codice 47)",
-                       ok_r2 and len(conf) == 1 and conf[0].get("type") == "distance" and conf[0].get("error_code") == 47, str(conf)[:100])
+                record("check_mate_redundancy dopo l'eliminazione: nessun accoppiamento in conflitto", ok_r2 and len(conf) == 0, str(conf)[:100])
 
                 # Chiudi documento
                 await c.call("close_document", discard=True)

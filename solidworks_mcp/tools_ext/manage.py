@@ -52,6 +52,11 @@ TOOLS = {
         {"force_rebuild": (B, "Force a full model rebuild (ForceRebuild3) before diagnosing errors (default false)"),
          "top_only": (B, "If force_rebuild is true, only rebuild top-level features in assemblies (default false)")},
         []),
+    "undo": ("undo",
+        "Undo the last operations of the active document (Edit > Undo, `steps` times, 1-20). Verified: the feature tree or the "
+        "volume must change, otherwise it reports that there was nothing to undo. Returns the features removed or restored.",
+        {"steps": (N, "Number of operations to undo (count, default 1)")},
+        []),
 }
 
 DESTRUCTIVE = {

@@ -9,7 +9,6 @@ TOOLS = {
         {
             "direction1_curves": (A, "List of sketch curve/edge names in Direction 1"),
             "direction2_curves": (A, "Optional list of guide curve/edge names in Direction 2"),
-            "unit": UNIT,
         },
         ["direction1_curves"],
     ),
@@ -19,7 +18,6 @@ TOOLS = {
         {
             "direction1_curves": (A, "List of sketch curve/edge names in Direction 1"),
             "direction2_curves": (A, "Optional list of guide curve/edge names in Direction 2"),
-            "unit": UNIT,
         },
         ["direction1_curves"],
     ),

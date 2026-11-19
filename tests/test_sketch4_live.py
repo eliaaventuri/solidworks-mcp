@@ -64,11 +64,13 @@ async def run():
                 ok_line, _, data_line = await c.call("draw_line", x1=0, y1=-20, x2=50, y2=-20)
                 line_id = data_line.get("entity_id")
                 ok_seg, _, data_seg = await c.call("segment_sketch_entity", entity=line_id, count=4, is_segments=False)
-                record("segment_sketch_entity", ok_seg and data_seg.get("created_points_count") == 4,
+                record("segment_sketch_entity: 4 parti = 3 punti interni (revisione 2026-11-12)", ok_seg and data_seg.get("created_points_count") == 3,
                        f"count: {data_seg.get('count')}, punti creati: {data_seg.get('created_points_count')}")
 
-                ok_txt, _, _ = await c.call("draw_sketch_text_along_curve", text="SOLIDWORKS-MCP", height=4)
-                record("draw_sketch_text_along_curve", ok_txt)
+                ok_txt, text_txt, d_txt = await c.call("draw_sketch_text_along_curve", text="SOLIDWORKS-MCP", height=4,
+                                                       curve_entity=line_id)
+                record("draw_sketch_text_along_curve: altezza 4 mm riletta", ok_txt and abs(((d_txt or {}).get("height_mm") or 0) - 4) < 1e-4
+                       and (d_txt or {}).get("height_mm") is not None, text_txt[:100])
 
                 # 4. Diagnose sketch relations
                 ok_nim, text_nim, _ = await c.call("diagnose_sketch_relations")

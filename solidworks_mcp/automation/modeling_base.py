@@ -20,6 +20,7 @@ import pythoncom
 
 from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
 from ..utils.sw_lang import std_plane_index
+from ..utils import com_cache
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,14 @@ class ModelingBase:
         app = self._sw_app
         if app is None:
             return
+        # Ottimizzazione 2026-11-18: sull'istanza DEDICATA (nessuno ci lavora a mano) le preferenze si impostano una volta e
+        # restano fino alla chiusura (shutdown_dedicated le rimette prima di ExitApp; un'istanza uccisa non scrive il registro).
+        # Prima: 4 letture + 8 scritture COM a ogni tool. Sull'istanza di Elia resta il ripristino a ogni tool.
+        if self.__dict__.get("_prefs_held") is app:
+            return
         saved = self.__dict__.setdefault("_saved_prefs", {})
+        if self.is_dedicated_mode():
+            self.__dict__["_prefs_held"] = app
         for pref, val in self._DIALOG_PREFS:
             try:
                 if pref not in saved:
@@ -79,8 +87,12 @@ class ModelingBase:
             except Exception:
                 pass
 
-    def _restore_prefs(self):
-        """Rimette le preferenze cambiate da `_prepare_prefs` (chiamato alla fine di ogni tool e prima di chiudere l'istanza)."""
+    def _restore_prefs(self, force: bool = False):
+        """Rimette le preferenze cambiate da `_prepare_prefs` (chiamato alla fine di ogni tool e prima di chiudere l'istanza).
+        Sull'istanza dedicata, fra un tool e l'altro non fa nulla (force=True alla chiusura)."""
+        if not force and self.__dict__.get("_prefs_held") is not None and self.__dict__.get("_prefs_held") is self._sw_app:
+            return
+        self.__dict__.pop("_prefs_held", None)
         saved = self.__dict__.pop("_saved_prefs", None)
         app = self._sw_app
         if not saved or app is None:
@@ -150,12 +162,43 @@ class ModelingBase:
             return True
 
     # ------------------------------------------------------------------ feature
-    def _features(self, doc) -> List[Tuple[str, str, Any]]:
+    def _features(self, doc, types: bool = True) -> List[Tuple[str, Optional[str], Any]]:
+        """(nome, tipo, feature) di tutte le feature del primo livello, in ordine (types=False: tipo None, non letto).
+        Prima l'elenco in blocco (IFeatureManager.GetFeatures(True): misurato 19/11 uguale al giro FirstFeature/GetNextFeature
+        su pezzo, assieme e tavola); se non risponde, il giro. Velocita' (misurata 19/11): ogni feature e' un oggetto COM
+        nuovo, e chiedere il numero del membro (GetIDsOfNames) costava quanto leggerlo: tutte le voci dell'elenco sono
+        IFeature, quindi il numero di Name e GetTypeName2 si chiede UNA volta e vale per tutte."""
+        ids: Dict[str, int] = {}
+
+        def rd(feat, member):
+            try:
+                if not isinstance(feat, win32com.client.CDispatch):     # oggetti finti dei test offline
+                    raise TypeError
+                ole = feat._oleobj_
+                did = ids.get(member)
+                if did is None:
+                    did = ids[member] = ole.GetIDsOfNames(member)
+                return ole.Invoke(did, 0, pythoncom.DISPATCH_PROPERTYGET, True)
+            except Exception:
+                return self._com(feat, member)
+
         out = []
+        try:
+            arr = doc.FeatureManager.GetFeatures(True)
+        except Exception:
+            arr = None
+        if arr:
+            for feat in arr:
+                try:
+                    out.append((rd(feat, "Name"), rd(feat, "GetTypeName2") if types else None, feat))
+                except Exception:
+                    pass
+            if out:
+                return out
         feat = self._com(doc, "FirstFeature")
         while feat is not None:
             try:
-                out.append((self._com(feat, "Name"), self._com(feat, "GetTypeName2"), feat))
+                out.append((self._com(feat, "Name"), self._com(feat, "GetTypeName2") if types else None, feat))
             except Exception:
                 pass
             feat = self._com(feat, "GetNextFeature")
@@ -317,11 +360,18 @@ class ModelingBase:
         return self._dist(q, p)
 
     def _find_entity(self, doc, kind: str, p, tol_m: float):
-        """Entita' piu' vicina a p (m); None se oltre tol_m."""
+        """Entita' piu' vicina a p (m); None se oltre tol_m. Tutte le entita' sono della stessa interfaccia (facce, spigoli o
+        vertici): il membro si chiama con com_cache.member_caller (1 chiamata COM per entita' invece di 3, misurato 19/11)."""
         best, bd = None, 1e9
+        if kind == "vertex":
+            get_pt = com_cache.member_caller("GetPoint", method=False)
+        else:
+            closest = com_cache.member_caller("GetClosestPointOn")
+            get_pt = lambda e: closest(e, p[0], p[1], p[2])      # noqa: E731
         for ent in self._body_entities(doc, kind):
             try:
-                d = self._closest(ent, kind, p)
+                q = get_pt(ent)
+                d = 1e9 if q is None else self._dist(q, p)
             except Exception:
                 continue
             if d < bd:

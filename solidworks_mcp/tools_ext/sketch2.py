@@ -101,7 +101,7 @@ TOOLS = {
         "Spline through points [[x,y,z],...] (at least 2) in the active 3D sketch.",
         {"points": (A, "Points [[x,y,z],...] (`unit`), model coordinates"), "unit": UNIT}, ["points"]),
     "draw_3d_point": ("draw_3d_point",
-        "Point in the active 3D sketch.",
+        "Draw a point (x, y, z in model coordinates) in the active 3D sketch.",
         {"x": _C3("X"), "y": _C3("Y"), "z": _C3("Z"), "unit": UNIT}, ["x", "y", "z"]),
 }
 

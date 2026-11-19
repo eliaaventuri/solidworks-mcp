@@ -174,72 +174,111 @@ class Sketch4Operations:
             sm = doc.SketchManager
             segs = self._s4_segs(doc)
 
+            # (revisione 2026-11-12) prima: senza `entity` prendeva l'ULTIMO segmento creato (non la selezione) e divideva
+            # sempre per interpolazione lineare fra gli estremi, quindi su archi e cerchi i punti cadevano sulla corda.
+            # Ora: entita' per id oppure il segmento selezionato; linee e archi/cerchi divisi a pari lunghezza sulla curva;
+            # ellissi e spline rifiutate; il risultato e' riletto (punti o segmenti in piu' nello schizzo).
             target = None
             if entity:
                 by_id = {self._safe_seg_id(s): s for s in segs}
                 target = by_id.get(entity)
                 if target is None:
                     return self._result(False, f"segment_sketch_entity: '{entity}' non trovato", SwErrors.swSelectionError)
-            elif segs:
-                target = segs[-1]
+            else:
+                try:
+                    sm_sel = doc.SelectionManager
+                    for i in range(1, int(sm_sel.GetSelectedObjectCount2(-1)) + 1):
+                        o = sm_sel.GetSelectedObject6(i, -1)
+                        if o is not None and self._s4_seg_type(o) >= 0 and hasattr(o, "GetStartPoint2"):
+                            target = o
+                            break
+                except Exception:
+                    target = None
             if target is None:
-                return self._result(False, "segment_sketch_entity: nessuna entità nello schizzo da suddividere.", SwErrors.swSelectionError)
+                return self._result(False, "segment_sketch_entity: indica `entity` (id da list_sketch_entities) oppure "
+                                    "seleziona prima il segmento.", SwErrors.swSelectionError)
 
-            n = max(2, int(count or 4))
-            if n > 1000:
-                return self._result(False, "segment_sketch_entity: count massimo 1000.", SwErrors.swInvalidInput)
+            n = int(count or 4)
+            if n < 2 or n > 1000:
+                return self._result(False, "segment_sketch_entity: count fra 2 e 1000.", SwErrors.swInvalidInput)
 
-            sd = self._s4_sd(doc, 0)
-            try:
-                target.Select4(False, sd)
-            except Exception:
-                pass
-
-            created_pts = []
-            pt_start = None
-            pt_end = None
-            read_err = "punti vuoti"
+            seg_type = self._s4_seg_type(target)            # 0 linea, 1 arco/cerchio
+            if seg_type not in (0, 1):
+                return self._result(False, f"segment_sketch_entity: solo linee, archi e cerchi (tipo {seg_type}): per "
+                                    "ellissi e spline i punti a pari distanza non sono calcolabili qui.", SwErrors.swInvalidInput)
             try:
                 sp = self._com(target, "GetStartPoint2")
                 ep = self._com(target, "GetEndPoint2")
-                read_err = f"sp={type(sp).__name__} ep={type(ep).__name__}"
-                if sp is not None and ep is not None:
-                    pt_start = (float(sp.X), float(sp.Y), float(sp.Z))
-                    pt_end = (float(ep.X), float(ep.Y), float(ep.Z))
+                x1, y1, z1 = float(sp.X), float(sp.Y), float(sp.Z)
+                x2, y2, z2 = float(ep.X), float(ep.Y), float(ep.Z)
             except Exception as ex:
-                read_err = str(ex)
-            if not (pt_start and pt_end):
-                return self._result(False, f"segment_sketch_entity: estremi dell'entità non leggibili ({read_err}).", SwErrors.swSketchError)
-
-            x1, y1, z1 = pt_start
-            x2, y2, z2 = pt_end
-            steps = n if not is_segments else n - 1
-            for k in range(1, steps + 1):
-                t = k / float(n)
-                xi = x1 + t * (x2 - x1)
-                yi = y1 + t * (y2 - y1)
-                zi = z1 + t * (z2 - z1)
-                if is_segments:
-                    try:
-                        sm.SplitOpenSegment(xi, yi, zi)
-                    except Exception as ex:
-                        return self._result(False, f"segment_sketch_entity: divisione non riuscita al punto {k}: {ex}", SwErrors.swSketchError)
-                    created_pts.append([xi, yi, zi])
+                return self._result(False, f"segment_sketch_entity: estremi dell'entità non leggibili ({ex}).", SwErrors.swSketchError)
+            closed = False
+            if seg_type == 0:
+                def at(t):
+                    return (x1 + t * (x2 - x1), y1 + t * (y2 - y1), z1 + t * (z2 - z1))
+            else:
+                c = self._com(target, "GetCenterPoint2")
+                cx, cy = float(c.X), float(c.Y)
+                closed = bool(self._com(target, "IsCircle"))
+                try:
+                    r = float(self._com(target, "GetRadius"))
+                except Exception:
+                    r = math.hypot(x1 - cx, y1 - cy)
+                if closed:          # per un cerchio il "punto iniziale" non sta sulla curva: si parte dall'asse +x
+                    x1, y1 = cx + r, cy
+                a0 = math.atan2(y1 - cy, x1 - cx)
+                ccw = int(self._com(target, "GetRotationDir")) == 1
+                if closed:
+                    sweep = 2 * math.pi
                 else:
-                    try:
-                        pt = sm.CreatePoint(xi, yi, zi)
-                    except Exception as ex:
-                        return self._result(False, f"segment_sketch_entity: creazione punto {k} non riuscita: {ex}", SwErrors.swSketchError)
-                    if pt is None:
-                        return self._result(False, f"segment_sketch_entity: SolidWorks non ha creato il punto {k}.", SwErrors.swSketchError)
-                    created_pts.append([xi, yi, zi])
+                    a1 = math.atan2(y2 - cy, x2 - cx)
+                    sweep = (a1 - a0) % (2 * math.pi) if ccw else -((a0 - a1) % (2 * math.pi))
+                if closed and not ccw:
+                    sweep = -sweep
 
+                def at(t):
+                    a = a0 + t * sweep
+                    return (cx + r * math.cos(a), cy + r * math.sin(a), z1)
+
+            n_pts_before = len(list(self._com(self._com(sm, "ActiveSketch"), "GetSketchPoints2") or []))
+            n_segs_before = len(segs)
+            pts = [at(k / float(n)) for k in range(1, n)]          # n-1 punti interni (n parti)
+            if closed:
+                pts = [at(0.0)] + pts                              # cerchio: n punti per n archi
+            doc.ClearSelection2(True)
+            if is_segments:
+                try:
+                    if closed:
+                        # cerchio: la prima divisione vuole due punti (diventa due archi), poi come un segmento aperto
+                        sm.SplitClosedSegment(pts[0][0], pts[0][1], pts[0][2], pts[1][0], pts[1][1], pts[1][2])
+                        rest = pts[2:]
+                    else:
+                        rest = pts
+                    for p in rest:
+                        sm.SplitOpenSegment(p[0], p[1], p[2])
+                except Exception as ex:
+                    return self._result(False, f"segment_sketch_entity: divisione non riuscita: {ex}", SwErrors.swSketchError)
+                got = len(self._s4_segs(doc)) - n_segs_before
+                want = n - 1
+            else:
+                for k, p in enumerate(pts, 1):
+                    if sm.CreatePoint(p[0], p[1], p[2]) is None:
+                        return self._result(False, f"segment_sketch_entity: SolidWorks non ha creato il punto {k}.", SwErrors.swSketchError)
+                got = len(list(self._com(self._com(sm, "ActiveSketch"), "GetSketchPoints2") or [])) - n_pts_before
+                want = len(pts)
+            pts_mm = [[round(p[0] * 1000, 4), round(p[1] * 1000, 4)] for p in pts]
+            if got < want:
+                return self._result(False, f"segment_sketch_entity: attesi {want} {'segmenti' if is_segments else 'punti'} "
+                                    f"in piu', SolidWorks ne mostra {got}.", SwErrors.swSketchError,
+                                    {"expected": want, "found": got, "points_mm": pts_mm})
             mode_str = "segmenti" if is_segments else "punti equidistanti"
-            msg = f"Suddivisione entità completata: {len(created_pts)} {mode_str} generati."
+            msg = f"Suddivisione in {n} parti: {want} {mode_str} in piu' (riletti dallo schizzo)."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "segmented": True,
                 "count": n,
-                "created_points_count": len(created_pts),
+                "created_points_count": want,
+                "points_mm": pts_mm,
                 "is_segments": bool(is_segments)
             })
         except Exception as e:
@@ -248,99 +287,71 @@ class Sketch4Operations:
 
     def draw_3point_arc_slot(self, x1: float, y1: float, x2: float, y2: float,
                              x3: float, y3: float, width: float = 10.0, unit: str = None) -> Dict:
-        """Crea un'asola ad arco per 3 punti (inizio, fine, passaggio) e larghezza."""
-        try:
-            doc, _sk, err = self._s2_active_or_open()
-            if err:
-                return err
-
-            sm = doc.SketchManager
-            x1_m = self._mmu(x1, unit)
-            y1_m = self._mmu(y1, unit)
-            x2_m = self._mmu(x2, unit)
-            y2_m = self._mmu(y2, unit)
-            x3_m = self._mmu(x3, unit)
-            y3_m = self._mmu(y3, unit)
-            w_m = self._mmu(width or 10.0, unit)
-
-            before_count = len(self._s4_segs(doc))
-            try:
-                res = sm.CreateSketchSlot(2, 0, w_m, x1_m, y1_m, 0, x2_m, y2_m, 0, x3_m, y3_m, 0, 0, False)
-            except Exception as ex:
-                return self._result(False, f"draw_3point_arc_slot: asola non creata: {ex}", SwErrors.swSketchError)
-
-            after_segs = self._s4_segs(doc)
-            added = len(after_segs) - before_count
-            created = (bool(res) or added > 0)
-            if not created:
-                return self._result(False, "draw_3point_arc_slot: SolidWorks non ha creato l'asola.", SwErrors.swSketchError)
-
-            u = unit or "mm"
-            msg = f"Asola ad arco 3 punti creata (larghezza {width} {u})."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "slot_created": created,
-                "slot_type": "3point_arc",
-                "width": width,
-                "endpoints": [[x1, y1], [x2, y2], [x3, y3]]
-            })
-        except Exception as e:
-            logger.error(f"draw_3point_arc_slot: {e} - {traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+        """Asola ad arco per 3 punti (centro dell'estremo iniziale, centro dell'estremo finale, punto sull'arco centrale).
+        (revisione 2026-11-12) prima usava il tipo 2 di CreateSketchSlot (arco dal CENTRO) con tre punti di passaggio:
+        un'asola diversa da quella chiesta. Ora passa a draw_slot(slot_type='arc_3point'), misurato."""
+        r = self.draw_slot(x1=x1, y1=y1, x2=x2, y2=y2, x3=x3, y3=y3, width=width or 10.0, unit=unit, slot_type="arc_3point")
+        if r.get("success"):
+            r["data"].update({"slot_created": True, "slot_type": "3point_arc", "endpoints": [[x1, y1], [x2, y2], [x3, y3]]})
+        return r
 
     def draw_sketch_text_along_curve(self, text: str, curve_entity: str = None, height: float = 5.0,
                                      mirror_horizontal: bool = False, mirror_vertical: bool = False,
                                      unit: str = None) -> Dict:
-        """Aggiunge testo di schizzo vincolato a seguire una curva guida."""
+        """Testo di schizzo che segue una curva dello schizzo (id in curve_entity).
+        (revisione 2026-11-12) prima la curva era selezionata con Mark 0 e il testo finiva nell'origine, orizzontale; l'altezza
+        era ignorata. La guida dell'API (IModelDoc2.InsertSketchText) chiede la curva selezionata con Mark = 1 e, se sta nello
+        stesso schizzo del testo, come geometria di costruzione. L'altezza si imposta con il formato del testo e si rilegge."""
         try:
             doc, _sk, err = self._s2_active_or_open()
             if err:
                 return err
-
             if not text:
                 return self._result(False, "Testo mancante", SwErrors.swInvalidInput)
-
-            sm = doc.SketchManager
+            if not curve_entity:
+                return self._result(False, "draw_sketch_text_along_curve: serve curve_entity (id da list_sketch_entities); per un "
+                                    "testo libero usa add_sketch_text.", SwErrors.swInvalidInput)
+            if height is None or float(height) <= 0:
+                return self._result(False, "height deve essere > 0", SwErrors.swInvalidInput)
             segs = self._s4_segs(doc)
-            target = None
-            if curve_entity:
-                by_id = {self._safe_seg_id(s): s for s in segs}
-                target = by_id.get(curve_entity)
-                if target is None:
-                    return self._result(False, f"draw_sketch_text_along_curve: curva '{curve_entity}' non trovata", SwErrors.swSelectionError)
-            elif segs:
-                target = segs[-1]
-
-            if target is not None:
-                try:
-                    sel_ok = bool(target.Select4(False, self._s4_sd(doc, 0)))
-                except Exception as ex:
-                    return self._result(False, f"draw_sketch_text_along_curve: selezione curva non riuscita: {ex}", SwErrors.swSelectionError)
-                if not sel_ok:
-                    return self._result(False, "draw_sketch_text_along_curve: selezione curva non riuscita.", SwErrors.swSelectionError)
-
-            res = None
+            by_id = {self._safe_seg_id(s): s for s in segs}
+            target = by_id.get(curve_entity)
+            if target is None:
+                return self._result(False, f"draw_sketch_text_along_curve: curva '{curve_entity}' non trovata", SwErrors.swSelectionError)
+            made_construction = False
+            if not bool(self._com(target, "ConstructionGeometry")):
+                target.ConstructionGeometry = True
+                made_construction = True
+            doc.ClearSelection2(True)
+            if not bool(target.Select4(False, self._s4_sd(doc, 1))):
+                return self._result(False, "draw_sketch_text_along_curve: selezione della curva (Mark 1) non riuscita.",
+                                    SwErrors.swSelectionError)
             flip = 1 if mirror_vertical else 0
             mirror = 1 if mirror_horizontal else 0
-            try:
-                res = doc.InsertSketchText(0.0, 0.0, 0.0, str(text), 0, flip, mirror, 100, 100)
-            except Exception as ex:
-                logger.warning(f"InsertSketchText error: {ex}")
-                try:
-                    res = sm.CreateText(0, 0, 0, str(text))
-                except Exception as ex2:
-                    return self._result(False, f"draw_sketch_text_along_curve: inserimento testo non riuscito: {ex2}", SwErrors.swSketchError)
+            res = doc.InsertSketchText(0.0, 0.0, 0.0, str(text), 0, flip, mirror, 100, 100)
+            doc.ClearSelection2(True)
             if res is None:
                 return self._result(False, "draw_sketch_text_along_curve: SolidWorks non ha inserito il testo.", SwErrors.swSketchError)
-
-            msg = f"Testo di schizzo '{text}' inserito nell'origine (0, 0, 0); non vincolato alla curva."
-            return self._result(True, msg, SwErrors.swSuccess, {
-                "created": True,
-                "text": text,
-                "curve_entity": curve_entity,
-                "height": height,
-                "placed_along_curve": False,
-                "ignored_params": ["height"]
-            })
+            h_m = self._mmu(float(height), unit)
+            got_h = None
+            try:
+                tf = self._com(res, "GetTextFormat")      # oggetto COM: _com non lo chiama
+                tf.CharHeight = h_m
+                res.SetTextFormat(False, tf)
+                got_h = float(self._com(res, "GetTextFormat").CharHeight)
+            except Exception as ex:
+                logger.debug(f"altezza del testo: {ex}")
+            try:
+                pos = [round(float(c) * 1000, 4) for c in (self._com(res, "GetCoordinates") or ())]
+            except Exception:
+                pos = None
+            data = {"created": True, "text": text, "curve_entity": curve_entity, "curve_made_construction": made_construction,
+                    "height_mm": round(got_h * 1000, 4) if got_h is not None else None, "insertion_point_mm": pos}
+            if got_h is None or abs(got_h - h_m) > 1e-7:
+                return self._result(False, f"Testo inserito ma altezza non impostata (letta {data['height_mm']} mm, chiesta "
+                                    f"{round(h_m * 1000, 4)} mm).", SwErrors.swSketchError, data)
+            return self._result(True, f"Testo '{text}' inserito lungo {curve_entity} (altezza {data['height_mm']} mm, riletta)"
+                                + ("; la curva e' diventata di costruzione" if made_construction else ""), SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"draw_sketch_text_along_curve: {e} - {traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)

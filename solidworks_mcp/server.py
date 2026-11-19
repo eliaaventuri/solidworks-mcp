@@ -5,6 +5,7 @@ I tool delle altre aree sono definiti in *_tools.py; la guardia di sovrascrittur
 
 import io
 import os
+import re
 import sys
 import json
 import base64
@@ -36,6 +37,10 @@ from .assembly_tools import ASSEMBLY_TOOLS, ASSEMBLY_DISPATCH
 from .data_tools import DATA_TOOLS, DATA_DISPATCH
 from .simulation_tools import SIMULATION_TOOLS, SIMULATION_DISPATCH
 from .safety import decorate_tools, check_call
+from .tools_ext import EXT_GROUP
+from .utils import com_cache
+
+com_cache.install()     # ottimizzazione 2026-11-18: descrizioni COM tenute per interfaccia (SW_MCP_COM_CACHE=0 per disattivare)
 from .resources import RESOURCES, read_resource_content
 from .prompts import PROMPTS, get_prompt_content
 
@@ -78,7 +83,25 @@ logger = logging.getLogger("SolidWorksMCP")
 # ============================================================================
 
 sw_automation = SolidWorksAutomation()
-server = Server("solidworks-mcp-server")
+
+# Istruzioni inviate al client all'avvio (initialize): il costo vero di una sessione e' il numero di GIRI del modello (ogni
+# chiamata = una risposta del modello da qualche secondo, piu' il caricamento dello schema del tool se il client lo rimanda).
+# Qui si spiega come fare tanti passi in una chiamata sola. Ottimizzazione 2026-11-18 (vedi OTTIMIZZAZIONE.md).
+SERVER_INSTRUCTIONS = (
+    "SolidWorks automation server. Every [SUCCESS] result was re-read from SolidWorks (volumes, positions, values): read the numbers.\n"
+    "WORK IN FEW CALLS - each tool call costs a full model turn:\n"
+    "1. Batch consecutive steps in ONE execute_tool_sequence call: steps=[{\"tool\":\"create_sketch\",\"arguments\":{\"plane\":\"Front\"}}, "
+    "{\"tool\":\"draw_circle\",\"arguments\":{\"x\":0,\"y\":0,\"radius\":5}}, {\"tool\":\"extrude_boss\",\"arguments\":{\"depth\":10}}]. "
+    "A step can reuse a value returned by an earlier step: the string \"$N.key\" (N = 1-based step number, or \"$prev.key\") is "
+    "replaced by data[key] of that step, e.g. {\"features\":[\"$3.feature\"]}. The sequence stops at the first failed step and "
+    "reports it; nothing after it runs.\n"
+    "2. Tools used inside a sequence do not need to be loaded one by one: search_tools(names=[...], detail=true) returns the "
+    "parameters of several tools in one call; search_tools(query=...) finds tools by keyword.\n"
+    "3. Lengths are in mm unless a tool has a `unit` argument; angles in degrees. Faces, edges and vertices are picked by a "
+    "point ON them in model coordinates: {\"face\":[x,y,z]}.\n"
+    "4. try_on_copy runs the same kind of sequence on a temporary copy of the part, to test a risky step without touching it."
+)
+server = Server("solidworks-mcp-server", instructions=SERVER_INSTRUCTIONS)
 
 
 # ============================================================================
@@ -125,7 +148,10 @@ def _raw_all_tools() -> list[Tool]:
         ),
         Tool(
             name="execute_tool_sequence",
-            description="Execute an ordered sequence of MCP tools in a single batch on the SolidWorks COM thread. Reduces IPC latency for multi-step workflows. Stops on the first error by default.",
+            description="Execute an ordered sequence of tools in ONE call (the fastest way to build a model: one model turn instead of "
+                        "one per step). A string argument \"$N.key\" (N = 1-based step number) or \"$prev.key\" is replaced by the value "
+                        "data[key] returned by that step (e.g. \"$3.feature\"; nested keys with dots). Stops on the first error by default. "
+                        "compact=true returns only step messages (no data) to keep the answer short.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -151,6 +177,11 @@ def _raw_all_tools() -> list[Tool]:
                         "type": "boolean",
                         "default": True,
                         "description": "If true (default), halts execution immediately if any step fails. If false, continues attempting remaining steps."
+                    },
+                    "compact": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, each step result has only tool, success and message (data omitted, except for failed steps)"
                     }
                 },
                 "required": ["steps"]
@@ -158,7 +189,9 @@ def _raw_all_tools() -> list[Tool]:
         ),
         Tool(
             name="search_tools",
-            description="Search available SolidWorks MCP tools by keyword or category. Returns matching tool names, descriptions, groups, and argument signatures. Useful for discovering specialized tools on-demand.",
+            description="Search available SolidWorks MCP tools by keyword or category, or get the parameters of several named tools at once "
+                        "(names=[...], detail=true: type and description of every argument). Use it to prepare an execute_tool_sequence "
+                        "without loading each tool separately.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -174,21 +207,31 @@ def _raw_all_tools() -> list[Tool]:
                         "type": "number",
                         "default": 15,
                         "description": "Maximum number of matching tools to return (count, default 15)"
+                    },
+                    "names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Exact tool names: return just these tools (query not needed)"
+                    },
+                    "detail": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "If true, every parameter comes with its type and description (not just the name)"
                     }
                 },
-                "required": ["query"]
+                "required": []
             }
         ),
         
         # Document Tools
         Tool(
             name="create_new_part",
-            description="Create a new part document.",
+            description="Create a new empty part document from the default part template and make it active (returns its title).",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="create_new_assembly",
-            description="Create a new assembly document.",
+            description="Create a new empty assembly document from the default assembly template and make it active (returns its title).",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
@@ -239,7 +282,7 @@ def _raw_all_tools() -> list[Tool]:
         ),
         Tool(
             name="list_open_documents",
-            description="List all open documents.",
+            description="List the documents open in SolidWorks: title, path, type (part/assembly/drawing), which one is active and whether it has unsaved changes.",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         
@@ -335,7 +378,7 @@ def _raw_all_tools() -> list[Tool]:
         ),
         Tool(
             name="draw_polygon",
-            description="Draw a regular polygon.",
+            description="Draw a regular polygon in the active sketch: center, circumscribed radius and number of sides (3-100); returns the ids of the new segments.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -376,7 +419,7 @@ def _raw_all_tools() -> list[Tool]:
         # Utility Tools
         Tool(
             name="set_units",
-            description="Set default unit for dimensions.",
+            description="Set the default length unit of the server (mm, cm, m, inch) used when a tool's `unit` argument is omitted.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -553,9 +596,16 @@ async def call_tool(name: str, arguments: dict) -> list[Union[TextContent, Image
             return [TextContent(type="text", text=format_result(result))]
 
         global _active_job
+        if _active_job is not None and not _active_job.done() and _active_job is _PREWARM.get("job"):
+            # l'avvio anticipato dell'istanza dedicata e' ancora in corso: si aspetta lui invece di rifiutare il tool
+            try:
+                await asyncio.wait_for(asyncio.wrap_future(_active_job), timeout=_startup_allowance())
+            except Exception as e:
+                logger.warning(f"avvio anticipato non concluso: {e!r}")
         if _active_job is not None and not _active_job.done():
             return [TextContent(type="text", text="[ERROR] SolidWorks sta ancora eseguendo un tool precedente (scaduto o bloccato): "
                                                   "controllare la finestra di SolidWorks e riprovare piu' tardi.")]
+        t_start = time.perf_counter()
         _active_job = _SW_EXECUTOR.submit(_dispatch_tool, name, arguments or {})
         timeout = _tool_timeout()
         if sw_automation._sw_app is None or _dedicated_lost():   # il tool dovra' prima avviare/rilanciare SolidWorks: tempo di avvio in piu'
@@ -566,7 +616,11 @@ async def call_tool(name: str, arguments: dict) -> list[Union[TextContent, Image
             logger.error(f"Tool {name}: oltre {timeout} s")
             return [TextContent(type="text", text=f"[ERROR] {_timeout_message(name, timeout)}")]
 
-        logger.info(f"Result: success={result['success']}")
+        logger.info(f"Result: success={result['success']} ({(time.perf_counter() - t_start) * 1000:.0f} ms)")
+        if _STATE_POOL["on"]:
+            # rilascio degli oggetti COM tenuti vivi DOPO la risposta (utils/com_cache.flush): avviene mentre il modello la legge;
+            # il tool successivo, sullo stesso thread, parte dopo (pochi decimi di secondo)
+            _SW_EXECUTOR.submit(_flush_com_pool)
         return _format_tool_response(name, arguments or {}, result)
         
     except Exception as e:
@@ -587,6 +641,18 @@ def _com_worker_init():
 _SW_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="sw-com",
                                                      initializer=_com_worker_init)
 _active_job = None      # future del tool in corso sul thread COM; None o concluso = libero
+_STATE_POOL = {"on": com_cache.stats().get("pool_on", False)}
+
+
+def _flush_com_pool():
+    t0 = time.perf_counter()
+    try:
+        n = com_cache.flush()
+    except Exception as e:
+        logger.warning(f"rilascio degli oggetti COM non riuscito: {e!r}")
+        return
+    if n:
+        logger.info(f"rilasciati {n} oggetti COM dopo la risposta ({(time.perf_counter() - t0) * 1000:.0f} ms)")
 
 
 def _tool_timeout() -> float:
@@ -647,6 +713,22 @@ def _active_title():
         return None
 
 
+# Nomi di parametro con lo stesso significato usati da tool diversi (revisione 2026-11-12, sez. 4: study/study_name in 19/32
+# tool, view/view_name, filepath/file_path, component/component_name). Il nome "sbagliato" per QUEL tool viene letto come
+# quello giusto (e dichiarato in data.argument_aliases) invece di essere ignorato: un giro del modello in meno.
+_ARG_ALIASES = (("study", "study_name"), ("view", "view_name"), ("filepath", "file_path"), ("component", "component_name"))
+
+
+def _apply_arg_aliases(arguments: dict, allowed) -> List[str]:
+    done = []
+    for a, b in _ARG_ALIASES:
+        for given, target in ((a, b), (b, a)):
+            if given in arguments and given not in allowed and target in allowed and target not in arguments:
+                arguments[target] = arguments.pop(given)
+                done.append(f"{given}->{target}")
+    return done
+
+
 def _dispatch_single_tool(name: str, arguments: dict) -> Dict:
     """Smista un singolo tool verso SPECIAL_HANDLERS o DISPATCH_TABLES (sul thread COM)."""
     doc_arg = arguments.pop("document", None) if (isinstance(arguments, dict) and name != "close_document") else None
@@ -659,6 +741,7 @@ def _dispatch_single_tool(name: str, arguments: dict) -> Dict:
     for table in DISPATCH_TABLES:
         if name in table:
             method, allowed = table[name]
+            aliased = _apply_arg_aliases(arguments, allowed)
             kwargs = {k: v for k, v in arguments.items() if k in allowed}
             result = getattr(sw_automation, method)(**kwargs)
             # un argomento con il nome sbagliato non deve sparire in silenzio (il tool userebbe il default e direbbe "fatto")
@@ -668,8 +751,48 @@ def _dispatch_single_tool(name: str, arguments: dict) -> Dict:
                                      f"{', '.join(ignored)} (ammessi: {', '.join(sorted(allowed))}).")
                 if isinstance(result.get("data"), dict):
                     result["data"]["ignored_arguments"] = ignored
+            if aliased and isinstance(result, dict) and isinstance(result.get("data"), dict):
+                result["data"]["argument_aliases"] = aliased
             return result
     return sw_automation._result(False, f"Unknown tool: {name}", SwErrors.swUnknownError)
+
+
+def _freeze_ui_enabled() -> bool:
+    """SW_MCP_FREEZE_UI=1: durante il tool niente aggiornamento della grafica e dell'albero del documento attivo (prova di
+    ottimizzazione 2026-11-18, spenta di default: vedi OTTIMIZZAZIONE.md)."""
+    return os.environ.get("SW_MCP_FREEZE_UI", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _freeze_ui():
+    """-> elenco di (oggetto, proprieta') rimessi a True da _unfreeze_ui. Ogni errore e' ignorato: e' solo un'accelerazione."""
+    frozen = []
+    try:
+        app = sw_automation._sw_app
+        doc = app.ActiveDoc if app is not None else None
+        if doc is None:
+            return frozen
+        fm = doc.FeatureManager
+        for prop in ("EnableFeatureTree", "EnableFeatureTreeWindow"):
+            try:
+                setattr(fm, prop, False)
+                frozen.append((fm, prop))
+            except Exception:
+                pass
+        view = doc.ActiveView
+        if view is not None:
+            view.EnableGraphicsUpdate = False
+            frozen.append((view, "EnableGraphicsUpdate"))
+    except Exception as e:
+        logger.debug(f"freeze ui: {e}")
+    return frozen
+
+
+def _unfreeze_ui(frozen):
+    for obj, prop in frozen:
+        try:
+            setattr(obj, prop, True)
+        except Exception:
+            pass
 
 
 def _dispatch_tool(name: str, arguments: dict) -> Dict:
@@ -677,9 +800,12 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
     Parametro comune `document` (titolo di un documento aperto): lo rende attivo prima del tool. Senza, se il documento
     attivo e' cambiato dalla chiamata precedente, il risultato lo segnala (un close_sketch chiudeva lo schizzo di un altro file)."""
     doc_arg = arguments.pop("document", None) if (isinstance(arguments, dict) and name != "close_document") else None
+    frozen = []
     try:
         if sw_automation._sw_app is not None:
             sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
+            if _freeze_ui_enabled():
+                frozen = _freeze_ui()
         if doc_arg:
             act = sw_automation.activate_document(name=doc_arg)
             if not act.get("success"):
@@ -699,6 +825,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
             result["message"] = f"{_pending_notice} {result.get('message', '')}"
         return result
     finally:
+        _unfreeze_ui(frozen)
         _LAST_ACTIVE_TITLE[0] = _active_title()
         try:
             sw_automation._restore_prefs()      # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
@@ -1010,6 +1137,47 @@ def _execute_python_handler(arguments: dict) -> Dict:
     return _execute_python_fixed(code)
 
 
+_STEP_REF = re.compile(r"^\$(\d+|prev)\.([A-Za-z0-9_.]+)$")
+
+
+def _resolve_step_refs(value, results):
+    """Sostituisce le stringhe "$N.chiave" / "$prev.chiave" con data[chiave] del passo N (1 = primo). -> (valore, errore|None).
+    Solo stringhe che sono ESATTAMENTE un riferimento: il valore conserva il suo tipo (numero, lista...)."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            out[k], e = _resolve_step_refs(v, results)
+            if e:
+                return None, e
+        return out, None
+    if isinstance(value, list):
+        out = []
+        for v in value:
+            r, e = _resolve_step_refs(v, results)
+            if e:
+                return None, e
+            out.append(r)
+        return out, None
+    if isinstance(value, str):
+        m = _STEP_REF.match(value.strip())
+        if not m:
+            return value, None
+        idx = len(results) if m.group(1) == "prev" else int(m.group(1))
+        if idx < 1 or idx > len(results):
+            return None, f"riferimento {value}: il passo {m.group(1)} non e' ancora stato eseguito"
+        cur = results[idx - 1].get("data")
+        for key in m.group(2).split("."):
+            if isinstance(cur, dict) and key in cur:
+                cur = cur[key]
+            elif isinstance(cur, list) and key.isdigit() and int(key) < len(cur):
+                cur = cur[int(key)]
+            else:
+                keys = sorted(cur) if isinstance(cur, dict) else type(cur).__name__
+                return None, f"riferimento {value}: chiave '{key}' assente nel risultato del passo {idx} (chiavi: {keys})"
+        return cur, None
+    return value, None
+
+
 def _execute_tool_sequence_handler(arguments: dict) -> Dict:
     steps = arguments.get("steps")
     if not isinstance(steps, list):
@@ -1055,7 +1223,13 @@ def _execute_tool_sequence_handler(arguments: dict) -> Dict:
                 break
             continue
 
-        tool_args = dict(step.get("arguments") or {})
+        tool_args, ref_err = _resolve_step_refs(dict(step.get("arguments") or {}), results)
+        if ref_err:
+            results.append({"step": i + 1, "tool": tool_name, "success": False, "message": ref_err})
+            if stop_on_error:
+                stopped_on_error = True
+                break
+            continue
         refusal = check_call(tool_name, tool_args)
         if refusal:
             results.append({"step": i + 1, "tool": tool_name, "success": False, "message": refusal})
@@ -1082,6 +1256,8 @@ def _execute_tool_sequence_handler(arguments: dict) -> Dict:
     executed = len(results)
     successful = sum(1 for r in results if r["success"])
     all_ok = (executed == total and successful == total)
+    if arguments.get("compact"):
+        results = [{k: v for k, v in r.items() if k != "data" or not r.get("success")} for r in results]
 
     if all_ok:
         msg = f"Successfully executed all {total} steps ({total}/{total}) in sequence."
@@ -1133,10 +1309,39 @@ BASE_DISPATCH = {
     "draw_polygon": ("draw_polygon", {"cx", "cy", "radius", "sides", "unit"}),
 }
 
+def _tool_signature(t, detail: bool):
+    props = (t.inputSchema or {}).get("properties", {})
+    if not detail:
+        return list(props.keys())
+    out = {}
+    for p, v in props.items():
+        typ = v.get("type") or ("/".join(x.get("type", "?") for x in v.get("anyOf", [])) if v.get("anyOf") else "any")
+        out[p] = f"{typ}: {v.get('description', '')}".strip()
+    return out
+
+
 def _search_tools_handler(arguments: dict) -> Dict:
-    query = str(arguments.get("query", "")).strip().lower()
+    query = str(arguments.get("query", "") or "").strip().lower()
+    names = arguments.get("names") or []
+    detail = bool(arguments.get("detail", False))
+    if names:
+        # schemi di piu' tool in UNA chiamata (ottimizzazione 2026-11-18: niente caricamento tool per tool)
+        by_name = {t.name: t for t in decorate_tools(_raw_all_tools())}
+        found, missing = [], []
+        for n in names:
+            t = by_name.get(str(n))
+            if t is None:
+                missing.append(n)
+                continue
+            found.append({"name": t.name, "group": _tool_group(t.name) or "base", "enabled": _tool_blocked_reason(t.name) is None,
+                          "description": (t.description or "").split("[DESTRUCTIVE")[0].strip(),
+                          "parameters": _tool_signature(t, detail),
+                          "required": (t.inputSchema or {}).get("required", [])})
+        return sw_automation._result(not missing, f"{len(found)} tool" + (f"; non esistono: {missing}" if missing else ""),
+                                     SwErrors.swSuccess if not missing else SwErrors.swInvalidInput,
+                                     {"tools": found, "missing": missing})
     if not query:
-        return sw_automation._result(False, "Query parameter is required", SwErrors.swInvalidInput)
+        return sw_automation._result(False, "Query parameter (or names) is required", SwErrors.swInvalidInput)
 
     group_filter = str(arguments.get("group", "")).strip().lower()
     limit = int(arguments.get("limit") or 15)
@@ -1190,7 +1395,7 @@ def _search_tools_handler(arguments: dict) -> Dict:
                 "group": t_group,
                 "enabled": is_enabled,
                 "description": (t.description or "").split("[DESTRUCTIVE")[0].strip(),
-                "parameters": list(props.keys()),
+                "parameters": _tool_signature(t, detail),
                 "required": (t.inputSchema or {}).get("required", [])
             }))
 
@@ -1257,6 +1462,8 @@ def _tool_group(name: str):
     """Gruppo di un tool, o None se il tool non esiste."""
     if name in BASE_DISPATCH or name in SPECIAL_HANDLERS or name in BASE_FROM_MODELING or name == "execute_python":
         return "base"
+    if name in EXT_GROUP:                      # tool dei lotti: gruppo dell'area vera (tavole, assiemi, dati, simulazione...)
+        return EXT_GROUP[name]
     for group, table in TOOLSET_TABLES.items():
         if name in table:
             return group
@@ -1324,11 +1531,33 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptRe
 # Main Entry Point
 # ============================================================================
 
+_PREWARM = {"job": None, "seconds": None}
+
+
+def _prewarm_enabled() -> bool:
+    """Ottimizzazione 2026-11-19: con l'istanza dedicata, SolidWorks parte appena il server si avvia (non al primo tool), cosi'
+    l'avvio (decine di secondi) si sovrappone ai primi giri del modello. SW_MCP_PREWARM=0 lo spegne."""
+    return sw_automation.is_dedicated_mode() and os.environ.get("SW_MCP_PREWARM", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _prewarm():
+    t0 = time.perf_counter()
+    try:
+        r = sw_automation.connect()
+        logger.info(f"avvio anticipato dell'istanza dedicata: {r.get('message')}")
+    except Exception as e:
+        logger.warning(f"avvio anticipato fallito: {e!r}")
+    _PREWARM["seconds"] = round(time.perf_counter() - t0, 1)
+
+
 async def main():
     """Main entry point for MCP server"""
     logger.info(f"Starting SolidWorks MCP Server v{__version__}...")
     logger.info(f"Log file: {LOG_FILE}")
-    
+    global _active_job
+    if _prewarm_enabled():
+        _active_job = _PREWARM["job"] = _SW_EXECUTOR.submit(_prewarm)
+
     try:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(read_stream, write_stream, server.create_initialization_options())
@@ -1346,12 +1575,14 @@ async def main():
 
 
 def _close_dedicated_on_exit():
+    com_cache.flush()               # oggetti COM tenuti vivi: si rilasciano qui, sul thread COM (non all'uscita di Python)
     if sw_automation.is_dedicated_mode() and sw_automation._dedicated_pid:
         if _dedicated_has_unsaved():
             logger.warning(f"istanza dedicata (PID {sw_automation._dedicated_pid}) lasciata aperta: "
                            "ci sono documenti con modifiche non salvate")
         else:
             sw_automation.shutdown_dedicated()
+    com_cache.flush()
 
 
 def _dedicated_has_unsaved() -> bool:

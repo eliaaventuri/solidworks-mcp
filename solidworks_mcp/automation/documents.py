@@ -622,21 +622,27 @@ class DocumentOperations:
                     return r
             
             docs = []
+            try:
+                active = self._com(self._sw_app, "ActiveDoc")
+                active_title = self._get_doc_title(active) if active is not None else None
+            except Exception:
+                active_title = None
+            type_names = {1: "Part", 2: "Assembly", 3: "Drawing"}
             # GetFirstDocument is not exposed via late binding; GetDocuments is
             for doc in self._com(self._sw_app, "GetDocuments") or ():
                 try:
                     title = self._get_doc_title(doc)
-                    doc_type = self._com(doc, "GetType")
-                    
-                    type_names = {1: "Part", 2: "Assembly", 3: "Drawing"}
-                    
-                    docs.append({
-                        "title": title,
-                        "type": type_names.get(doc_type, "Unknown")
-                    })
-                except:
-                    pass
-            
+                    row = {"title": title, "type": type_names.get(self._com(doc, "GetType"), "Unknown"),
+                           "active": title == active_title}
+                    try:
+                        row["path"] = str(self._com(doc, "GetPathName") or "") or None      # None = mai salvato
+                        row["unsaved_changes"] = bool(self._com(doc, "GetSaveFlag"))
+                    except Exception:
+                        pass
+                    docs.append(row)
+                except Exception as e:
+                    logger.debug(f"list_open_documents: {e}")
+
             return self._result(True, f"{len(docs)} document(s) open",
                               SwErrors.swSuccess, {"documents": docs})
             

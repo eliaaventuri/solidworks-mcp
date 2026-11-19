@@ -174,6 +174,8 @@ class SolidWorksAutomation:
 
     def _connect_dedicated(self) -> Dict:
         """Launch a NEW SolidWorks process and attach to it through the ROT (by PID)."""
+        from ..utils import com_cache
+        com_cache.clear()           # le descrizioni COM in cache appartengono al processo precedente
         exe = self._config.exe_path
         if not exe or exe == "auto" or not os.path.exists(exe):
             exe = os.environ.get("SW_MCP_EXE") or r"C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\SLDWORKS.exe"
@@ -292,7 +294,9 @@ class SolidWorksAutomation:
             return self._result(False, "No dedicated instance")
         restore = getattr(self, "_restore_prefs", None)
         if restore is not None:
-            restore()                                 # alla chiusura SolidWorks scrive le preferenze nel registro
+            restore(force=True)                       # alla chiusura SolidWorks scrive le preferenze nel registro
+        from ..utils import com_cache
+        com_cache.flush()                             # oggetti tenuti vivi (vivaio COM) rilasciati prima di chiudere
         try:
             if self._sw_app is not None:
                 self._sw_app.ExitApp()

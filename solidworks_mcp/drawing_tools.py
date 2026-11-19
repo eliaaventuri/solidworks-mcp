@@ -103,7 +103,7 @@ _TOOLS = {
         "add missing overall and hole diameters, stack dimensions (shortest nearest the outline).",
         {"view": _VIEW, "pitch": (N, "Spacing between dimension rows in mm (default 8)"),
          "first_offset": (N, "Distance of the first dimension row from the outline in mm (default 10)"),
-         "cleanup": (B, "Remove duplicates and chamfer dimensions (default true)"), "unit": _UNIT}, []),
+         "cleanup": (B, "Remove duplicates and chamfer dimensions (default true)")}, []),
     "get_drawing_layout": ("get_drawing_layout",
         "Geometric inventory of the active sheet (mm): sheet, title block, views and annotations with bounding boxes; dimensions with "
         "view, axis, side, distance from outline and row. Use it to check overlaps.", {}, []),
@@ -196,7 +196,7 @@ _TOOLS = {
         {"name": (S, "Sheet name (default: automatic)"), "paper_size": (S, "A4..A0 (default A3)"),
          "orientation": (S, "landscape (default) | portrait"), "projection": (S, "first (default) | third"),
          "scale": _SCALE, "sheet_format": (S, "iso (default) | din | none")}, []),
-    "activate_sheet": ("activate_sheet", "Activate a sheet by name.", {"name": (S, "Sheet name")}, ["name"]),
+    "activate_sheet": ("activate_sheet", "Make a sheet of the active drawing the current sheet, by name (see list_sheets).", {"name": (S, "Sheet name")}, ["name"]),
     "set_sheet_properties": ("set_sheet_properties", "Change scale, paper size, orientation, projection or name of a sheet.",
         {"sheet": (S, "Sheet name (default: active sheet)"), "scale": _SCALE, "paper_size": (S, "A4..A0"),
          "orientation": (S, "landscape | portrait"), "projection": (S, "first | third"), "new_name": (S, "New sheet name")}, []),
@@ -229,8 +229,9 @@ _TOOLS = {
                      "pass the current path, or use save_document without filepath).",
         {"filepath": (S, "Destination path")}, ["filepath"]),
     "audit_drawing": ("audit_drawing",
-        "Perform a comprehensive quality and standards audit of the active drawing sheet: checks title block completeness, "
-        "BOM table & balloon alignment (identifies missing or unlinked balloons), dangling dimensions, and annotation boundaries.",
+        "Read-only quality audit of a drawing sheet (the active sheet is restored afterwards): sheet format loaded "
+        "(format file), drawing number fitting its title-block cell, views present and broken views, BOM rows vs "
+        "balloons (missing / orphan / duplicate), duplicate and dangling dimensions. Returns a score and the lists.",
         {"sheet": (S, "Sheet name to audit (default: active sheet)")}, []),
 }
 

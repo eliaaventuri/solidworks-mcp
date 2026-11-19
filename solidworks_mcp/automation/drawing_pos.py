@@ -98,8 +98,30 @@ class DrawingPosMixin:
     def _dp_remove_hole_dims(self, doc, views: List[Any]) -> int:
         """Toglie le quote lineari importate con un punto di riferimento sull'asse di un foro, se almeno una vista mostra i
         cerchi dei fori (li' si rifanno in catena). Non tocca le quote create da questo modulo."""
-        if not any(self._dp_grid_ok(v) for v in self._sheet_views(doc)):
+        grid_views = [v for v in self._sheet_views(doc) if self._dp_grid_ok(v)]
+        if not grid_views:
             return 0
+        # (revisione 2026-11-12) prima si toglievano le quote di TUTTI i fori, ma le catene si rifanno solo per i fori che
+        # una vista a griglia mostra come cerchi: le quote degli altri fori (es. un foro su una faccia laterale) erano perse.
+        # Ora un asse conta solo se e' perpendicolare a una vista a griglia e cade su uno dei suoi fori.
+        covered = []
+        for gv in grid_views:
+            try:
+                proj, dirp, _s = self._dm_proj(gv)
+                hs = self._dp_holes(gv)[0]
+                covered.append((proj, dirp, [(h["cx"], h["cy"]) for h in hs]))
+            except Exception as e:
+                logger.debug(f"grid view holes: {e}")
+
+        def redone(axis) -> bool:
+            o, d = axis
+            for proj, dirp, centers in covered:
+                if abs(dirp(d)[2]) < 0.999:
+                    continue
+                q = proj(o)
+                if any(math.hypot(q[0] - cx, q[1] - cy) < 5e-4 for cx, cy in centers):
+                    return True
+            return False
         mine = set(self._dp_done.values())
         n = 0
         for v in views:
@@ -111,7 +133,7 @@ class DrawingPosMixin:
                     continue
             except Exception:
                 continue
-            axes = self._dp_hole_axes(m)
+            axes = [a for a in self._dp_hole_axes(m) if redone(a)]
             if not axes:
                 continue
             for dd in self._dq_view_dims(v):

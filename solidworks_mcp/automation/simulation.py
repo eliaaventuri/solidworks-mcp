@@ -150,7 +150,7 @@ from ..utils.keep_file import keeps_old_file, set_aside  # noqa: E402
 class SimulationOperations:
     """Simulazione statica lineare. Richiede SolidWorksAutomation (get_active_doc, _com, _result, _find_entity...)."""
 
-    _sim_reg_snapshot = None
+    _sim_last_reg_restored: List[str] = []
     _sim_frames: Dict[str, Any] = {}
     _sim_run_info: Dict[str, Any] = {}
 
@@ -177,11 +177,13 @@ class SimulationOperations:
             pass
         return out
 
-    def _sim_reg_restore(self) -> List[str]:
-        """Riporta HKCU\\Software\\SolidWorks\\AddInsStartup allo stato salvato prima del caricamento dell'add-in."""
+    def _sim_reg_restore(self, snap: Dict[str, Any]) -> List[str]:
+        """Riporta HKCU\\Software\\SolidWorks\\AddInsStartup allo stato `snap` letto SUBITO PRIMA del nostro LoadAddIn.
+        (revisione 2026-11-12) prima `snap` era lo stato del PRIMO avvio del server e il ripristino si ripeteva anche dopo: una
+        modifica fatta da Elia agli add-in nel frattempo veniva annullata. Ora si annulla solo cio' che il nostro caricamento ha
+        appena cambiato."""
         import winreg
         changed: List[str] = []
-        snap = self._sim_reg_snapshot
         if snap is None:
             return changed
         now = self._sim_reg_read()
@@ -222,29 +224,26 @@ class SimulationOperations:
             if not r["success"]:
                 return None, r["message"]
         app = self._sw_app
-        if self._sim_reg_snapshot is None:
-            SimulationOperations._sim_reg_snapshot = self._sim_reg_read()
         add = None
         try:
             add = app.GetAddInObject("SldWorks.Simulation")
         except Exception:
             add = None
-        loaded_now = False
         if add is None:
             dll = self._sim_dll()
+            before = self._sim_reg_read()
             try:
                 rc = app.LoadAddIn(dll)
             except Exception as e:
+                SimulationOperations._sim_last_reg_restored = self._sim_reg_restore(before)
                 return None, f"LoadAddIn({dll}) fallito: {e}"
-            loaded_now = True
+            SimulationOperations._sim_last_reg_restored = self._sim_reg_restore(before)
             try:
                 add = app.GetAddInObject("SldWorks.Simulation")
             except Exception:
                 add = None
             if add is None:
                 return None, f"LoadAddIn({dll}) = {rc} ma GetAddInObject restituisce None: add-in non caricabile/licenza assente"
-        if loaded_now:
-            self._sim_reg_restore()
         try:
             cw = add.CosmosWorks
         except Exception as e:
@@ -301,7 +300,7 @@ class SimulationOperations:
                 data["simulation_version_number"] = int(cw.VersionNumber)
             except Exception:
                 pass
-            data["registry_addins_startup_restored"] = self._sim_reg_restore()
+            data["registry_addins_startup_restored"] = list(getattr(self, "_sim_last_reg_restored", []) or [])
             doc, err = self.get_active_doc()
             if not err:
                 try:
@@ -714,9 +713,23 @@ class SimulationOperations:
                 return self._result(False, f"AddGravity fallito (errore {ec.value})", SwErrors.swFeatureError)
             g.GravityBeginEdit()
             g.SetGravitationalAcclerationValues(float(comps[0]), float(comps[1]), float(comps[2]))
-            rc = g.GravityEndEdit
-            return self._result(True, f"Gravita' {acceleration} m/s2 lungo {vec}: {g.Name}", SwErrors.swSuccess,
-                                {"name": g.Name, "end_edit": rc})
+            rc = int(g.GravityEndEdit)
+            try:
+                vals = [VARIANT(pythoncom.VT_BYREF | pythoncom.VT_R8, 0.0) for _ in range(3)]
+                g.GetGravitationalAcclerationValues(*vals)
+                got = [float(v.value) for v in vals]
+            except Exception:
+                got = None
+            if got is not None and any(abs(a - float(b)) > 1e-6 * max(1.0, abs(float(b))) for a, b in zip(got, comps)):
+                return self._result(False, f"Gravita' {g.Name}: SolidWorks riporta {got} invece di {list(comps)}",
+                                    SwErrors.swFeatureError, {"name": g.Name, "read_back": got})
+            if rc != 0:
+                # (revisione 2026-11-12) prima il codice di ritorno non era letto e la risposta era l'eco della richiesta
+                return self._result(False, f"GravityEndEdit fallito (codice {rc}): gravita' {g.Name} non applicata come chiesto",
+                                    SwErrors.swFeatureError, {"name": g.Name, "end_edit": rc})
+            return self._result(True, f"Gravita' {acceleration} m/s2 lungo {vec}: {g.Name}"
+                                + (" (rilette)" if got is not None else ""), SwErrors.swSuccess,
+                                {"name": g.Name, "end_edit": rc, "read_back": got})
         except Exception as e:
             logger.error(f"add_gravity: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
@@ -840,10 +853,17 @@ class SimulationOperations:
             doc.ClearSelection2(True)
             skm = doc.SketchManager
             skm.Insert3DSketch(True)
-            pt = skm.CreatePoint(*o)
-            lz = skm.CreateLine(*o, *[o[i] + ax[i] * 0.01 for i in range(3)])
-            lx = skm.CreateLine(*o, *[o[i] + xd[i] * 0.01 for i in range(3)])
-            skm.Insert3DSketch(True)
+            try:
+                pt = skm.CreatePoint(*o)
+                lz = skm.CreateLine(*o, *[o[i] + ax[i] * 0.01 for i in range(3)])
+                lx = skm.CreateLine(*o, *[o[i] + xd[i] * 0.01 for i in range(3)])
+            finally:
+                # (revisione 2026-11-12) prima un errore qui lasciava lo schizzo 3D APERTO
+                if self._com(skm, "ActiveSketch") is not None:
+                    skm.Insert3DSketch(True)
+            if pt is None or lz is None or lx is None:
+                return self._result(False, "Schizzo 3D ausiliario del cuscinetto non creato (punto o linee mancanti)",
+                                    SwErrors.swFeatureError)
             helper = [n for n in self._feature_names(doc, "3DProfileFeature") if n not in before]
             doc.ClearSelection2(True)
             smg = doc.SelectionManager
@@ -870,7 +890,11 @@ class SimulationOperations:
             bl.BearingLoadUnit = 0
             bl.XDirectionValue = float(value)
             bl.DistributionType = dist
-            rc = bl.BearingLoadEndEdit
+            rc = int(bl.BearingLoadEndEdit)
+            if rc != 0:
+                return self._result(False, f"BearingLoadEndEdit fallito (codice {rc}): carico {bl.Name} non applicato come "
+                                    "chiesto", SwErrors.swFeatureError, {"name": bl.Name, "end_edit": rc,
+                                                                          "coordinate_system": csf.Name, "helper_sketch": helper})
             return self._result(True, f"Carico da cuscinetto {value} N ({distribution}): {bl.Name}", SwErrors.swSuccess,
                                 {"name": bl.Name, "coordinate_system": csf.Name, "helper_sketch": helper,
                                  "axis": [round(c, 6) for c in ax], "direction_used": [round(c, 6) for c in xd],
@@ -1025,7 +1049,20 @@ class SimulationOperations:
                 return self._result(False, "contact: bonded | free | no_penetration", SwErrors.swInvalidInput)
             cm = st.ContactManager
             rc = cm.SetGlobalContact(t, 0)
-            return self._result(True, f"Contatto globale '{contact}' impostato (rc={rc})", SwErrors.swSuccess, {"rc": rc})
+            # (revisione 2026-11-12) prima la risposta era l'eco della richiesta (rc vale sempre None): ora si rilegge
+            got_t, got_o = _bi(), _bi()
+            try:
+                cm.GetGlobalContact(got_t, got_o)
+                got = int(got_t.value)
+            except Exception as ex:
+                return self._result(False, f"Contatto globale impostato ma non rileggibile ({ex})", SwErrors.swUnknownError,
+                                    {"rc": rc})
+            names = {0: "bonded", 1: "free", 2: "no_penetration"}
+            if got != t:
+                return self._result(False, f"Contatto globale NON impostato: chiesto '{names[t]}', SolidWorks riporta "
+                                    f"'{names.get(got, got)}'", SwErrors.swFeatureError, {"read_back": names.get(got, got)})
+            return self._result(True, f"Contatto globale '{names[t]}' impostato (riletto)", SwErrors.swSuccess,
+                                {"read_back": names[t]})
         except Exception as e:
             logger.error(f"set_simulation_contact: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
@@ -1148,6 +1185,15 @@ class SimulationOperations:
             flag["done"] = True
             dt = time.time() - t0
             exceeded = dt > float(timeout)
+            # (revisione 2026-11-12) prima i messaggi modali si leggevano solo dopo 20 s di analisi: un'analisi breve fallita
+            # (messaggio "Non riuscita" aperto a fine corsa) risultava completata. Ora anche una lettura finale.
+            if pid:
+                try:
+                    for d in _dialog_texts(pid, press_ok=self.is_dedicated_mode()):
+                        if d not in flag["dialogs"]:
+                            flag["dialogs"].append(d)
+                except Exception as ex:
+                    logger.debug(f"run_simulation: lettura finale delle finestre: {ex}")
             seen = f"; messaggi di SolidWorks chiusi con OK: {flag['dialogs']}" if flag["dialogs"] else ""
             if rc != 0:
                 return self._result(False, f"Analisi fallita: errore {rc} ({_ERR_RUN.get(rc, '?')}){seen}", SwErrors.swUnknownError,
@@ -1155,9 +1201,16 @@ class SimulationOperations:
             if any(w in d.lower() for d in flag["dialogs"] for w in SIM_FAILED_WORDS):
                 return self._result(False, f"Analisi fallita (rc {rc}){seen}", SwErrors.swUnknownError,
                                     {"rc": rc, "dialogs": flag["dialogs"]})
-            return self._result(True, f"Analisi completata in {dt:.1f} s", SwErrors.swSuccess,
-                                {"seconds": round(dt, 2), "timeout_exceeded": exceeded,
-                                 "steps": int(st.Results.GetMaximumAvailableSteps)})
+            try:
+                steps = int(st.Results.GetMaximumAvailableSteps)
+            except Exception:
+                steps = 0
+            if steps < 1:
+                return self._result(False, f"Analisi terminata (rc {rc}) ma senza risultati leggibili{seen}", SwErrors.swUnknownError,
+                                    {"rc": rc, "dialogs": flag["dialogs"], "steps": steps})
+            return self._result(True, f"Analisi completata in {dt:.1f} s" + (seen if flag["dialogs"] else ""), SwErrors.swSuccess,
+                                {"seconds": round(dt, 2), "timeout_exceeded": exceeded, "steps": steps,
+                                 "dialogs": flag["dialogs"]})
         except Exception as e:
             logger.error(f"run_simulation: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
@@ -1357,11 +1410,21 @@ class SimulationOperations:
                     data["factor_of_safety"]["location_error"] = str(ex)
             except Exception as ex:
                 data["factor_of_safety"] = {"error": str(ex)}
-            r = res.GetReactionForcesAndMoments(step, _nullv(), 0, _bi())
+            re_ = _bi()
+            r = res.GetReactionForcesAndMoments(step, _nullv(), 0, re_)
+            r = list(r) if r is not None else []
             n = len(r) // 9
+            reaction_ok = n > 0 and int(re_.value) == 0
+            if not reaction_ok:
+                # (revisione 2026-11-12) prima un vettore vuoto dava reazione 0 N con successo e il codice d'errore non era letto
+                data["reaction_force_N"] = None
+                data["reaction_moment_Nm"] = None
+                data["reaction_error"] = (f"GetReactionForcesAndMoments: codice {int(re_.value)}, {n} nodi vincolati letti: "
+                                          "reazioni NON disponibili")
             tot = [sum(r[i * 9 + k] for i in range(n)) for k in (1, 2, 3)]
-            data["reaction_force_N"] = {"x": round(tot[0], 4), "y": round(tot[1], 4), "z": round(tot[2], 4),
-                                        "resultant": round(sum(c * c for c in tot) ** 0.5, 4)}
+            if reaction_ok:
+                data["reaction_force_N"] = {"x": round(tot[0], 4), "y": round(tot[1], 4), "z": round(tot[2], 4),
+                                            "resultant": round(sum(c * c for c in tot) ** 0.5, 4)}
             mom = [0.0, 0.0, 0.0]
             for i in range(n):
                 p = nodes.get(int(r[i * 9]))
@@ -1372,13 +1435,16 @@ class SimulationOperations:
                 mom[0] += d[1] * f[2] - d[2] * f[1] + r[i * 9 + 5]
                 mom[1] += d[2] * f[0] - d[0] * f[2] + r[i * 9 + 6]
                 mom[2] += d[0] * f[1] - d[1] * f[0] + r[i * 9 + 7]
-            data["reaction_moment_Nm"] = {"x": round(mom[0], 4), "y": round(mom[1], 4), "z": round(mom[2], 4),
-                                          "resultant": round(sum(c * c for c in mom) ** 0.5, 4)}
+            if reaction_ok:
+                data["reaction_moment_Nm"] = {"x": round(mom[0], 4), "y": round(mom[1], 4), "z": round(mom[2], 4),
+                                              "resultant": round(sum(c * c for c in mom) ** 0.5, 4)}
             data["reaction_moment_point_mm"] = [round(c * 1000, 4) for c in q]
             data["plots"] = list(res.GetPlotNames)
             vm = data["von_mises_nodal_MPa"]["max"]
             return self._result(True, f"VM max {vm:.3f} MPa, spostamento max {data['displacement_mm']['max']:.5f} mm, "
-                                      f"FOS min {data['factor_of_safety'].get('min')}", SwErrors.swSuccess, data)
+                                      f"FOS min {data['factor_of_safety'].get('min')}"
+                                      + ("" if reaction_ok else f"; ATTENZIONE: {data['reaction_error']}"),
+                                SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"get_simulation_results: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)

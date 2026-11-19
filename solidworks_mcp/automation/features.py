@@ -142,28 +142,17 @@ class FeatureOperations:
                 return err
             rows = []
             skipped = 0
-            feat = self._com(doc, "FirstFeature")
-            n_guard = 0
-            while feat is not None and n_guard < 20000:
-                n_guard += 1
+            for name, ftype, feat in self._features(doc):     # elenco in blocco (modeling_base._features)
+                name, ftype = str(name), str(ftype)
+                if ftype in SYSTEM_FOLDER_TYPES and not include_system:
+                    skipped += 1
+                    continue
                 try:
-                    name = str(self._com(feat, "Name"))
-                    ftype = str(self._com(feat, "GetTypeName2"))
-                    if ftype in SYSTEM_FOLDER_TYPES and not include_system:
-                        skipped += 1
-                    else:
-                        try:
-                            sup = feat.IsSuppressed2(1, None)
-                            sup = bool(sup[0] if isinstance(sup, (tuple, list)) else sup)
-                        except Exception:
-                            sup = False
-                        rows.append((name, ftype, sup))
+                    sup = feat.IsSuppressed2(1, None)
+                    sup = bool(sup[0] if isinstance(sup, (tuple, list)) else sup)
                 except Exception:
-                    pass
-                try:
-                    feat = self._com(feat, "GetNextFeature")
-                except Exception:
-                    break
+                    sup = False
+                rows.append((name, ftype, sup))
             if detail:
                 items = [{"name": n, "type": t, "suppressed": sp} for n, t, sp in rows]
             else:

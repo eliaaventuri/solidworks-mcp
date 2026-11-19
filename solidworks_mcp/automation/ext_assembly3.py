@@ -616,9 +616,18 @@ class Assembly3Operations:
                     problems.append(f"{name}: soppressione non riuscita")
                     set_supp(name, False)
                     continue
-                snap = self._as_dof_snapshot(doc)
-                if not set_supp(name, False):
-                    problems.append(f"{name}: NON riattivato")
+                # (revisione 2026-11-12) prima un errore fra soppressione e riattivazione lasciava l'accoppiamento SOPPRESSO
+                snap, snap_err = {}, None
+                try:
+                    snap = self._as_dof_snapshot(doc)
+                except Exception as ex:
+                    snap_err = ex
+                finally:
+                    if not set_supp(name, False):
+                        problems.append(f"{name}: NON riattivato")
+                if snap_err is not None:
+                    problems.append(f"{name}: gradi di liberta' non misurati ({snap_err})")
+                    continue
                 gained = {n: [base[n]["dof_count"], s["dof_count"]] for n, s in snap.items()
                           if n in base and s["dof_count"] > base[n]["dof_count"]}
                 tested.append({"name": name, "type": i.get("type"), "components": i.get("components"),

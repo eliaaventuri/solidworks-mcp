@@ -4,7 +4,7 @@
 
 [![offline tests](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml/badge.svg)](https://github.com/elo-savage/solidworks-mcp/actions/workflows/test-offline.yml)
 ![version](https://img.shields.io/badge/version-8.4.0-blue)
-![tools](https://img.shields.io/badge/MCP%20tools-448-green)
+![tools](https://img.shields.io/badge/MCP%20tools-454-green)
 ![SOLIDWORKS](https://img.shields.io/badge/SOLIDWORKS-2026-red)
 ![Python](https://img.shields.io/badge/python-3.10%2B%20x64-yellow)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
@@ -25,9 +25,9 @@
 
 An [MCP](https://modelcontextprotocol.io/) server, written in Python, that connects AI clients such as **Claude Code** and **Claude Desktop** to **SOLIDWORKS** on Windows. It talks to SOLIDWORKS through the official COM API and gives the model **473 tools** (474 with `execute_python` enabled). With them it can sketch, model, assemble, make drawings, export, and run FEA studies.
 
-The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 390 of the 448 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
+The live tests build real parts and compare **measured numbers** (volumes, masses, dimensions, positions, reaction forces, stresses) with values calculated by hand. About 390 of the 454 tools are exercised by those tests; the remaining ones (mostly secondary sketch, feature and component-management tools) call SOLIDWORKS but do not have a dedicated live test yet.
 
-84 more tools were tried and **removed**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one keeps its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition), and calling it returns that reason. 25 duplicate tools (two names for the same operation, such as `extrude_sketch` and `extrude_boss`) were also removed: the old name returns an error that names the tool to use.
+85 more tools were tried and **removed**, because SOLIDWORKS does not allow them through its API or because they did not pass a live test: each one keeps its measured reason in `solidworks_mcp/not_implemented.py` (for example half section views, cam/slot/rack-and-pinion mates, snap hooks, STEP AP242 with PMI on the Student edition), and calling it returns that reason. 25 duplicate tools (two names for the same operation, such as `extrude_sketch` and `extrude_boss`) were also removed: the old name returns an error that names the tool to use.
 
 ## Features
 
@@ -146,10 +146,30 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_INSTANCE=dedicated` | Use a private, hidden SOLIDWORKS instance instead of the one you have open |
 | `SW_MCP_AUTORESTART=1` | If the dedicated instance dies or times out, the next tool restarts it and warns that open documents were lost |
 | `SW_MCP_TOOL_TIMEOUT` | Maximum seconds per tool (overrides `tool_timeout`). On timeout, the server returns an error; it closes a dedicated instance, but never touches yours |
-| `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base`, which is always on, `modeling`, `drawings`, `assembly`, `data`, `simulation`). Fewer tools means shorter descriptions sent to the model |
+| `SW_MCP_TOOLSETS` | Expose only some tool groups, e.g. `base,modeling,drawings` (groups: `base` - 35 tools, always on - `modeling` 204, `drawings` 56, `assembly` 65, `data` 41, `simulation` 53). Fewer tools means shorter descriptions sent to the model |
 | `SW_MCP_EXE`, `SW_MCP_ARGS`, `SW_MCP_STARTUP_TIMEOUT` | How the dedicated instance is launched (defaults: auto, `/r`, 240 s) |
-| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 448 tools |
+| `SW_MCP_ALLOW_PYTHON=1` | Enable `execute_python`, which runs arbitrary Python on your PC. Off by default; with it off, the client sees 454 tools |
 | `SW_MCP_ATTACH_IMAGES=0` | Disable inline `ImageContent` attachments for image exports (default `1`, enabled) |
+| `SW_MCP_COM_CACHE=0` | Disable the light COM wrappers (default on: no type description is fetched for each object SOLIDWORKS returns) |
+| `SW_MCP_COM_POOL=0` | Disable the COM object pool (default on: returned objects are released after the answer is sent, not during the tool) |
+| `SW_MCP_PREWARM=0` | Do not start the dedicated instance when the server starts (default on: it starts in the background right away) |
+| `SW_MCP_FREEZE_UI=1` | Experimental: suspend graphics and FeatureManager tree updates of the active document during each tool |
+
+### Speed
+
+Most of the time of a session is spent in model turns, not in SOLIDWORKS: every tool call is one turn of the model. So:
+
+- **Batch the steps.** `execute_tool_sequence` runs many tools in one call. A step can reuse a value returned by an
+  earlier step: the string `"$3.feature"` (step 3, key `feature`) or `"$prev.entity_id"` is replaced by that value.
+  `compact=true` keeps the answer short. The server sends these instructions to the client when it connects.
+- **Load schemas in bulk.** `search_tools` with `names=[...]` and `detail=true` returns the parameters of several tools in
+  one call, so a sequence can be written without loading each tool first.
+- **Expose fewer tools** with `SW_MCP_TOOLSETS` when you only need one area (groups follow the real area of each tool).
+- The server side was profiled on a typical 18-tool session (block, holes, fillet, chamfer, mass, feature list): from
+  18.0 s to 6.7 s. Every call between the server and SOLIDWORKS crosses processes (~3 ms each on the test PC), so the
+  server makes fewer of them: light COM wrappers, the feature tree read in one call, member ids asked once per list of
+  objects, returned objects released after the answer instead of during the tool, the dedicated instance started early
+  and its no-dialog preferences kept between tools (restored when it closes). Each tool's time is written in the server log.
 
 ## Safety
 
@@ -188,6 +208,6 @@ The live tests build parts **only through the MCP tools** and compare the measur
 
 ## Credits and license
 
-The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 448 working tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
+The project started from [alisamsam/solidworks-mcp](https://github.com/alisamsam/solidworks-mcp) by Samsaam Ali Baig, which had 22 basic tools. It was then rewritten and extended to 454 working tools by Elia Venturi ([@elo-savage](https://github.com/elo-savage)).
 
 Released under the [MIT License](LICENSE). SOLIDWORKS is a trademark of Dassault Systèmes; this project is not affiliated with or endorsed by Dassault Systèmes.

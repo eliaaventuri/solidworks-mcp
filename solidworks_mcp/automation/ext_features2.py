@@ -447,17 +447,38 @@ class Features2Operations:
             extra = {"profile": prof, "size_requested": size, "size_used": size_name, "length": length, "method": method_l, "right_handed": bool(right_handed),
                      "reverse": bool(reverse), "unit": self._unit_name(unit), "edge_diameter_mm": round(ci["radius"] * 2000.0, 4),
                      "kind": "internal" if ci["internal"] else "external"}
+            # (revisione 2026-11-12) prima misura e profondita' rilette erano solo riportate: SolidWorks ripiega in silenzio su
+            # un'altra misura se quella chiesta non c'e' nel profilo. Ora si confrontano e, se diverse, la feature si elimina.
+            read_err = None
             try:
                 rd = (feat or self._find_feature(doc, self._new_features(doc, before)[0]["name"])).GetDefinition
                 extra.update({"size": rd.Size, "profile_file": rd.Type, "depth": round(self._from_m(float(rd.BlindDepth), unit), 5),
                               "end_condition": int(rd.EndCondition)})
-            except Exception:
-                pass
+            except Exception as ex:
+                read_err = str(ex)
+            wrong = []
+            if read_err is not None:
+                wrong.append(f"definizione non rileggibile ({read_err})")
+            else:
+                if str(extra.get("size") or "").strip().lower() != str(size_name).strip().lower():
+                    wrong.append(f"misura {extra.get('size')!r} invece di {size_name!r}")
+                if abs(float(extra.get("depth") or 0) - float(length)) > 1e-4 * max(1.0, abs(float(length))):
+                    wrong.append(f"lunghezza {extra.get('depth')} invece di {length}")
+            if wrong:
+                self._delete_features(doc, [x["name"] for x in self._new_features(doc, before)])
+                return self._result(False, f"Filettatura creata ma diversa dalla richiesta ({'; '.join(wrong)}): eliminata. "
+                                    f"Profilo '{prof}'.", SwErrors.swFeatureError, extra)
             if pitch_mm is not None:
                 extra["pitch_mm"] = pitch_mm
                 extra["pitch_note"] = ("pitch from the size name; IThreadFeatureData.Pitch is NOT updated by SolidWorks (it keeps the "
                                        "10 mm default), the real pitch comes from the profile configuration")
-            return self._finish(doc, "Filettatura", feat, v0, before, extra, require_volume_change=True)
+            auto = not profile or str(profile).lower() == "auto"
+            extra["profile_auto"] = auto
+            res = self._finish(doc, "Filettatura", feat, v0, before, extra, require_volume_change=True)
+            if res.get("success") and auto:
+                res["message"] = res["message"] + (f" | profilo scelto in automatico: {prof} (spigolo "
+                                                   f"{'interno' if ci['internal'] else 'esterno'}; profile=... per cambiarlo)")
+            return res
         except Exception as e:
             logger.error(f"thread_feature: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)

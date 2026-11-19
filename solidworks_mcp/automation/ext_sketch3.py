@@ -149,26 +149,47 @@ class Sketch3Operations:
             maj_x_m = self._mmu(major_x, unit)
             maj_y_m = self._mmu(major_y, unit)
             min_r_m = self._mmu(minor_r, unit)
-            a_start = math.radians(start_angle)
-            a_end = math.radians(end_angle)
-            sx_m = cx_m + maj_x_m * math.cos(a_start)
-            sy_m = cy_m + min_r_m * math.sin(a_start)
-            ex_m = cx_m + maj_x_m * math.cos(a_end)
-            ey_m = cy_m + min_r_m * math.sin(a_end)
+            # (revisione 2026-11-12) prima l'asse minore e i punti iniziale/finale ignoravano major_y: con l'asse maggiore
+            # inclinato l'ellisse era sbagliata. Ora tutto e' calcolato nel riferimento dell'ellisse (u = asse maggiore,
+            # v = u ruotato di +90 gradi) e gli estremi creati sono riletti e confrontati.
+            a_m = math.hypot(maj_x_m, maj_y_m)
+            if a_m <= 0 or min_r_m <= 0:
+                return self._result(False, "draw_elliptical_arc: asse maggiore (major_x, major_y) e minor_r devono essere > 0.",
+                                    SwErrors.swInvalidInput)
+            ux, uy = maj_x_m / a_m, maj_y_m / a_m
+            vx, vy = -uy, ux
+
+            def at(deg):
+                t = math.radians(deg)
+                return (cx_m + a_m * math.cos(t) * ux + min_r_m * math.sin(t) * vx,
+                        cy_m + a_m * math.cos(t) * uy + min_r_m * math.sin(t) * vy)
+            sx_m, sy_m = at(start_angle)
+            ex_m, ey_m = at(end_angle)
             sk_mgr = doc.SketchManager
             seg = sk_mgr.CreateEllipticalArc(
                 cx_m, cy_m, 0.0,
                 cx_m + maj_x_m, cy_m + maj_y_m, 0.0,
-                cx_m, cy_m + min_r_m, 0.0,
+                cx_m + min_r_m * vx, cy_m + min_r_m * vy, 0.0,
                 sx_m, sy_m, 0.0,
                 ex_m, ey_m, 0.0,
                 1
             )
             if seg is None:
                 return self._result(False, "draw_elliptical_arc: arco ellittico non creato da SolidWorks.", SwErrors.swSketchError)
+            mm = lambda v: round(v * 1000.0, 4)
+            try:
+                p0, p1 = seg.GetStartPoint2, seg.GetEndPoint2
+                got = [[mm(p0.X), mm(p0.Y)], [mm(p1.X), mm(p1.Y)]]
+            except Exception:
+                got = None
+            want = [[mm(sx_m), mm(sy_m)], [mm(ex_m), mm(ey_m)]]
+            if got is not None and not all(abs(g - w) < 1e-3 for gp, wp in zip(got, want) for g, w in zip(gp, wp)):
+                return self._result(False, f"draw_elliptical_arc: SolidWorks ha creato l'arco con estremi {got} mm invece di "
+                                    f"{want} mm.", SwErrors.swSketchError, {"endpoints_mm": got, "expected_mm": want})
             return self._result(
-                True, f"Arco ellittico creato da {start_angle} a {end_angle} deg.",
-                SwErrors.swSuccess, {"center": [cx, cy], "angles": [start_angle, end_angle], "created": True}
+                True, f"Arco ellittico creato da {start_angle} a {end_angle} deg (estremi {want} mm, riletti).",
+                SwErrors.swSuccess, {"center": [cx, cy], "angles": [start_angle, end_angle], "created": True,
+                                     "endpoints_mm": got or want, "entity_id": self._seg_id(seg)}
             )
         except Exception as e:
             logger.error(f"draw_elliptical_arc: {e}\n{traceback.format_exc()}")
@@ -225,63 +246,32 @@ class Sketch3Operations:
 
     def draw_centerpoint_slot(self, cx: float, cy: float, length: float, width: float,
                               angle: float = 0.0, unit: str = None) -> Dict:
-        """Disegna un'asola rettilinea dal centro."""
+        """Asola rettilinea dal centro: `length` = distanza fra i centri degli estremi.
+        (revisione 2026-11-12) prima usava il tipo 0 di CreateSketchSlot con il centro come primo estremo: l'asola partiva dal
+        centro ed era lunga meta'. Ora calcola i due centri degli estremi e passa a draw_slot (center_to_center, misurato)."""
         try:
-            doc, sk, err = self._s2_active_or_open()
-            if err:
-                return err
-            sk_mgr = doc.SketchManager
-            rad = math.radians(angle)
-            hl = length / 2.0
-            cx_m = self._mmu(cx, unit)
-            cy_m = self._mmu(cy, unit)
-            x2_m = cx_m + self._mmu(hl * math.cos(rad), unit)
-            y2_m = cy_m + self._mmu(hl * math.sin(rad), unit)
-            w_m = self._mmu(width, unit)
-            before_segs = len(self._segments(sk))
-            res = sk_mgr.CreateSketchSlot(0, 0, w_m, cx_m, cy_m, 0.0, x2_m, y2_m, 0.0, 0.0, 0.0, 0.0, 1, False)
-            if res is None or len(self._segments(sk)) <= before_segs:
-                return self._result(False, "draw_centerpoint_slot: asola non creata da SolidWorks.", SwErrors.swSketchError)
-            return self._result(
-                True, f"Asola dal centro {cx},{cy} creata: lunghezza {length}, larghezza {width}.",
-                SwErrors.swSuccess, {"center": [cx, cy], "length": length, "width": width, "angle": angle}
-            )
+            if length is None or float(length) <= 0:
+                return self._result(False, "draw_centerpoint_slot: length deve essere > 0.", SwErrors.swInvalidInput)
+            rad = math.radians(float(angle or 0.0))
+            hx, hy = float(length) / 2.0 * math.cos(rad), float(length) / 2.0 * math.sin(rad)
+            r = self.draw_slot(x1=float(cx) - hx, y1=float(cy) - hy, x2=float(cx) + hx, y2=float(cy) + hy, width=width,
+                               unit=unit, slot_type="center_to_center")
+            if r.get("success"):
+                r["data"].update({"center": [cx, cy], "length": length, "angle": angle})
+            return r
         except Exception as e:
             logger.error(f"draw_centerpoint_slot: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def draw_arc_slot(self, cx: float, cy: float, radius: float, width: float, start_angle: float = 0.0,
                       end_angle: float = 90.0, slot_type: str = "centerpoint_arc", unit: str = None) -> Dict:
-        """Disegna un'asola curvilinea ad arco."""
-        try:
-            doc, sk, err = self._s2_active_or_open()
-            if err:
-                return err
-            if "center" not in str(slot_type or "").lower():
-                return self._result(False, f"draw_arc_slot: tipo '{slot_type}' non supportato da questo tool: usa 'centerpoint_arc'.",
-                                    SwErrors.swInvalidInput)
-            sk_mgr = doc.SketchManager
-            cx_m = self._mmu(cx, unit)
-            cy_m = self._mmu(cy, unit)
-            r_m = self._mmu(radius, unit)
-            w_m = self._mmu(width, unit)
-            a1 = math.radians(start_angle)
-            a2 = math.radians(end_angle)
-            x1 = cx_m + r_m * math.cos(a1)
-            y1 = cy_m + r_m * math.sin(a1)
-            x2 = cx_m + r_m * math.cos(a2)
-            y2 = cy_m + r_m * math.sin(a2)
-            before_segs = len(self._segments(sk))
-            res = sk_mgr.CreateSketchSlot(2, 0, w_m, cx_m, cy_m, 0.0, x1, y1, 0.0, x2, y2, 0.0, 1, False)
-            if res is None or len(self._segments(sk)) <= before_segs:
-                return self._result(False, "draw_arc_slot: asola ad arco non creata da SolidWorks.", SwErrors.swSketchError)
-            return self._result(
-                True, f"Asola ad arco creata: raggio {radius}, larghezza {width}, angoli {start_angle}-{end_angle}.",
-                SwErrors.swSuccess, {"center": [cx, cy], "radius": radius, "width": width, "slot_type": "centerpoint_arc"}
-            )
-        except Exception as e:
-            logger.error(f"draw_arc_slot: {e}\n{traceback.format_exc()}")
-            return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+        """Asola ad arco dal centro: passa a draw_slot(slot_type='arc_center'), stessa mappatura di CreateSketchSlot
+        (revisione 2026-11-12: c'erano tre mappature diverse del tipo di asola in tre file)."""
+        if "center" not in str(slot_type or "").lower():
+            return self._result(False, f"draw_arc_slot: tipo '{slot_type}' non supportato da questo tool: usa 'centerpoint_arc' "
+                                "(per l'asola per 3 punti: draw_3point_arc_slot).", SwErrors.swInvalidInput)
+        return self.draw_slot(cx=cx, cy=cy, radius=radius, width=width, start_angle=start_angle, end_angle=end_angle,
+                              unit=unit, slot_type="arc_center")
 
 
     def draw_3d_arc(self, p1: list, p2: list, p3: list, unit: str = None) -> Dict:
@@ -407,21 +397,112 @@ class Sketch3Operations:
             return self._result(False, f"Errore: {e}", SwErrors.swGenericError)
 
     def repair_sketch(self, close_gaps: bool = True, gap_tolerance: float = 0.05, unit: str = None) -> Dict:
-        """Analizza e ripara micro-fessure e sovrapposizioni nello schizzo attivo."""
+        """Ripara lo schizzo attivo: (1) estremi distinti a distanza <= gap_tolerance uniti con una relazione di coincidenza
+        (chiude le micro-fessure), (2) segmenti doppi (stesso tipo e stessi estremi/centro) cancellati. Con close_gaps=false
+        solo l'analisi. (revisione 2026-11-12) prima contava i contorni e basta, ignorando i due parametri."""
         try:
-            _doc, sk, err = self._s2_active_or_open()
+            doc, sk, err = self._s2_active_or_open()
             if err:
                 return err
-            open_ref = _byref_i4()
-            closed_ref = _byref_i4()
-            sk.CheckFeatureUse(0, open_ref, closed_ref)
-            open_count = int(open_ref.value)
-            closed_count = int(closed_ref.value)
-            return self._result(
-                True, f"Verifica schizzo completata: contorni aperti {open_count}, chiusi {closed_count}.",
-                SwErrors.swSuccess, {"open_contours": open_count, "closed_contours": closed_count,
-                                     "ignored_params": ["close_gaps", "gap_tolerance"]}
-            )
+
+            def contours():
+                o, c = _byref_i4(), _byref_i4()
+                sk.CheckFeatureUse(0, o, c)
+                return int(o.value), int(c.value)
+
+            tol = self._mmu(gap_tolerance if gap_tolerance is not None else 0.05, unit)
+            open0, closed0 = contours()
+            segs = [s for s in self._segments(sk) if not bool(self._com(s, "ConstructionGeometry"))]
+            # estremi dei segmenti (oggetti punto distinti per id)
+            ends = {}
+            for s in segs:
+                for attr in ("GetStartPoint2", "GetEndPoint2"):
+                    try:
+                        p = getattr(s, attr)
+                        ends[self._pt_id(p)] = p
+                    except Exception:
+                        pass
+            pts = list(ends.items())
+            gaps = []
+            for i in range(len(pts)):
+                for j in range(i + 1, len(pts)):
+                    (ia, a), (ib, b) = pts[i], pts[j]
+                    d = math.hypot(float(a.X) - float(b.X), float(a.Y) - float(b.Y))
+                    if d <= tol:
+                        gaps.append((ia, ib, a, b, d))
+            # segmenti doppi: stesso tipo, stessi estremi (in un verso o nell'altro) e stesso centro
+            def key(s):
+                try:
+                    p0, p1 = s.GetStartPoint2, s.GetEndPoint2
+                    e = sorted([(round(float(p0.X), 9), round(float(p0.Y), 9)), (round(float(p1.X), 9), round(float(p1.Y), 9))])
+                    try:
+                        c = s.GetCenterPoint2
+                        cc = (round(float(c.X), 9), round(float(c.Y), 9))
+                    except Exception:
+                        cc = None
+                    return (int(s.GetType), tuple(e), cc)
+                except Exception:
+                    return None
+            seen, dups = {}, []
+            for s in segs:
+                k = key(s)
+                if k is None or int(s.GetType) not in (0, 1):     # solo linee e archi: per spline/ellissi gli estremi non bastano
+                    continue
+                if k in seen:
+                    dups.append(s)
+                else:
+                    seen[k] = s
+            data = {"gap_tolerance_mm": round(tol * 1000.0, 6),
+                    "gaps_found": [{"points": [ia, ib], "distance_mm": round(d * 1000.0, 6)} for ia, ib, _a, _b, d in gaps],
+                    "duplicates_found": [self._seg_id(s) for s in dups],
+                    "open_contours_before": open0, "closed_contours_before": closed0}
+            if not close_gaps:
+                return self._result(True, f"Analisi: {len(gaps)} fessure <= {data['gap_tolerance_mm']} mm, {len(dups)} segmenti "
+                                    f"doppi; contorni aperti {open0}, chiusi {closed0} (nessuna modifica: close_gaps=false).",
+                                    SwErrors.swSuccess, data)
+            sd = self._sd(doc, 0)
+            for ia, ib, a, b, d in gaps:
+                doc.ClearSelection2(True)
+                try:
+                    if a.Select4(False, sd) and b.Select4(True, sd):
+                        doc.SketchAddConstraints("sgCOINCIDENT")
+                except Exception as ex:
+                    logger.debug(f"repair_sketch coincidente {ia}-{ib}: {ex}")
+            doc.ClearSelection2(True)
+            # verifica: le fessure si ricalcolano da capo (quando due punti si uniscono uno dei due oggetti sparisce)
+            left = []
+            pts2 = {}
+            for s in [s for s in self._segments(sk) if not bool(self._com(s, "ConstructionGeometry"))]:
+                for attr in ("GetStartPoint2", "GetEndPoint2"):
+                    try:
+                        p = getattr(s, attr)
+                        pts2[self._pt_id(p)] = (float(p.X), float(p.Y))
+                    except Exception:
+                        pass
+            items = list(pts2.items())
+            for i in range(len(items)):
+                for j in range(i + 1, len(items)):
+                    (ia, pa), (ib, pb) = items[i], items[j]
+                    if math.hypot(pa[0] - pb[0], pa[1] - pb[1]) <= tol:
+                        left.append([ia, ib])
+            failed = left
+            closed_gaps = max(0, len(gaps) - len(left))
+            removed = 0
+            for s in dups:
+                try:
+                    doc.ClearSelection2(True)
+                    if s.Select4(False, sd) and doc.Extension.DeleteSelection2(0):
+                        removed += 1
+                except Exception:
+                    pass
+            doc.ClearSelection2(True)
+            open1, closed1 = contours()
+            data.update({"gaps_closed": closed_gaps, "gaps_not_closed": failed, "duplicates_removed": removed,
+                         "open_contours": open1, "closed_contours": closed1})
+            ok = not failed and removed == len(dups)
+            return self._result(ok, f"Riparazione: {closed_gaps}/{len(gaps)} fessure chiuse, {removed}/{len(dups)} doppioni "
+                                f"tolti; contorni aperti {open0} -> {open1}, chiusi {closed0} -> {closed1}.",
+                                SwErrors.swSuccess if ok else SwErrors.swSketchError, data)
         except Exception as e:
             logger.error(f"repair_sketch: {e}\n{traceback.format_exc()}")
             return self._result(False, f"repair_sketch: verifica non riuscita: {e}", SwErrors.swSketchError)

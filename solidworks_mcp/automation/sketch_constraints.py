@@ -438,25 +438,30 @@ class SketchConstraintOperations:
             if fn is None:
                 return self._result(False, f"kind sconosciuto: {kind}", SwErrors.swInvalidInput)
             dd = None
-            n_before = len(self._sketch_dimensions(doc, sk_name))
+            # (revisione 2026-11-12) SW a volte restituisce None ma la quota esiste. Prima: si provava la posizione seguente
+            # (seconda quota uguale) e alla fine si prendeva l'ULTIMA dell'elenco, che puo' essere una quota esistente a cui
+            # poi si scriveva il valore. Ora la quota nuova e' quella che non c'era prima, cercata dopo ogni tentativo.
+            names_before = {d["name"] for d in self._sketch_dimensions(doc, sk_name)}
+            new_names = []
             for (tx, ty) in tries:
                 dd = getattr(doc, fn)(tx, ty, 0)
                 if dd is not None:
                     break
-            if dd is None:
-                # SW a volte restituisce None ma la quota esiste
-                if len(self._sketch_dimensions(doc, sk_name)) > n_before:
-                    dd = True
-            if dd is None:
+                new_names = [d["name"] for d in self._sketch_dimensions(doc, sk_name) if d["name"] not in names_before]
+                if new_names:
+                    break
+            if dd is None and not new_names:
                 return self._result(False, f"AddDimension fallito per {descs} (tipo {kind}). "
                                     "Controlla che le entita' siano compatibili (es. diametro su cerchio/arco).",
                                     SwErrors.swSketchError)
             dim_obj = None
-            if dd is not True:
+            if dd is not None:
                 dim_obj = dd.GetDimension2(0)
+            elif len(new_names) == 1:
+                dim_obj = doc.Parameter(new_names[0])
             else:
-                dims = self._sketch_dimensions(doc, sk_name)
-                dim_obj = doc.Parameter(dims[-1]["name"])
+                return self._result(False, f"SolidWorks ha creato {len(new_names)} quote invece di una: {new_names}. "
+                                    "Valore non impostato.", SwErrors.swSketchError, {"new_dimensions": new_names})
             if dim_obj is None:
                 return self._result(False, "Quota creata ma non recuperabile", SwErrors.swSketchError)
             full = self._com(dim_obj, "FullName")
@@ -634,8 +639,9 @@ class SketchConstraintOperations:
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
     def split_sketch_entity(self, entity: str, x: float, y: float, unit: str = None, sketch: str = None) -> Dict:
-        """Divide una linea nel punto (x,y): la linea viene cancellata e ricostruita come due linee che si toccano nel punto.
-        Quote e relazioni della linea originale vanno perse (l'API qui non ha una divisione diretta). Solo linee."""
+        """Divide una linea nel punto (x,y) in due linee. Prima la divisione nativa di SolidWorks (tiene le relazioni degli
+        estremi); se non riesce, due linee nuove e poi la cancellazione dell'originale (quote e relazioni perse, dichiarato).
+        Solo linee."""
         try:
             doc, err = self._part()
             if err:
@@ -668,20 +674,57 @@ class SketchConstraintOperations:
                 return self._result(False, f"Il punto e' a {dist:.3f} mm da '{entity}' (tolleranza 0.05 mm): "
                                     "deve stare sulla linea.", SwErrors.swSelectionError,
                                     {"distance_mm": round(dist, 4)})
-            d = self.delete_sketch_entities(entities=[entity], sketch=sk_name)
-            if not d.get("success"):
-                return d
-            l1 = self.draw_line(x1=ax, y1=ay, x2=qx, y2=qy, unit="mm")
-            l2 = self.draw_line(x1=qx, y1=qy, x2=bx, y2=by, unit="mm")
-            if not (l1.get("success") and l2.get("success")):
-                return self._result(False, f"Linea originale cancellata, ma la ricostruzione e' fallita: {l1.get('message')} / "
-                                    f"{l2.get('message')}. Controlla lo schizzo.", SwErrors.swSketchError)
-            ids = [l1["data"]["entity_id"], l2["data"]["entity_id"]]
+            # (revisione 2026-11-12) prima la linea era CANCELLATA e poi ricostruita: se la ricostruzione falliva la geometria
+            # era persa. Ora: divisione nativa (SketchManager.SplitOpenSegment, tiene le relazioni degli estremi) verificata
+            # contando le linee; se non riesce, le due linee nuove si disegnano PRIMA e l'originale si cancella solo dopo.
+            n_before = len(self._segments(sk))
+            native = False
+            try:
+                doc.ClearSelection2(True)
+                doc.SketchManager.SplitOpenSegment(qx / 1000.0, qy / 1000.0, 0.0)
+                native = len(self._segments(sk)) == n_before + 1     # l'id originale resta a uno dei due pezzi (misurato)
+            except Exception as ex:
+                logger.debug(f"SplitOpenSegment: {ex}")
+            if native:
+                ids = []
+                want = ({(round(ax, 3), round(ay, 3)), (round(qx, 3), round(qy, 3))},
+                        {(round(qx, 3), round(qy, 3)), (round(bx, 3), round(by, 3))})
+                for s in self._segments(sk):
+                    try:
+                        if int(s.GetType) != 0:
+                            continue
+                        p0, p1 = s.GetStartPoint2, s.GetEndPoint2
+                        ends = {(round(p0.X * 1000, 3), round(p0.Y * 1000, 3)), (round(p1.X * 1000, 3), round(p1.Y * 1000, 3))}
+                        if ends in want:
+                            ids.append(self._seg_id(s))
+                    except Exception:
+                        pass
+                note = "relazioni degli estremi conservate"
+            else:
+                if len(self._segments(sk)) != n_before:
+                    return self._result(False, "SplitOpenSegment ha cambiato lo schizzo senza dividere la linea: controlla "
+                                        "lo schizzo (annulla con Ctrl+Z).", SwErrors.swSketchError)
+                l1 = self.draw_line(x1=ax, y1=ay, x2=qx, y2=qy, unit="mm")
+                l2 = self.draw_line(x1=qx, y1=qy, x2=bx, y2=by, unit="mm") if l1.get("success") else {"success": False}
+                if not (l1.get("success") and l2.get("success")):
+                    made = [r["data"]["entity_id"] for r in (l1, l2) if r.get("success")]
+                    if made:
+                        self.delete_sketch_entities(entities=made, sketch=sk_name)
+                    return self._result(False, f"Divisione non riuscita (linea originale INTATTA): {l1.get('message')} / "
+                                        f"{l2.get('message')}", SwErrors.swSketchError)
+                d = self.delete_sketch_entities(entities=[entity], sketch=sk_name)
+                ids = [l1["data"]["entity_id"], l2["data"]["entity_id"]]
+                if not d.get("success"):
+                    self.delete_sketch_entities(entities=ids, sketch=sk_name)
+                    return self._result(False, f"Linea originale non cancellabile ({d.get('message')}): tolte le due nuove, "
+                                        "schizzo come prima.", SwErrors.swSketchError)
+                note = "quote e relazioni della linea originale perse (divisione nativa non riuscita)"
             status = int(self._com(sk, "GetConstrainedStatus"))
-            return self._result(True, f"'{entity}' diviso in ({qx:.3f}; {qy:.3f}) mm: nuove linee {ids}. Quote e relazioni "
-                                "della linea originale sono state perse; schizzo " + STATUS_NAMES.get(status, "?"),
+            return self._result(True, f"'{entity}' diviso in ({qx:.3f}; {qy:.3f}) mm: nuove linee {ids}; {note}; schizzo "
+                                + STATUS_NAMES.get(status, "?"),
                                 SwErrors.swSuccess, {"sketch": sk_name, "split_point_mm": [round(qx, 4), round(qy, 4)],
-                                                     "new_entities": ids, "sketch_status": STATUS_NAMES.get(status)})
+                                                     "new_entities": ids, "native_split": native,
+                                                     "sketch_status": STATUS_NAMES.get(status)})
         except Exception as e:
             logger.error(f"split_sketch_entity: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
@@ -728,6 +771,25 @@ class SketchConstraintOperations:
         except Exception as e:
             logger.error(f"set_dimension_driven: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+
+    def _rel_entity_sets(self, sk) -> list:
+        """Per ogni relazione dello schizzo, l'insieme degli id delle entita' coinvolte (per riconoscere un doppione)."""
+        out = []
+        try:
+            for r in (sk.RelationManager.GetRelations(0) or ()):
+                ids = set()
+                for e in (r.GetEntities or ()):
+                    try:
+                        ids.add(self._seg_id(e))
+                    except Exception:
+                        try:
+                            ids.add(self._pt_id(e))
+                        except Exception:
+                            pass
+                out.append(ids)
+        except Exception as e:
+            logger.debug(f"_rel_entity_sets: {e}")
+        return out
 
     def list_sketch_relations(self, sketch: str = None) -> Dict:
         """Relazioni geometriche dello schizzo: tipo, entita' coinvolte (id), indice. Serve a trovare la relazione
@@ -924,6 +986,7 @@ class SketchConstraintOperations:
                     any(is_pt(o) for o in objs):
                 code = "sgCOINCIDENT"
             n0 = int(sk.RelationManager.GetRelationsCount(0))
+            sigs_before = self._rel_entity_sets(sk)
             before = int(self._com(sk, "GetConstrainedStatus"))
             info = {}
             if code == "sgATPIERCE" and "other_sketch" in kinds:
@@ -952,7 +1015,29 @@ class SketchConstraintOperations:
             if external and n1 - n0 <= 0 and before == after:
                 return self._result(False, f"Relazione {relation} con entita' esterne: SolidWorks non l'ha creata "
                                     f"({descs}); controlla che i tipi siano compatibili.", SwErrors.swSketchError, data)
-            return self._result(True, f"Relazione {relation} su {descs}: schizzo {STATUS_NAMES.get(after)}",
+            if not external and n1 - n0 <= 0 and before == after:
+                # (revisione 2026-11-12) prima un rifiuto di SolidWorks fra entita' dello schizzo rispondeva successo.
+                # Nessuna relazione in piu' e stato invariato: va bene solo se fra quelle entita' una relazione c'era gia'.
+                ids = set()
+                for o in objs:
+                    try:
+                        if o is None or o == "origin":
+                            continue
+                        ids.add(self._pt_id(o) if is_pt(o) else self._seg_id(o))
+                    except Exception:
+                        pass
+                if ids and any(ids <= s for s in sigs_before):
+                    data["already_present"] = True
+                    return self._result(True, f"Relazione {relation} su {descs}: fra queste entita' una relazione c'era gia', "
+                                        f"SolidWorks non ne ha aggiunte; schizzo {STATUS_NAMES.get(after)}", SwErrors.swSuccess, data)
+                return self._result(False, f"Relazione {relation} su {descs}: SolidWorks non l'ha creata (nessuna relazione "
+                                    "in piu', stato dello schizzo invariato). Controlla che le entita' siano compatibili.",
+                                    SwErrors.swSketchError, data)
+            warn = ""
+            if after in (4, 5, 6) and before not in (4, 5, 6):
+                warn = " ATTENZIONE: la relazione rende lo schizzo " + STATUS_NAMES.get(after) + " (togli una relazione o quota)"
+                data["warning"] = warn.strip()
+            return self._result(True, f"Relazione {relation} su {descs}: schizzo {STATUS_NAMES.get(after)}{warn}",
                                 SwErrors.swSuccess, data)
         except Exception as e:
             logger.error(f"add_sketch_relation: {e}\n{traceback.format_exc()}")
@@ -1084,9 +1169,23 @@ class SketchConstraintOperations:
             else:
                 if None in (x1, y1, x2, y2):
                     return self._result(False, "x1, y1, x2, y2 obbligatori.", SwErrors.swInvalidInput)
-                t = 0 if st.startswith("center") else 1   # swSketchSlotCreationType_e
+                # (revisione 2026-11-12) prima 'overall' usava il tipo 1 (swSketchSlotCreationType_center_line = centro +
+                # estremo della linea centrale), cioe' un'asola centrata in (x1,y1) lunga il doppio. Ora tutte le asole rette
+                # usano il tipo 0 (line: centri dei due estremi); per 'overall' i centri sono gli estremi accorciati di width/2.
+                if st not in ("center_to_center", "overall"):
+                    return self._result(False, f"slot_type sconosciuto: {slot_type}. Validi: center_to_center | overall | "
+                                        "arc_center | arc_3point", SwErrors.swInvalidInput)
+                ax_, ay_, bx_, by_ = float(x1), float(y1), float(x2), float(y2)
+                if st == "overall":
+                    L = math.hypot(bx_ - ax_, by_ - ay_)
+                    h = float(width) / 2.0
+                    if L <= 2 * h:
+                        return self._result(False, f"overall: la lunghezza totale ({L:g}) deve superare la larghezza ({width}).",
+                                            SwErrors.swInvalidInput)
+                    ux_, uy_ = (bx_ - ax_) / L, (by_ - ay_) / L
+                    ax_, ay_, bx_, by_ = ax_ + h * ux_, ay_ + h * uy_, bx_ - h * ux_, by_ - h * uy_
                 before = {self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))}
-                res = sm.CreateSketchSlot(t, 0, m(width), m(x1), m(y1), 0, m(x2), m(y2), 0, 0, 0, 0, 1, False)
+                res = sm.CreateSketchSlot(0, 0, m(width), m(ax_), m(ay_), 0, m(bx_), m(by_), 0, 0, 0, 0, 1, False)
             if res is None:
                 return self._result(False, "CreateSketchSlot fallito", SwErrors.swSketchError)
             segs = [self._seg_id(s) for s in self._segments(self._com(sm, "ActiveSketch"))
@@ -1243,7 +1342,7 @@ class SketchConstraintOperations:
             logger.error(f"convert_entities: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
 
-    def mirror_sketch_entities(self, entities: list, axis, unit: str = None, keep_original: bool = True) -> Dict:
+    def mirror_sketch_entities(self, entities: list, axis, unit: str = None) -> Dict:
         """Specchia entita' dello schizzo rispetto a una linea / asse di mezzeria (id o '@x,y')."""
         try:
             doc, err = self._part()

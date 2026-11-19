@@ -11,7 +11,7 @@ TOOLS = {
          "thickness": (N, "Sheet thickness (`unit`, mm), required"),
          "bend_radius": (N, "Inside bend radius (`unit`, mm; default = thickness)"),
          "depth": (N, "Extrusion length for an OPEN sketch (`unit`, mm; 0 or omitted for a closed sketch)"),
-         "k_factor": (N, "K-factor (ratio between 0 and 1, default 0.5)"),
+         "k_factor": (N, "K-factor (ratio 0-1, default 0.5). Read back after creation: SolidWorks 2026 does not keep a K set through the API, so a value other than the one the sheet metal ends up with is refused and the flange deleted"),
          "reverse": (B, "Reverse the thickness / extrusion direction (boolean, default false)"),
          "unit": UNIT},
         ["thickness"]),

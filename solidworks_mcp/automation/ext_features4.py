@@ -30,8 +30,9 @@ class Features4Operations:
         except Exception:
             pass
 
-    def _safe_select(self, doc, kind: str, pt, unit=None, mark=0, tol_mm: float = 50.0) -> bool:
-        """Seleziona un'entita' geometrica senza bloccare l'esecuzione in caso di scostamento di coordinate."""
+    def _safe_select(self, doc, kind: str, pt, unit=None, mark=0, tol_mm: float = 0.05) -> bool:
+        """Seleziona l'entita' geometrica che passa per il punto (tolleranza 0,05 mm come _select_point).
+        (revisione 2026-11-12) prima la tolleranza era 50 mm: si prendeva la faccia piu' vicina anche se sbagliata."""
         try:
             if pt is not None and hasattr(self, "_select_point"):
                 ok, _ = self._select_point(doc, kind, pt, unit=unit, mark=mark, tol_mm=tol_mm)

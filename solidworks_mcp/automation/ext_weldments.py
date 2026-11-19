@@ -148,11 +148,18 @@ class WeldmentsOperations:
             path, cfg, err = self._wld_profile_path(standard, profile, size)
             if err:
                 return err
+            fm = doc.FeatureManager
+            # misurato 2026-11-19: InsertStructuralWeldment5 NON aggiunge la feature Saldatura; senza di essa la distinta di
+            # taglio automatica non esiste (nessuna voce). Con la feature inserita prima, SolidWorks raggruppa i corpi in voci.
+            if not any(t == "WeldmentFeature" for _n, t, _f in self._features(doc)):
+                try:
+                    self._wld_raw(fm, "InsertWeldmentFeature")
+                except Exception as ex:
+                    logger.debug(f"InsertWeldmentFeature: {ex}")
             v0 = self._volume_m3(doc)
             before = self._names(doc)
             nb0 = len(self._bodies(doc))
             doc.ClearSelection2(True)
-            fm = doc.FeatureManager
             group = self._wld_call(fm, "CreateStructuralMemberGroup")
             group.Segments = VARIANT(_VT_AD, tuple(chosen))
             apply, ctype = _CORNER[ct]
@@ -287,8 +294,30 @@ class WeldmentsOperations:
             if err:
                 return err
             self._exit_sketch(doc)
-            folders = [f for n, t, f in self._features(doc) if t == "CutListFolder"]
+            # misurato 2026-11-19: le voci vere sono le CutListFolder SOTTO la cartella dei corpi (SolidBodyFolder, "Elenco di
+            # taglio"); prima si cercavano solo in cima all'albero e, non trovandole, se ne creava UNA con tutti i corpi
             created = False
+            roots = [f for n, t, f in self._features(doc) if t == "SolidBodyFolder"]
+            if update:
+                # misurato 2026-11-19: senza la feature Saldatura la distinta automatica e' spenta e non c'e' nessuna voce:
+                # SetAutomaticCutList(True) + UpdateCutList sulla cartella dei corpi fa raggruppare i corpi a SolidWorks
+                for r_ in roots:
+                    try:
+                        bf_ = self._com(r_, "GetSpecificFeature2")
+                        if not bool(self._wld_raw(bf_, "GetAutomaticCutList")):
+                            self._wld_raw(bf_, "SetAutomaticCutList", True)
+                        self._wld_raw(bf_, "UpdateCutList")
+                    except Exception as ex:
+                        logger.debug(f"UpdateCutList sulla cartella dei corpi: {ex}")
+            folders = []
+            for r_ in roots:
+                sf = self._com(r_, "GetFirstSubFeature")
+                while sf is not None:
+                    if str(self._com(sf, "GetTypeName2")) == "CutListFolder":
+                        folders.append(sf)
+                    sf = self._com(sf, "GetNextSubFeature")
+            if not folders:
+                folders = [f for n, t, f in self._features(doc) if t == "CutListFolder"]
             if not folders:
                 solids = self._bodies(doc)
                 if not solids:
@@ -306,19 +335,56 @@ class WeldmentsOperations:
             updated = None
             if update:
                 updated = bool(self._wld_raw(bf, "UpdateCutList"))
-            members = [win32com.client.Dispatch(b) for b in list(self._wld_raw(bf, "GetBodies") or [])]
-            rows, groups = [], {}
-            for b in members:
-                bx = [round(float(v) * 1000, 3) for v in self._wld_raw(b, "GetBodyBox")]
-                size = [round(bx[i + 3] - bx[i], 3) for i in range(3)]
-                key = tuple(sorted(size))
-                vol = round(self._body_volume(b) * 1e9, 3)
-                rows.append({"body": str(self._com(b, "Name")), "box_size_mm": size, "volume_mm3": vol})
-                g = groups.setdefault(key, {"quantity": 0, "box_size_mm": list(key), "volume_each_mm3": vol})
-                g["quantity"] += 1
-            items = list(groups.values())
+            # (revisione 2026-11-12) prima le voci erano raggruppate per INGOMBRO: membri diversi con lo stesso ingombro (tubo
+            # 40x40x4 e 40x40x3) finivano nella stessa voce. Ora le voci sono le cartelle che SolidWorks stesso crea nella
+            # distinta (CutListFolder, anche come sotto-feature: una cartella = una voce, i suoi corpi = la quantita').
+            def sub_folders(f):
+                out = []
+                try:
+                    sf = self._com(f, "GetFirstSubFeature")
+                    while sf is not None:
+                        if str(self._com(sf, "GetTypeName2")) == "CutListFolder":
+                            out.append(sf)
+                        sf = self._com(sf, "GetNextSubFeature")
+                except Exception:
+                    pass
+                return out
+
+            def bodies_of(f):
+                try:
+                    return [win32com.client.Dispatch(b) for b in list(self._wld_raw(self._com(f, "GetSpecificFeature2"),
+                                                                                     "GetBodies") or [])]
+                except Exception:
+                    return []
+
+            item_feats = []
+            for f in folders:
+                subs = sub_folders(f)
+                item_feats.extend(subs if subs else [f])
+            members, rows, items = [], [], []
+            for f in item_feats:
+                bl = bodies_of(f)
+                if not bl:
+                    continue
+                vols = []
+                for b in bl:
+                    bx = [round(float(v) * 1000, 3) for v in self._wld_raw(b, "GetBodyBox")]
+                    size = [round(bx[i + 3] - bx[i], 3) for i in range(3)]
+                    vol = round(self._body_volume(b) * 1e9, 3)
+                    vols.append(vol)
+                    rows.append({"body": str(self._com(b, "Name")), "item": str(self._com(f, "Name")), "box_size_mm": size,
+                                 "volume_mm3": vol})
+                    members.append(b)
+                items.append({"item": str(self._com(f, "Name")), "quantity": len(bl),
+                              "box_size_mm": sorted(rows[-1]["box_size_mm"]), "volume_each_mm3": vols[0],
+                              "identical_volumes": max(vols) - min(vols) <= 1e-3 * max(1.0, abs(vols[0]))})
             data = {"folder": fname, "created": created, "update_result": updated, "bodies": len(members),
                     "items": items, "members": rows}
+            n_solid = len(self._bodies(doc))
+            if len(members) != n_solid:
+                data["bodies_in_part"] = n_solid
+                return self._result(False, f"Distinta di taglio incompleta: {len(members)} corpi nelle voci, {n_solid} nel pezzo "
+                                    "(aggiorna con update=true).", SwErrors.swFeatureError, data)
             return self._result(True, f"Distinta di taglio '{fname}': {len(members)} corpi in {len(items)} voci "
                                 f"(quantita' {[i['quantity'] for i in items]})", SwErrors.swSuccess, data)
         except Exception as e:

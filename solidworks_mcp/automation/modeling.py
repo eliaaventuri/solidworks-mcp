@@ -103,10 +103,12 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
 
     # ------------------------------------------------------------------ utilita' interne
     def _names(self, doc) -> List[str]:
-        return [n for n, t, f in self._features(doc)]
+        return [n for n, t, f in self._features(doc, types=False)]     # solo i nomi: meta' delle chiamate COM
 
     def _new_features(self, doc, before: List[str]) -> List[Dict]:
-        return [{"name": n, "type": t} for n, t, f in self._features(doc) if n not in before]
+        before = set(before)
+        return [{"name": n, "type": self._com(f, "GetTypeName2")}         # tipo letto solo per le feature nuove
+                for n, t, f in self._features(doc, types=False) if n not in before]
 
     def _finish(self, doc, label: str, feat, v0: float, before: List[str], extra: Dict = None,
                 require_volume_change: bool = False) -> Dict:
@@ -182,7 +184,7 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             return []
 
     # ------------------------------------------------------------------ massa / materiale
-    def get_mass_properties(self, unit: str = None) -> Dict:
+    def get_mass_properties(self) -> Dict:
         """Volume, massa, area, baricentro (Extension.CreateMassProperty)."""
         try:
             doc, err = self._part()
@@ -1264,13 +1266,15 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 return f"Feature '{n}' non trovata. Feature: {self._names(doc)}"
         return None
 
-    def _seed_effect(self, doc, names: List[str]) -> float:
+    def _seed_effect(self, doc, names: List[str]) -> Optional[float]:
         """Effetto sul volume (m3, positivo = materiale in meno) delle feature `names`: serve a verificare che
-        una ripetizione abbia prodotto tutte le istanze (un'istanza fuori dal corpo viene saltata in silenzio)."""
+        una ripetizione abbia prodotto tutte le istanze (un'istanza fuori dal corpo viene saltata in silenzio).
+        None se la misura non riesce (feature non trovata o errore): (revisione 2026-11-12) prima restituiva 0.0, che
+        per chi chiama significa "il seme non cambia il volume" e faceva accettare la ripetizione senza verifica."""
         try:
             feats = [self._find_feature(doc, n) for n in names]
             if any(f is None for f in feats):
-                return 0.0
+                return None
             v_on = self._volume_m3(doc)
             # stato di soppressione di TUTTE le feature: sopprimere il seme sopprime anche le feature figlie (altre ripetizioni
             # del seme...) e riattivare il seme NON le riattiva: vanno rimesse com'erano
@@ -1301,8 +1305,9 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                         pass
                 self._volume_m3(doc)
             return v_off - v_on
-        except Exception:
-            return 0.0
+        except Exception as e:
+            logger.debug(f"_seed_effect: {e}")
+            return None
 
     def _select_bodies(self, doc, points, unit, mark: int, append: bool = False):
         """Seleziona i corpi indicati da un punto SU una loro faccia ([[x,y,z],...]). -> (ok, errore, numero di corpi)."""
@@ -1503,6 +1508,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                     combos.append(c)
             fm = doc.FeatureManager
             seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
+            if seed is None:
+                return self._result(False, f"Non riesco a misurare l'effetto sul volume delle feature {features} (servono "
+                                    "per verificare le istanze): nulla e' stato creato. Controlla i nomi con list_features.",
+                                    SwErrors.swFeatureError)
             n_tot = c1 * c2
             state = {"n_sel": 0}
 
@@ -1554,7 +1563,12 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 if feat is not None or self._new_features(doc, before):
                     created_any = True
                     if bodies and not features:
-                        ok_inst = len(self._bodies(doc)) > n_bodies0
+                        # (revisione 2026-11-12) prima bastava che i corpi aumentassero: istanze mancanti passavano. Una
+                        # ripetizione di corpi crea (n-1) corpi nuovi per ogni corpo selezionato.
+                        exp_b = n_bodies0 + (n_tot - 1) * state["n_sel"]
+                        ok_inst = len(self._bodies(doc)) == exp_b
+                        info_v = {"instances_check": "numero di corpi", "bodies_found": len(self._bodies(doc)),
+                                  "bodies_expected": exp_b}
                     else:
                         def measure(cnts, r1=r1, r2=r2):
                             """Effetto sul volume della ripetizione con cnts = (n1[, n2]) istanze; la elimina subito."""
@@ -1594,8 +1608,14 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             extra.update(info_v)
             if bodies:
                 nb = len(self._bodies(doc))
-                extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
-                              "bodies_expected_if_separate": n_bodies0 + (n_tot - 1) * n_sel})
+                exp_b = n_bodies0 + (n_tot - 1) * n_sel
+                extra.update({"bodies_before": n_bodies0, "bodies_after": nb, "bodies_expected_if_separate": exp_b})
+                if nb != exp_b:
+                    doc.ClearSelection2(True)
+                    self._delete_features(doc, self._pattern_features(doc, before))
+                    return self._result(False, f"Ripetizione di corpi: {nb} corpi invece di {exp_b} ({n_tot} istanze di "
+                                        f"{n_sel} corpi): istanze mancanti; la ripetizione e' stata eliminata.",
+                                        SwErrors.swFeatureError, extra)
             return self._finish(doc, "Ripetizione lineare", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"linear_pattern: {e}\n{traceback.format_exc()}")
@@ -1626,6 +1646,10 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
             before = self._names(doc)
             doc.ClearSelection2(True)
             seed = 0.0 if (geometry_pattern or not features) else self._seed_effect(doc, features)
+            if seed is None:
+                return self._result(False, f"Non riesco a misurare l'effetto sul volume delle feature {features} (servono "
+                                    "per verificare le istanze): nulla e' stato creato. Controlla i nomi con list_features.",
+                                    SwErrors.swFeatureError)
             fm = doc.FeatureManager
             n = int(count)
             state = {"n_sel": 0}
@@ -1664,6 +1688,8 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                                     + (" " + why if why else " Controlla asse, numero di istanze e che le istanze cadano sul corpo."),
                                     SwErrors.swFeatureError)
             info_v = {}
+            if features and not seed:
+                info_v = {"instances_check": "non verificabile (il seme non cambia il volume)"}
             if features and seed:
                 # riferimento con un'istanza in meno e STESSO passo angolare (spaziatura fissa)
                 if equal_spacing:
@@ -1696,9 +1722,14 @@ class ModelingOperations(ModelingBase, SketchConstraintOperations):
                 nb = len(self._bodies(doc))
                 extra.update({"bodies_before": n_bodies0, "bodies_after": nb,
                               "bodies_expected_if_separate": n_bodies0 + (n - 1) * state["n_sel"]})
-                if nb <= n_bodies0 and not features:
-                    return self._result(False, "Ripetizione di corpi: il numero di corpi non e' aumentato (istanze fuse o "
-                                        "fuori posto?).", SwErrors.swFeatureError, extra)
+                exp_b = n_bodies0 + (n - 1) * state["n_sel"]
+                if nb != exp_b:
+                    # (revisione 2026-11-12) prima si controllava solo che i corpi fossero aumentati
+                    doc.ClearSelection2(True)
+                    self._delete_features(doc, self._pattern_features(doc, before))
+                    return self._result(False, f"Ripetizione di corpi: {nb} corpi invece di {exp_b} ({n} istanze di "
+                                        f"{state['n_sel']} corpi): istanze mancanti; la ripetizione e' stata eliminata.",
+                                        SwErrors.swFeatureError, extra)
             return self._finish(doc, "Ripetizione circolare", feat, v0, before, extra)
         except Exception as e:
             logger.error(f"circular_pattern: {e}\n{traceback.format_exc()}")

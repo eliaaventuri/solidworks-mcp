@@ -287,7 +287,7 @@ class Data2Operations:
         except Exception as e:
             return self._result(False, f"export_gltf_glb: {e}", SwErrors.swGenericError)
 
-    def export_3d_pdf(self, filepath: str, quality_dpi: int = 300, overwrite: bool = False) -> Dict:
+    def export_3d_pdf(self, filepath: str, overwrite: bool = False) -> Dict:
         """Genera un file PDF 3D interattivo con visualizzazione e rotazione a 360° del modello."""
         try:
             doc, err = self._part_or_assembly()

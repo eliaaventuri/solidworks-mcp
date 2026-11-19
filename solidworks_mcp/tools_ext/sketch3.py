@@ -220,7 +220,7 @@ TOOLS = {
     ),
     "repair_sketch": (
         "repair_sketch",
-        "Analyze sketch geometry and repair micro-gaps and overlapping entities.",
+        "Repair the active sketch: endpoints closer than gap_tolerance are joined with a coincident relation (closes micro-gaps) and duplicate lines/arcs are deleted; reports gaps, duplicates and open/closed contours before and after. close_gaps=false only analyzes.",
         {
             "close_gaps": (B, "Whether to automatically close identified micro-gaps (default true)"),
             "gap_tolerance": (N, "Maximum gap distance to close in mm (length unit, default 0.05)"),

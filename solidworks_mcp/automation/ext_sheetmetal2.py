@@ -58,23 +58,54 @@ class SheetMetal2Operations:
             doc, err = self._part()
             if err:
                 return err
-            sk_name = sketch or ""
-            if sk_name:
-                if not doc.Extension.SelectByID2(sk_name, "SKETCH", 0, 0, 0, False, 0, null_variant(), 0):
-                    return self._result(False, f"sm_normal_cut: schizzo '{sk_name}' non selezionato", SwErrors.swSelectionError)
+            # (misurato 2026-11-19) con lo schizzo aperto il volume letto vale 0: lo schizzo si chiude, si misura e si
+            # riseleziona per nome; il taglio "passante" va fatto nei due versi (lo schizzo sta su una faccia della lamiera)
+            sk_name, err = self._resolve_sketch(doc, sketch)
+            if err:
+                return err
+            self._exit_sketch(doc)
+            doc.ClearSelection2(True)
+            if not self._select_feature(doc, sk_name, False, 0):
+                return self._result(False, f"sm_normal_cut: schizzo '{sk_name}' non selezionabile", SwErrors.swSelectionError)
             fm = doc.FeatureManager
-            d_m = self._mmu(depth or 0.0, unit)
-            feat = fm.FeatureCut4(
-                False, False, False, 0, 0, d_m, 0.0, False, False, False, False,
-                0.0, 0.0, False, False, False, False, True, False, True, False, False, False,
-                0, 0.0, False, optimize_geometry
-            )
+            # (revisione 2026-11-12) prima depth mancante diventava una profondita' cieca di 0 mm (lo schema dice "tutto lo
+            # spessore"): ora senza depth il taglio e' passante (T1 = 1, swEndCondThroughAll); controllo del volume.
+            if depth is not None and float(depth) <= 0:
+                return self._result(False, "sm_normal_cut: depth deve essere > 0 (oppure omesso = tutto lo spessore).",
+                                    SwErrors.swInvalidInput)
+            d_m = self._mmu(float(depth), unit) if depth is not None else 0.0
+            doc.ClearSelection2(True)
+            v0 = self._volume_m3(doc)
+            before = self._names(doc)
+            # tentativi: (sd, flip, T1, T2) - passante nei due versi, oppure cieco da un lato e poi dall'altro
+            tries = [(False, False, 1, 1)] if depth is None else [(True, False, 0, 0), (True, True, 0, 0)]
+            feat = None
+            for sd_, flip, t1, t2 in tries:
+                doc.ClearSelection2(True)
+                self._select_feature(doc, sk_name, False, 0)
+                feat = fm.FeatureCut4(
+                    sd_, flip, False, t1, t2, d_m, d_m, False, False, False, False,
+                    0.0, 0.0, False, False, False, False, True, False, True, False, False, False,
+                    0, 0.0, False, optimize_geometry
+                )
+                if feat is not None and self._volume_m3(doc) < v0 - 1e-12:
+                    break
+                if feat is not None:          # creato ma senza effetto (verso sbagliato): via e si prova l'altro
+                    self._delete_features(doc, [x["name"] for x in self._new_features(doc, before) if x["type"] != "ProfileFeature"])
+                    feat = None
             if feat is None:
                 return self._result(False, "sm_normal_cut: taglio normale allo spessore non creato da SolidWorks",
                                     SwErrors.swFeatureError, {"created": False, "sketch": sk_name})
+            v1 = self._volume_m3(doc)
+            data = {"created": True, "sketch": sk_name, "optimize": optimize_geometry,
+                    "depth": depth if depth is not None else "through_all", "volume_removed_mm3": round((v0 - v1) * 1e9, 4)}
+            if v0 - v1 <= 1e-12:
+                self._delete_features(doc, [x["name"] for x in self._new_features(doc, before) if x["type"] != "ProfileFeature"])
+                return self._result(False, "sm_normal_cut: il taglio non toglie materiale (schizzo fuori dalla lamiera?): "
+                                    "eliminato.", SwErrors.swFeatureError, data)
             return self._result(
-                True, "Taglio normale allo spessore della lamiera eseguito.",
-                SwErrors.swSuccess, {"created": True, "sketch": sk_name, "optimize": optimize_geometry}
+                True, f"Taglio normale allo spessore eseguito: tolti {data['volume_removed_mm3']} mm3.",
+                SwErrors.swSuccess, data
             )
         except Exception as e:
             logger.error(f"sm_normal_cut: {e}\n{traceback.format_exc()}")

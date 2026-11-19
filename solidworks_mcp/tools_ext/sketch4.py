@@ -25,11 +25,11 @@ TOOLS = {
     ),
     "segment_sketch_entity": (
         "segment_sketch_entity",
-        "Divide a sketch line, arc, circle, or spline into N equal segments or place N equidistant sketch points along its length.",
+        "Divide a sketch line, arc or circle into N equal parts: split it into N segments (is_segments=true) or add the N-1 inner points (a circle gets N points). Points are computed on the curve (equal arc length) and re-read from the sketch. Ellipses and splines are refused.",
         {
             "entity": (S, "Sketch segment ID to divide (or omit to use selected entity)"),
-            "count": (N, "Number of segments or points to create (count, default 4)"),
-            "is_segments": (B, "true = split into N separate sketch segments; false = place N equidistant sketch points (default false)"),
+            "count": (N, "Number of equal parts, 2-1000 (default 4)"),
+            "is_segments": (B, "true = split into N separate sketch segments; false = place the dividing sketch points (default false)"),
         },
         [],
     ),

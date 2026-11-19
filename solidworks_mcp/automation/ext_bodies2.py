@@ -563,6 +563,9 @@ class Bodies2Operations:
             if al not in ("tangent", "seed"):
                 return self._result(False, "align deve essere tangent | seed", SwErrors.swInvalidInput)
             seed = self._seed_effect(doc, list(features))
+            if seed is None:
+                return self._result(False, f"Effetto sul volume delle feature {list(features)} non misurabile (nomi giusti? "
+                                    "vedi list_features): impossibile verificare le istanze.", SwErrors.swFeatureError)
             if abs(seed) < 1e-15:
                 return self._result(False, "Le feature indicate non cambiano il volume: impossibile verificare le istanze.",
                                     SwErrors.swInvalidInput)
@@ -596,7 +599,7 @@ class Bodies2Operations:
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
     # ------------------------------------------------------------------ sketch_driven_pattern
-    def sketch_driven_pattern(self, features, sketch: str, geometry_pattern: bool = False, unit: str = None) -> Dict:
+    def sketch_driven_pattern(self, features, sketch: str, geometry_pattern: bool = False) -> Dict:
         """Ripetizione di feature sui punti di uno schizzo: il baricentro del seme va su ogni punto dello schizzo."""
         try:
             doc, err = self._part()
@@ -613,6 +616,9 @@ class Bodies2Operations:
             except Exception:
                 npts = None
             seed = self._seed_effect(doc, list(features))
+            if seed is None:
+                return self._result(False, f"Effetto sul volume delle feature {list(features)} non misurabile (nomi giusti? "
+                                    "vedi list_features): impossibile verificare le istanze.", SwErrors.swFeatureError)
             if abs(seed) < 1e-15:
                 return self._result(False, "Le feature indicate non cambiano il volume: impossibile verificare le istanze.",
                                     SwErrors.swInvalidInput)
@@ -669,6 +675,9 @@ class Bodies2Operations:
                 cs = r["data"]["feature"]
                 created_cs = cs
             seed = self._seed_effect(doc, list(features))
+            if seed is None:
+                return self._result(False, f"Effetto sul volume delle feature {list(features)} non misurabile (nomi giusti? "
+                                    "vedi list_features): impossibile verificare le istanze.", SwErrors.swFeatureError)
             if abs(seed) < 1e-15:
                 return self._result(False, "Le feature indicate non cambiano il volume: impossibile verificare le istanze.",
                                     SwErrors.swInvalidInput)

@@ -81,7 +81,7 @@ if not STUBBED:
                                                                         SwErrors.swConnectionError)
 
 RESULTS = []
-EXPECTED_TOOLS = 448                       # 449 registrati meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON);
+EXPECTED_TOOLS = 454                       # 455 registrati meno execute_python, disattivato di default (SW_MCP_ALLOW_PYTHON);
                                            # 2026-11-18: cancellato il codice degli 84 tool nascosti (erano 558 registrati)
                                            # e tolti 25 doppioni (REPLACED_BY in not_implemented.py)
 from solidworks_mcp.not_implemented import NOT_IMPLEMENTED
@@ -323,6 +323,30 @@ def test_dialog_prefs():
            during == {10: False, 96: False, 100: False, 101: True, 55: True} and app.t == orig, f"{during} -> {app.t}")
     sw._restore_prefs()
     record("preferenze: ripristino ripetuto innocuo", app.t == orig)
+    # ottimizzazione 2026-11-18: istanza dedicata -> impostate una volta, tenute fra i tool, rimesse solo con force (chiusura)
+    os.environ["SW_MCP_INSTANCE"] = "dedicated"
+    try:
+        sw2 = SolidWorksAutomation()
+        sw2._sw_app = app2 = App()
+        orig2 = dict(app2.t)
+        calls = {"n": 0}
+        real_set = app2.SetUserPreferenceToggle
+
+        def counting_set(k, v):
+            calls["n"] += 1
+            real_set(k, v)
+        app2.SetUserPreferenceToggle = counting_set
+        sw2._prepare_prefs()
+        sw2._restore_prefs()                    # fine del tool: sull'istanza dedicata non rimette nulla
+        n_first = calls["n"]
+        sw2._prepare_prefs()                    # tool seguente: niente scritture
+        held = dict(app2.t)
+        n_second = calls["n"] - n_first
+        sw2._restore_prefs(force=True)          # chiusura dell'istanza
+        record("preferenze, istanza dedicata: tenute fra i tool (0 scritture al secondo tool), ripristinate alla chiusura",
+               n_first == 4 and n_second == 0 and held[10] is False and app2.t == orig2, f"{n_first} {n_second} {app2.t}")
+    finally:
+        os.environ.pop("SW_MCP_INSTANCE", None)
 
 
 # ============================================================================ sicurezza
@@ -1008,10 +1032,15 @@ def test_toolsets(tmp):
         try:
             names = _names()
             groups_ok = all(n in names for n in srv.BASE_DISPATCH) and all(n in names for n in srv.DRAWING_DISPATCH)
-            none_other = not ((set(srv.MODELING_DISPATCH) - srv.BASE_FROM_MODELING) | set(srv.DATA_DISPATCH)) & names
             groups_ok = groups_ok and srv.BASE_FROM_MODELING <= names      # estrusione/taglio/raccordo/smusso anche in base
-            record("SW_MCP_TOOLSETS=base,drawings: solo base e disegni esposti", groups_ok and none_other,
-                   f"{len(names)} tool")
+            others = {n for n in names if srv._tool_group(n) not in ("base", "drawings")}
+            ext_drw = {n for n, g in srv.EXT_GROUP.items() if g == "drawings" and srv.not_implemented_reason(n) is None}
+            record("SW_MCP_TOOLSETS=base,drawings: solo base e disegni esposti (anche i tool del lotto tavole 2)",
+                   groups_ok and not others and ext_drw <= names and "add_section_view" in names, f"{len(names)} tool, estranei {sorted(others)[:5]}")
+            record("gruppi per area vera: i tool dei lotti di assiemi/tavole/dati/simulazione non sono piu' in 'modeling'",
+                   srv._tool_group("check_mate_redundancy") == "assembly" and srv._tool_group("export_ifc") == "data"
+                   and srv._tool_group("add_bearing_load") == "simulation" and srv._tool_group("sketch_offset_on_surface") == "modeling",
+                   str([srv._tool_group(n) for n in ("check_mate_redundancy", "export_ifc", "add_bearing_load")]))
             text, calls = call("create_sketch", {"plane": "Front"})
             record("tool base attivo con il gruppo scelto", not text.startswith("[ERROR]") or "gruppo" not in text, text[:60])
             mod = next(n for n in srv.MODELING_DISPATCH if n not in srv.BASE_FROM_MODELING)
@@ -1025,7 +1054,9 @@ def test_toolsets(tmp):
 
         os.environ["SW_MCP_TOOLSETS"] = "bogus"
         try:
-            base = (set(srv.BASE_DISPATCH) | set(srv.SPECIAL_HANDLERS) | srv.BASE_FROM_MODELING) - {"execute_python"}
+            base = ((set(srv.BASE_DISPATCH) | set(srv.SPECIAL_HANDLERS) | srv.BASE_FROM_MODELING
+                     | {n for n, g in srv.EXT_GROUP.items() if g == "base" and srv.not_implemented_reason(n) is None})
+                    - {"execute_python"})
             record("gruppo sconosciuto: solo base attivo (execute_python resta nascosto)", _names() == base,
                    f"{len(_names())} tool, attesi {len(base)}")
         finally:
@@ -1110,6 +1141,102 @@ def test_descriptions():
     record("descrizioni dei tool in inglese", not tool_it, f"{len(tool_it)}: {tool_it[:6]}")
     record("descrizioni dei parametri in inglese", not italian, f"{len(italian)}: {italian[:6]}")
     record("parametri numerici con unita' di misura (o count/index/ratio)", not nounit, f"{len(nounit)}: {nounit[:6]}")
+
+
+def test_params_used():
+    """Revisione 2026-11-12, punto 5: ogni parametro di uno schema deve comparire nel metodo che lo riceve (oltre la firma),
+    altrimenti il tool lo accetta e lo ignora in silenzio. Esclusi overwrite/document (controllati prima della chiamata da
+    safety.check_call e da server._dispatch_tool) e i metodi con **kwargs."""
+    from solidworks_mcp.automation import SolidWorksAutomation
+    tools = asyncio.run(srv.list_tools())
+    impl = {k: m for d in srv.DISPATCH_TABLES for k, (m, _a) in d.items()}
+    unused = []
+    for t in tools:
+        m = impl.get(t.name)
+        fn = getattr(SolidWorksAutomation, m, None) if m else None
+        if fn is None:
+            continue
+        try:
+            src = inspect.getsource(fn)
+        except (OSError, TypeError):
+            continue
+        if "**" in src.split(")", 1)[0]:
+            continue
+        for p in (t.inputSchema or {}).get("properties", {}):
+            if p in ("overwrite", "document"):
+                continue
+            if len(re.findall(r"\b" + re.escape(p) + r"\b", src)) <= 1:
+                unused.append(f"{t.name}.{p}")
+    record("nessun parametro dello schema ignorato dal metodo", not unused, f"{len(unused)}: {unused[:8]}")
+
+
+def test_optimization():
+    """Ottimizzazione 2026-11-18: istruzioni del server, riferimenti fra i passi di execute_tool_sequence, risposta compatta,
+    schemi di piu' tool in una chiamata (search_tools names)."""
+    ins = srv.server.instructions or ""
+    record("istruzioni del server: spiegano execute_tool_sequence, i riferimenti $N e search_tools names",
+           "execute_tool_sequence" in ins and "$N.key" in ins and "search_tools(names" in ins, f"{len(ins)} caratteri")
+    steps = [{"tool": "set_units", "arguments": {"unit": "inch"}},
+             {"tool": "set_units", "arguments": {"unit": "$1.unit"}},
+             {"tool": "set_units", "arguments": {"unit": "mm"}}]
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps}))
+    d = json.loads(res[0].text.split("Details: ", 1)[1]) if "Details: " in res[0].text else {}
+    r2 = (d.get("results") or [{}, {}])[1]
+    record("execute_tool_sequence: \"$1.unit\" diventa il valore restituito dal passo 1",
+           res[0].text.startswith("[SUCCESS]") and (r2.get("data") or {}).get("unit") == "inch", str(r2)[:100])
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": [
+        {"tool": "set_units", "arguments": {"unit": "$2.unit"}}]}))
+    record("execute_tool_sequence: riferimento a un passo non eseguito -> errore spiegato",
+           res[0].text.startswith("[ERROR]") and "non e' ancora stato eseguito" in res[0].text, res[0].text[:100])
+    res = asyncio.run(srv.call_tool("execute_tool_sequence", {"steps": steps, "compact": True}))
+    d = json.loads(res[0].text.split("Details: ", 1)[1]) if "Details: " in res[0].text else {}
+    record("execute_tool_sequence compact: nessun campo data nei passi riusciti",
+           res[0].text.startswith("[SUCCESS]") and all("data" not in r for r in d.get("results", [])) and len(d.get("results", [])) == 3)
+    r = srv._search_tools_handler({"names": ["extrude_boss", "draw_circle"], "detail": True})
+    tools = (r.get("data") or {}).get("tools", [])
+    record("search_tools names+detail: due tool con tipo e descrizione di ogni parametro",
+           r["success"] and len(tools) == 2 and isinstance(tools[0]["parameters"], dict)
+           and str(tools[0]["parameters"].get("depth", "")).startswith("number"), str(tools[0]["parameters"])[:100] if tools else "")
+    args = {"view": "Disegno1", "filepath": "x.sldprt"}
+    done = srv._apply_arg_aliases(args, {"view_name", "file_path"})
+    record("argomenti con il nome dell'altro tool (view/view_name, filepath/file_path) letti come quello giusto",
+           args == {"view_name": "Disegno1", "file_path": "x.sldprt"} and len(done) == 2, str(args))
+    args = {"view": "A", "view_name": "B"}
+    srv._apply_arg_aliases(args, {"view_name"})
+    record("alias: se c'e' gia' il nome giusto l'altro non lo sovrascrive (resta e viene segnalato come ignorato)",
+           args == {"view": "A", "view_name": "B"})
+    r = srv._search_tools_handler({"names": ["tool_che_non_esiste"]})
+    record("search_tools names: nome inesistente segnalato", not r["success"] and r["data"]["missing"] == ["tool_che_non_esiste"])
+    # COM leggero (utils/com_cache): solo su Windows con pywin32 (su Linux non si installa)
+    from solidworks_mcp.utils import com_cache
+    if STUBBED:
+        record("com_cache: senza pywin32 non si installa e non rompe l'import", not com_cache.stats()["installed"])
+    else:
+        import win32com.client as _w
+        d_ = _w.Dispatch("Scripting.Dictionary")
+        d_.Add("a", 1)
+        d_.Add("b", 2)
+        ok_ = (type(d_).__name__ == "LightDispatch" and d_.Count == 2 and d_.Item("a") == 1 and d_.Exists("b")
+               and sorted(d_.Keys()) == ["a", "b"])
+        record("com_cache: oggetti COM leggeri (senza descrizione del tipo) con proprieta', metodi e proprieta' con indice",
+               com_cache.stats()["installed"] and ok_, str(com_cache.stats())[:200])
+        # vivaio: lo stesso oggetto COM restituito due volte -> stesso involucro (dispid gia' noti); flush lo lascia andare
+        inner = _w.Dispatch("Scripting.Dictionary")
+        inner.Add("x", 7)
+        d_.Add("k", inner)
+        com_cache.flush()
+        a_, b_ = d_.Item("k"), d_.Item("k")
+        st_ = com_cache.stats()
+        n_ = com_cache.flush()
+        c_ = d_.Item("k")
+        record("com_cache vivaio: stesso oggetto -> stesso involucro finche' non si svuota, poi involucro nuovo",
+               (a_ is b_) and a_.Item("x") == 7 and st_["pool_alive"] >= 1 and n_ >= 1 and c_ is not a_ and c_.Item("x") == 7,
+               f"alive {st_['pool_alive']} flush {n_}")
+        ex_ = com_cache.member_caller("Exists")
+        it_ = com_cache.member_caller("Count", method=False)
+        record("com_cache member_caller: chiamata diretta su oggetti veri e via normale su quelli finti",
+               ex_(d_, "a") is True and ex_(d_, "zz") is False and it_(d_) == 3
+               and com_cache.member_caller("upper")("abc") == "ABC")
 
 
 # ============================================================================ 5.2 ripresa dell'istanza dedicata
@@ -1840,8 +1967,21 @@ def test_sketch4_tools():
 
     record("sketch4: sketch_offset_on_surface calcola distanza e geodetica", ok_off["success"] and ok_off["data"]["geodesic"])
     record("sketch4: make_sketch_chain combina segmenti", ok_chn["success"] and ok_chn["data"]["segment_count"] == 1)
-    record("sketch4: segment_sketch_entity suddivide entita' in N segmenti", ok_seg["success"] and ok_seg["data"]["count"] == 5 and ok_seg["data"]["is_segments"])
-    record("sketch4: draw_3point_arc_slot crea asola 3 punti con endpoints", ok_slt["success"] and ok_slt["data"]["slot_type"] == "3point_arc")
+    record("sketch4: segment_sketch_entity su una spline -> rifiutato (punti non calcolabili sulla curva)",
+           not ok_seg["success"] and "solo linee" in ok_seg["message"], ok_seg["message"][:90])
+    _slot_args = {}
+    _orig_slot = sw.draw_slot
+    sw.draw_slot = lambda **kw: (_slot_args.update(kw), {"success": True, "message": "ok", "data": {}})[1]
+    ok_slt = sw.draw_3point_arc_slot(0, 0, 20, 0, 10, 5, width=4)
+    ok_cps = sw.draw_centerpoint_slot(cx=5, cy=0, length=20, width=4, angle=90)
+    _cps_args = dict(_slot_args)
+    sw.draw_slot = _orig_slot
+    record("sketch4: draw_3point_arc_slot passa a draw_slot(arc_3point) con i 3 punti",
+           ok_slt["success"] and ok_slt["data"]["slot_type"] == "3point_arc")
+    record("sketch3: draw_centerpoint_slot -> draw_slot con i centri degli estremi a +-length/2",
+           ok_cps["success"] and _cps_args.get("slot_type") == "center_to_center"
+           and abs(_cps_args["x1"] - 5) < 1e-9 and abs(_cps_args["y1"] + 10) < 1e-9 and abs(_cps_args["y2"] - 10) < 1e-9,
+           str(_cps_args))
     record('sketch4: show_sketch_curvature sulla spline', ok_curv['success'] and ok_curv['data']['density'] == 30)
     record("sketch4: draw_equation_curve_3d valuta formule parametriche e crea punti 3D",
            ok_eq3d["success"] and ok_eq3d["data"]["samples_count"] == 20 and len(ok_eq3d["data"]["start_point_m"]) == 3)
@@ -1896,8 +2036,16 @@ def test_sketch5_tools():
 
     # Mock per esecuzione con schizzo e spline attiva
     class _MockOleStub:
+        # TangentMagnitude con indice: PROPERTYPUT (flags 4) scrive args=(verso, valore), PROPERTYGET (flags 2) rilegge
+        ignore_put = False
+        def __init__(self): self.mag = {}
         def GetIDsOfNames(self, name): return 1
-        def Invoke(self, did, lcid, flags, res, *args): self.last_args = args
+        def Invoke(self, did, lcid, flags, res, *args):
+            self.last_args = args
+            if flags == 4 and not _MockOleStub.ignore_put:
+                self.mag[args[0]] = args[1]
+            elif flags == 2:
+                return self.mag.get(args[0], 1.0)
 
     class _MockSplineHandle:
         def __init__(self):
@@ -1916,7 +2064,10 @@ def test_sketch5_tools():
         def InsertPoint(self, x, y, z): return True
         def DeletePoint(self, pt): return True
         def GetPoints2(self): return [self]
-        def GetSplineHandles(self): return [_MockSplineHandle()]
+        def GetSplineHandles(self):
+            if not hasattr(self, "_h"):
+                self._h = [_MockSplineHandle()]       # stessi manubri a ogni lettura (come SolidWorks)
+            return self._h
         def Select4(self, append, data): return True
 
     class _MockArcSeg:
@@ -1993,8 +2144,13 @@ def test_sketch5_tools():
     ok_prf = sw.set_sketch_performance_mode(True, False, False)
 
     record('sketch5: relax, simplify e inserimento punto spline operativi', ok_rel['success'] and ok_smp['success'] and ok_ins['success'])
-    record("sketch5: edit_spline_handle aggiorna manubri tangenza",
-           ok_hnd["success"] and ok_hnd["data"]["magnitude"] == 2.0)
+    record("sketch5: edit_spline_handle aggiorna manubri tangenza (valore riletto)",
+           ok_hnd["success"] and ok_hnd["data"]["read_back"].get("magnitude") == 2.0)
+    _MockOleStub.ignore_put = True
+    ko_hnd = sw.edit_spline_handle(0, magnitude=3.0, spline_entity="Spline1")
+    _MockOleStub.ignore_put = False
+    record("sketch5: edit_spline_handle con valore non applicato da SolidWorks -> errore",
+           not ko_hnd["success"] and "magnitude" in ko_hnd["message"], ko_hnd["message"][:100])
     record("sketch5: replace_sketch_entity e create_sketch_belt eseguiti con successo",
            ok_rep["success"] and ok_rep["data"]["replaced"] and ok_blt["success"])
     record("sketch5: relazioni (suppress, get_allowed, delete_all) analizzate correttamente",
@@ -2624,7 +2780,7 @@ def test_simulation2_tools(tmp):
     ok_thm = sw.create_thermal_study("Therm_Test", transient=False)
     ok_drp = sw.create_drop_test_study("Drop_Test", 1000.0)
     ok_fat = sw.create_fatigue_study("Fat_Test", 100000)
-    ok_top = sw.create_topology_study("Topo_Test", 50.0)
+    ok_top = sw.create_topology_study("Topo_Test")
     ok_dyn = sw.create_linear_dynamic_study("Dyn_Test", "harmonic")
     record('simulation2: creazione studi (buckling, termico, drop test, fatica, topologia, dinamico)', not ok_bck['success'] and (not ok_thm['success']) and (not ok_drp['success']) and (not ok_fat['success']) and (not ok_top['success']) and (not ok_dyn['success']))
 
@@ -3669,7 +3825,7 @@ def main():
                          ("D10 PDF 3D", lambda: test_pdf3d(tmp)),
                          ("D3 eDrawings", lambda: test_edrawings(tmp)),("unita'", test_units),
                          ("toolset", lambda: test_toolsets(tmp)), ("thread e timeout", test_worker_timeout),
-                         ("ripresa", test_autorestart), ("descrizioni", test_descriptions),
+                         ("ripresa", test_autorestart), ("descrizioni", test_descriptions), ("parametri usati", test_params_used), ("ottimizzazione", test_optimization),
                          ("risorse e prompt", test_resources_and_prompts),
                          ("revisione sicurezza e file", lambda: test_review_fixes(tmp)),
                          ("revisione sezione 2, resto", lambda: test_review_sec2_rest(tmp)),

@@ -34,20 +34,9 @@ TOOLS = {
     ),
     "zebra_stripes_display": (
         "zebra_stripes_display",
-        "Toggle zebra stripes reflection display on the model for visual curvature continuity analysis.",
+        "Turn zebra stripes ON or OFF in the active view (IModelView.DisplayZebraStripes, read back) for visual curvature continuity checks.",
         {
             "enable": (B, "True to enable zebra stripes display, false to disable (default true)"),
-        },
-        [],
-    ),
-    "gaussian_curvature_display": (
-        "gaussian_curvature_display",
-        "Toggle Gaussian surface curvature color gradient mapping in the viewport.",
-        {
-            "enable": (B, "True to activate Gaussian curvature display, false to turn off (default true)"),
-            "min_radius": (N, "Minimum radius of curvature threshold in mm (`unit`, default 0.1)"),
-            "max_radius": (N, "Maximum radius of curvature threshold in mm (`unit`, default 100.0)"),
-            "unit": UNIT,
         },
         [],
     ),

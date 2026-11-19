@@ -358,10 +358,15 @@ class DataExportOperations:
         return doc, None
 
     def _dx_cfg_name(self, doc) -> str:
+        """Nome della configurazione attiva. (revisione 2026-11-12) prima, se la lettura falliva, restituiva "Default": un nome
+        fisso (e solo inglese) poi usato per attivare e ripristinare configurazioni. Ora la lettura fallita e' un errore."""
         try:
-            return str(self._com(self._com(doc.ConfigurationManager, "ActiveConfiguration"), "Name"))
-        except Exception:
-            return "Default"
+            name = self._com(self._com(doc.ConfigurationManager, "ActiveConfiguration"), "Name")
+        except Exception as e:
+            raise RuntimeError(f"configurazione attiva non leggibile ({e})")
+        if not name:
+            raise RuntimeError("configurazione attiva non leggibile (nome vuoto)")
+        return str(name)
 
     def _dx_cfg_names(self, doc) -> List[str]:
         try:
@@ -458,10 +463,14 @@ class DataExportOperations:
             except Exception:
                 pass
             try:
-                pbox = self._dx_box_m(self._com(c, "GetModelDoc2"))
+                mdoc = self._com(c, "GetModelDoc2")
+                if mdoc is None:
+                    raise RuntimeError("documento del componente non caricato (componente leggero o non risolto?)")
+                pbox = self._dx_box_m(mdoc)
                 t = list(self._com(self._com(c, "Transform2"), "ArrayData"))
-            except Exception:
-                continue
+            except Exception as e:
+                # (revisione 2026-11-12) prima il componente era saltato in silenzio: box incompleto con successo
+                raise RuntimeError(f"box dell'assieme incompleto: componente {self._com(c, 'Name2')} non misurabile ({e})")
             if not pbox:
                 continue
             R, T = t[0:9], t[9:12]
@@ -1576,6 +1585,23 @@ class DataExportOperations:
         except Exception as e:
             return self._dx_fail("inspect_export_file", e)
 
+    def _dx_restore_prefs(self, app, saved: Dict) -> List[str]:
+        """Rimette le preferenze GLOBALI salvate {("i"|"t"|"d", chiave): valore} e le RILEGGE. -> elenco di quelle che non sono
+        tornate al valore di prima (revisione 2026-11-12: prima il ripristino era in `except: pass` senza rilettura)."""
+        bad = []
+        get = {"i": app.GetUserPreferenceIntegerValue, "t": app.GetUserPreferenceToggle, "d": app.GetUserPreferenceDoubleValue}
+        put = {"i": app.SetUserPreferenceIntegerValue, "t": app.SetUserPreferenceToggle, "d": app.SetUserPreferenceDoubleValue}
+        for (k, key), v in saved.items():
+            try:
+                put[k](key, v)
+                now = get[k](key)
+                same = abs(float(now) - float(v)) <= 1e-12 if k == "d" else (bool(now) == bool(v) if k == "t" else int(now) == int(v))
+                if not same:
+                    bad.append(f"preferenza {key}: {now} invece di {v}")
+            except Exception as ex:
+                bad.append(f"preferenza {key} non ripristinata: {ex}")
+        return bad
+
     @keeps_old_file
     def export_model(self, filepath: str, format: str = None, configuration: str = None, quality: str = "fine",
                      deviation: float = None, angle: float = None, binary: bool = True, step_ap: int = 214,
@@ -1632,6 +1658,12 @@ class DataExportOperations:
                     prev_cfg = self._dx_cfg_name(doc)
                     doc.ShowConfiguration2(configuration)
                 self._dx_rebuild(doc)
+                if fmt == "3mf" and (deviation is not None or angle is not None or str(quality).lower() != "fine"
+                                     or str(units).lower() != "mm"):
+                    # (revisione 2026-11-12) prima qualita', deviazione, angolo e unita' comparivano in `options` anche per il
+                    # 3MF ma non avevano effetto (le preferenze impostate sono solo quelle dell'STL)
+                    return self._result(False, "3MF: quality/deviation/angle/units non sono applicabili via API (il 3MF usa le "
+                                        "impostazioni di SolidWorks, in mm): toglili oppure esporta in STL.", SwErrors.swInvalidInput)
                 if fmt in ("stl", "3mf"):
                     q = {"coarse": 1, "fine": 2, "custom": 3}.get(str(quality).lower())
                     if q is None:
@@ -1649,7 +1681,9 @@ class DataExportOperations:
                                 setdbl(2, float(deviation) / 1000.0)
                             if angle is not None:
                                 setdbl(3, math.radians(float(angle)))
-                    opts.update({"quality": q, "units": units})
+                        opts.update({"quality": q, "units": units})
+                    else:
+                        opts.update({"quality": "impostazioni di SolidWorks", "units": "mm"})
                 elif fmt == "step":
                     if int(step_ap) not in (203, 214, 242):
                         return self._result(False, "step_ap: 203 | 214 | 242", SwErrors.swInvalidInput)
@@ -1665,12 +1699,7 @@ class DataExportOperations:
                 ok = doc.Extension.SaveAs(filepath, 0, 1, export_data, e, w)
                 model_box = self._dx_box_m(doc) if fmt in ("stl", "3mf") else None   # box della configurazione ESPORTATA
             finally:
-                for (k, key), v in saved.items():
-                    try:
-                        {"i": app.SetUserPreferenceIntegerValue, "t": app.SetUserPreferenceToggle,
-                         "d": app.SetUserPreferenceDoubleValue}[k](key, v)
-                    except Exception:
-                        pass
+                prefs_bad = self._dx_restore_prefs(app, saved)
                 if prev_cfg:
                     doc.ShowConfiguration2(prev_cfg)
             exists = os.path.exists(filepath) and os.path.getsize(filepath) > 0
@@ -1684,6 +1713,10 @@ class DataExportOperations:
                     "api_ok": bool(ok), "errors": int(e.value), "warnings": int(w.value), "options": opts}
             if per_comp:
                 data["files"] = per_comp
+            if prefs_bad:
+                data["preferences_not_restored"] = prefs_bad
+                return self._result(False, f"Export eseguito ma le preferenze globali di SolidWorks NON sono tornate come prima: "
+                                    f"{prefs_bad}", SwErrors.swExportError, data)
             if not exists:
                 return self._result(False, f"Export NON riuscito (errori {int(e.value)})", SwErrors.swExportError, data)
             good = True
@@ -1896,11 +1929,7 @@ class DataExportOperations:
                         doc.GraphicsRedraw2()
                     except Exception:
                         pass
-                for k, v in saved_prefs.items():
-                    try:
-                        app.SetUserPreferenceIntegerValue(k, v)
-                    except Exception:
-                        pass
+                notes.extend(self._dx_restore_prefs(app, {("i", k): v for k, v in saved_prefs.items()}))
                 if persp_added:
                     try:
                         mv.RemovePerspective()

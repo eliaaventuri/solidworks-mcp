@@ -314,6 +314,7 @@ class AssemblyMotionMixin:
                 R_req = _rot_matrix(*(list(rotate_by) + [0, 0, 0])[:3]) if rotate_by else [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
             w_req, phi_req = _axis_angle(R_req)
             extra = {}
+            t_expected = _add(t0, T_req)          # posizione attesa dell'origine del componente (aggiornata sotto)
             if not respect_mates:
                 comp.Transform2 = self._as_transform(_mm(R_req, M0), _add(t0, T_req)) if False else \
                     self._as_transform(_mm(R_req, M0), _add(t0, T_req))
@@ -360,6 +361,7 @@ class AssemblyMotionMixin:
                          "applied": {"translation_mm": [round(v * 1000, 4) for v in applied_T],
                                      "rotation_deg_about_free_axes": [round(math.degrees(th), 4) for _, th in applied_rot]},
                          "ignored": {"translation_mm": round(ign_T * 1000, 4), "rotation_deg": round(math.degrees(ign_rot), 4)}}
+                t_expected = list(xf_t) if (U or Rax) else list(t0)
                 if not U and not Rax:
                     extra["note"] = "nessun grado di liberta': il componente e' completamente vincolato"
                 elif len(U) + len(Rax) > 0 and not free_all and (ign_T > 1e-9 or ign_rot > 1e-9):
@@ -383,7 +385,16 @@ class AssemblyMotionMixin:
             moved = self._dist(self._as_pose(comp)[1], t0) * 1000
             info["moved_mm"] = round(moved, 4)
             info.update(extra)
-            return self._result(True, f"{comp.Name2} spostato di {moved:.3f} mm", SwErrors.swSuccess, info)
+            # (revisione 2026-11-12, sez. 5) verifica della posa: la posizione riletta si confronta con quella calcolata
+            err_mm = self._dist(self._as_pose(comp)[1], t_expected) * 1000
+            info["pose_error_mm"] = round(err_mm, 4)
+            info["expected_origin_mm"] = [round(v * 1000, 4) for v in t_expected]
+            if err_mm > 0.5:
+                return self._result(False, f"{comp.Name2} spostato di {moved:.3f} mm ma l'origine e' a {err_mm:.3f} mm dalla "
+                                    "posizione calcolata (il solutore degli accoppiamenti l'ha portato altrove?)",
+                                    SwErrors.swFeatureError, info)
+            return self._result(True, f"{comp.Name2} spostato di {moved:.3f} mm (posa riletta: scarto {err_mm:.4f} mm)",
+                                SwErrors.swSuccess, info)
         except Exception as e:
             return self._as_fail("move_component", e)
 

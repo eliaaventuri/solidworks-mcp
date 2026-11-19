@@ -20,6 +20,7 @@ from .ext_bodies2 import Bodies2Operations
 from .ext_curves import CurvesOperations
 from .ext_surfaces1 import Surfaces1Operations
 from .ext_surfaces2 import Surfaces2Operations
+from .ext_surfaces3 import Surfaces3Operations
 from .ext_manage import ManageOperations
 from .ext_sheetmetal import SheetMetalOperations
 from .ext_weldments import WeldmentsOperations
@@ -34,6 +35,7 @@ from .ext_sketch4 import Sketch4Operations
 from .ext_sketch5 import Sketch5Operations
 from .ext_assembly3 import Assembly3Operations
 from .ext_drawings2 import Drawings2Operations
+from .ext_drawings3 import Drawings3Operations
 from .ext_features4 import Features4Operations
 from .ext_data2 import Data2Operations
 from .ext_simulation2 import Simulation2Operations
@@ -43,9 +45,10 @@ class SolidWorksAutomation(_BaseAutomation, SimulationOperations, DataExportOper
                            SketchOperations, FeatureOperations, DrawingOperations,
                            ModelingOperations, AssemblyOperations, MokaOperations, Sketch2Operations,
                            Features2Operations, Bodies2Operations, CurvesOperations, Surfaces1Operations, Surfaces2Operations,
+                           Surfaces3Operations,
                            ManageOperations, SheetMetalOperations, WeldmentsOperations, MoldOperations, AnalysisOperations,
                            Sketch3Operations, Features3Operations, SheetMetal2Operations, Assembly2Operations,
-                           SelectionOperations, Sketch4Operations, Sketch5Operations, Assembly3Operations, Drawings2Operations,
+                           SelectionOperations, Sketch4Operations, Sketch5Operations, Assembly3Operations, Drawings2Operations, Drawings3Operations,
                            Features4Operations, Data2Operations, Simulation2Operations):
     """
     Complete SolidWorks automation class

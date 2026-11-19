@@ -25,7 +25,7 @@ class Features3Operations:
     """Mixin per feature avanzate 3D, feature sottili, tagli dedicati e manipolazione albero."""
 
 
-    def boundary_boss(self, direction1_curves: list, direction2_curves: list = None, unit: str = None) -> Dict:
+    def boundary_boss(self, direction1_curves: list, direction2_curves: list = None) -> Dict:
         """Crea un'estrusione solida di delimitazione (Boundary Boss)."""
         try:
             doc, err = self._part()
@@ -51,7 +51,7 @@ class Features3Operations:
             logger.error(f"boundary_boss: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
 
-    def boundary_cut(self, direction1_curves: list, direction2_curves: list = None, unit: str = None) -> Dict:
+    def boundary_cut(self, direction1_curves: list, direction2_curves: list = None) -> Dict:
         """Esegue un taglio solido con delimitazione (Boundary Cut)."""
         try:
             doc, err = self._part()
@@ -205,9 +205,6 @@ class Features3Operations:
     def get_feature_tree(self, include_sketches: bool = True, include_suppressed: bool = True) -> Dict:
         """Restituisce la struttura gerarchica ad albero di feature e schizzi con stato di errore e avviso."""
         try:
-            import pythoncom
-            from win32com.client import VARIANT
-
             doc, err = self.get_active_doc()
             if err:
                 return err
@@ -221,15 +218,8 @@ class Features3Operations:
                 ftype = str(self._com(feat, "GetTypeName2") or "")
                 suppressed = bool(feat.IsSuppressed2(1, None)[0]) if hasattr(feat, "IsSuppressed2") else False
 
-                err_code = 0
-                warn = False
-                if hasattr(feat, "GetErrorCode2"):
-                    try:
-                        bf = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, None)
-                        err_code = int(feat.GetErrorCode2(bf))
-                        warn = bool(bf.value)
-                    except Exception:
-                        pass
+                err_code, warn = self._feat_error(feat) if hasattr(feat, "GetErrorCode2") else (0, False)
+                err_code = err_code or 0          # illeggibile: non contato (la lettura unica e' in base._feat_error)
 
                 if err_code != 0 and not warn:
                     error_count += 1
@@ -243,15 +233,8 @@ class Features3Operations:
                         if include_sketches:
                             sname = str(self._com(sub_f, "Name") or "")
                             stype = str(self._com(sub_f, "GetTypeName2") or "")
-                            scode = 0
-                            swarn = False
-                            if hasattr(sub_f, "GetErrorCode2"):
-                                try:
-                                    sbf = VARIANT(pythoncom.VT_BYREF | pythoncom.VT_BOOL, None)
-                                    scode = int(sub_f.GetErrorCode2(sbf))
-                                    swarn = bool(sbf.value)
-                                except Exception:
-                                    pass
+                            scode, swarn = self._feat_error(sub_f) if hasattr(sub_f, "GetErrorCode2") else (0, False)
+                            scode = scode or 0
                             if scode != 0 and not swarn:
                                 error_count += 1
                             elif swarn:

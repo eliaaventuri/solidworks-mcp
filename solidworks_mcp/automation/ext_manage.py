@@ -72,19 +72,21 @@ class ManageOperations:
             ww_feats = [self._ww_name(x) for x in _as_list(fs.value)]
             ww_codes = [self._ww_name(x) for x in _as_list(ec.value)]
             features = []
+            unreadable = []
             for name, typ, feat in self._features(doc):
-                bf = _byref(pythoncom.VT_BOOL)
-                code = int(feat.GetErrorCode2(bf))
-                warn = bool(bf.value)
+                code, warn = self._feat_error(feat)       # lettura unica (revisione 2026-11-12)
+                if code is None:
+                    unreadable.append(name)
+                    continue
                 if code != 0 or warn:
                     features.append({"name": name, "type": typ, "error_code": code, "warning": warn})
             errors = [f for f in features if not f["warning"]]
             warnings = [f for f in features if f["warning"]]
             bad = [b for b in bodies if b["defects"] != 0]
-            ok = not bad and not errors and not ww_feats
+            ok = not bad and not errors and not ww_feats and not unreadable
             data = {"bodies": bodies, "bodies_with_defects": bad, "features_with_errors": errors,
                     "features_with_warnings": warnings, "whats_wrong_features": ww_feats,
-                    "whats_wrong_codes": ww_codes, "ok": ok}
+                    "whats_wrong_codes": ww_codes, "features_error_unreadable": unreadable, "ok": ok}
             msg = (f"Geometria {'OK' if ok else 'CON PROBLEMI'}: {len(bodies)} corpi ({len(bad)} con difetti), "
                    f"{len(errors)} feature con errore, {len(warnings)} con avviso")
             return self._result(True, msg, SwErrors.swSuccess, data)
@@ -319,6 +321,39 @@ class ManageOperations:
         except Exception as e:
             logger.error(f"change_sketch_plane: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swSketchError)
+    def undo(self, steps: int = 1) -> Dict:
+        """Annulla le ultime `steps` operazioni del documento attivo (EditUndo2). (revisione 2026-11-12, sez. 5: mancava un
+        "annulla".) Verifica: albero delle feature o volume cambiati."""
+        try:
+            doc, err = self.get_active_doc()
+            if err:
+                return err
+            n = int(steps or 1)
+            if n < 1 or n > 20:
+                return self._result(False, "steps fra 1 e 20", SwErrors.swInvalidInput)
+            self._exit_sketch(doc)
+            part = int(self._com(doc, "GetType")) == 1
+            names0 = [nm for nm, _t, _f in self._features(doc)]
+            v0 = self._volume_m3(doc) if part else None
+            doc.EditUndo2(n)
+            doc.ClearSelection2(True)
+            names1 = [nm for nm, _t, _f in self._features(doc)]
+            v1 = self._volume_m3(doc) if part else None
+            data = {"steps": n, "removed_features": [x for x in names0 if x not in names1],
+                    "restored_features": [x for x in names1 if x not in names0]}
+            if part:
+                data.update({"volume_before_mm3": round(v0 * 1e9, 3), "volume_mm3": round(v1 * 1e9, 3)})
+            changed = names0 != names1 or (part and abs(v1 - v0) > 1e-15)
+            if not changed:
+                return self._result(False, "undo: nulla e' cambiato (niente da annullare, oppure l'operazione non e' annullabile, "
+                                    "es. un salvataggio).", SwErrors.swFeatureError, data)
+            return self._result(True, f"Annullate {n} operazioni: tolte {data['removed_features']}, rimesse "
+                                f"{data['restored_features']}" + (f", volume {data['volume_mm3']} mm3" if part else ""),
+                                SwErrors.swSuccess, data)
+        except Exception as e:
+            logger.error(f"undo: {e}\n{traceback.format_exc()}")
+            return self._result(False, f"Errore: {e}", SwErrors.swFeatureError)
+
     def get_rebuild_errors(self, force_rebuild: bool = False, top_only: bool = False) -> Dict:
         """Ispeziona errori e avvisi di ricostruzione del modello attivo (What's Wrong e codici di errore delle feature)."""
         try:
@@ -326,11 +361,14 @@ class ManageOperations:
             if err:
                 return err
 
+            # (revisione 2026-11-12) prima un ForceRebuild3 fallito finiva solo nel log e la risposta poteva dire "OK"
+            forced = None
             if force_rebuild:
                 try:
-                    doc.ForceRebuild3(bool(top_only))
+                    forced = bool(doc.ForceRebuild3(bool(top_only)))
                 except Exception as ex:
-                    logger.warning(f"ForceRebuild3 failed: {ex}")
+                    return self._result(False, f"get_rebuild_errors: ForceRebuild3 non riuscito ({ex}): stato della "
+                                        "ricostruzione non verificabile.", SwErrors.swGenericError)
 
             # 1. Interroga GetWhatsWrong
             ww_feats, ww_codes, ww_warns = [], [], []
@@ -359,12 +397,9 @@ class ManageOperations:
                     code = 0
                     warn = False
                     if hasattr(feat, "GetErrorCode2"):
-                        try:
-                            bf = _byref(pythoncom.VT_BOOL)
-                            code = int(feat.GetErrorCode2(bf))
-                            warn = bool(bf.value)
-                        except Exception as ex:
-                            return self._result(False, f"get_rebuild_errors: GetErrorCode2 non riuscito su '{fname}': {ex}",
+                        code, warn = self._feat_error(feat)       # lettura unica (revisione 2026-11-12)
+                        if code is None:
+                            return self._result(False, f"get_rebuild_errors: codice d'errore di '{fname}' non leggibile",
                                                 SwErrors.swGenericError)
 
                     if code != 0 or warn:
@@ -388,12 +423,9 @@ class ManageOperations:
                             scode = 0
                             swarn = False
                             if hasattr(sub_f, "GetErrorCode2"):
-                                try:
-                                    sbf = _byref(pythoncom.VT_BOOL)
-                                    scode = int(sub_f.GetErrorCode2(sbf))
-                                    swarn = bool(sbf.value)
-                                except Exception as ex:
-                                    return self._result(False, f"get_rebuild_errors: GetErrorCode2 non riuscito su '{sname}': {ex}",
+                                scode, swarn = self._feat_error(sub_f)
+                                if scode is None:
+                                    return self._result(False, f"get_rebuild_errors: codice d'errore di '{sname}' non leggibile",
                                                         SwErrors.swGenericError)
                             if scode != 0 or swarn:
                                 sitem = {"name": sname, "type": stype, "error_code": scode, "warning": swarn, "parent": fname}
@@ -409,7 +441,7 @@ class ManageOperations:
 
             has_errors = bool(features_with_errors or any(not w for w in ww_warns))
             has_warnings = bool(features_with_warnings or any(w for w in ww_warns))
-            rebuild_ok = not has_errors
+            rebuild_ok = not has_errors and forced is not False
 
             ww_list = []
             for i in range(len(ww_feats)):
@@ -427,9 +459,13 @@ class ManageOperations:
                 msg = f"Rebuild status: OK with warnings. {total_warns} feature warning(s) detected."
             else:
                 msg = f"Rebuild status: FAILED. {total_errs} error(s) and {total_warns} warning(s) detected. Fix sketches or feature inputs."
+                if forced is False and not has_errors:
+                    msg = ("Rebuild status: FAILED. ForceRebuild3 returned False although no feature reports an error code: "
+                           "the model did not rebuild.")
 
             data = {
                 "rebuild_ok": rebuild_ok,
+                "force_rebuild_result": forced,
                 "features_scanned": n_feat,
                 "has_errors": has_errors,
                 "has_warnings": has_warnings,

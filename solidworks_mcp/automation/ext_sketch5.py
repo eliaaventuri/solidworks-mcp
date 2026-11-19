@@ -174,11 +174,25 @@ class Sketch5Operations:
             idx = max(0, int(point_index or 0))
             if idx >= len(handles):
                 return self._result(False, f"edit_spline_handle: manubrio #{point_index} non trovato (manubri della spline: {len(handles)}).", SwErrors.swInvalidInput)
+            if magnitude is None and radial_angle_deg is None and polar_angle_deg is None and curvature is None:
+                return self._result(False, "edit_spline_handle: indica almeno magnitude, radial_angle_deg, polar_angle_deg "
+                                    "o curvature.", SwErrors.swInvalidInput)
             h = handles[idx]
+
+            # TangentMagnitude e' una proprieta' CON INDICE (WhichDirection: 1 = verso 1). Con il late binding si scrive e si
+            # legge con Invoke e il dispid (un intero). (revisione 2026-11-12) prima la risposta diceva edited=True senza
+            # rileggere nulla: ora ogni valore chiesto e' riletto da un manubrio preso di nuovo dalla spline.
+            def _dispid(o, name):
+                d = o._oleobj_.GetIDsOfNames(name)
+                return d[0] if isinstance(d, (tuple, list)) else d
+
+            def _mag_get(o):
+                return float(o._oleobj_.Invoke(_dispid(o, "TangentMagnitude"), 0, pythoncom.DISPATCH_PROPERTYGET, 1, 1))
+
             try:
                 h.TangentDriving = True
                 if magnitude is not None:
-                    h._oleobj_.Invoke(h._oleobj_.GetIDsOfNames("TangentMagnitude"), 0, pythoncom.DISPATCH_PROPERTYPUT, 0, 1, float(magnitude))
+                    h._oleobj_.Invoke(_dispid(h, "TangentMagnitude"), 0, pythoncom.DISPATCH_PROPERTYPUT, 0, 1, float(magnitude))
                 if radial_angle_deg is not None:
                     h.TangentRadialDirection = float(math.radians(radial_angle_deg))
                 if polar_angle_deg is not None:
@@ -189,15 +203,41 @@ class Sketch5Operations:
             except Exception as ex:
                 return self._result(False, f"edit_spline_handle: modifica manubrio non riuscita: {ex}", SwErrors.swSketchError)
 
+            read, wrong = {}, {}
+            try:
+                h2 = (self._com(sp, "GetSplineHandles") or ())[idx]
+                if magnitude is not None:
+                    read["magnitude"] = round(_mag_get(h2), 6)
+                    if abs(read["magnitude"] - float(magnitude)) > 1e-4 * max(1.0, abs(float(magnitude))):
+                        wrong["magnitude"] = read["magnitude"]
+                for key, val, prop in (("radial_angle_deg", radial_angle_deg, "TangentRadialDirection"),
+                                       ("polar_angle_deg", polar_angle_deg, "TangentPolarDirection")):
+                    if val is not None:
+                        got = math.degrees(float(self._com(h2, prop)))
+                        read[key] = round(got, 4)
+                        if abs(((got - float(val)) + 180.0) % 360.0 - 180.0) > 0.01:
+                            wrong[key] = read[key]
+                if curvature is not None:
+                    read["curvature"] = round(float(self._com(h2, "Curvature")), 6)
+                    if abs(read["curvature"] - float(curvature)) > 1e-4 * max(1.0, abs(float(curvature))):
+                        wrong["curvature"] = read["curvature"]
+            except Exception as ex:
+                return self._result(False, f"edit_spline_handle: valori scritti ma non rileggibili ({ex}): esito incerto.",
+                                    SwErrors.swSketchError)
+
             spline_name = self._safe_seg_id(sp)
-            msg = f"Manubrio della spline '{spline_name}' al punto #{point_index} aggiornato."
+            asked = {"magnitude": magnitude, "radial_angle_deg": radial_angle_deg, "polar_angle_deg": polar_angle_deg,
+                     "curvature": curvature}
+            if wrong:
+                return self._result(False, f"edit_spline_handle: SolidWorks non ha applicato {sorted(wrong)}: riletto {wrong}, "
+                                    f"chiesto { {k: asked[k] for k in wrong} }.", SwErrors.swSketchError,
+                                    {"spline_entity": spline_name, "handle_index": idx, "read_back": read})
+            msg = f"Manubrio della spline '{spline_name}' al punto #{idx} aggiornato (riletto: {read})."
             return self._result(True, msg, SwErrors.swSuccess, {
                 "spline_entity": spline_name,
-                "handle_index": point_index,
-                "magnitude": magnitude,
-                "radial_angle_deg": radial_angle_deg,
-                "polar_angle_deg": polar_angle_deg,
-                "curvature": curvature,
+                "handle_index": idx,
+                **asked,
+                "read_back": read,
                 "edited": True
             })
         except Exception as e:

@@ -526,21 +526,24 @@ class DrawingAnnotMixin:
             y += step
         return best
 
-    def _dq_chamfer_note(self, doc, labels: List[str]) -> bool:
-        """Le quote di smusso tolte dalle viste diventano una nota 'SMUSSI NON QUOTATI: 1x45, ...' in area libera."""
+    def _dq_chamfer_note(self, doc, labels: List[str]) -> str:
+        """Le quote di smusso tolte dalle viste diventano una nota 'SMUSSI NON QUOTATI: 1x45, ...' in area libera.
+        -> "created" | "exists" (una nota degli smussi c'e' gia' e contiene tutte le misure) | "failed" (le quote vanno
+        lasciate nelle viste)."""
         labels = sorted(set(l.replace("\u00b0", "") for l in labels))
         if not labels:
-            return False
+            return "failed"
         text = drawing_text("chamfer_note", self._ui_language()) + ": " + ", ".join(labels).replace(".", ",")
         for a in self._dq_annotations(doc):
             if a["kind"] == "note" and str(a.get("text", "")).startswith(all_drawing_texts("chamfer_note")):
-                return False
+                have = str(a.get("text", ""))
+                return "exists" if all(lb.replace(".", ",") in have for lb in labels) else "failed"
         # ostacoli PRIMA di inserire la nota; poi la nota si misura con GetExtent (il carattere delle note del formato puo' essere
         # piu' grande dei 3,5 mm della stima: in inglese "UNDIMENSIONED CHAMFERS" toccava la quota vicina)
         occ = self._an_obstacles(doc)
         note = doc.InsertNote(text)
         if note is None:
-            return False
+            return "failed"
         ann = note.GetAnnotation
         try:
             ex = [float(t) for t in note.GetExtent]
@@ -551,11 +554,11 @@ class DrawingAnnotMixin:
         if spot is None:
             ann.Select3(False, None)
             doc.EditDelete()
-            return False
+            return "failed"
         if ex is not None:
             pos = [float(t) for t in ann.GetPosition]
             ann.SetPosition2(pos[0] + spot[0] - (ex[0] + ex[3]) / 2, pos[1] + spot[1] - (ex[1] + ex[4]) / 2, 0)
         else:
             ann.SetPosition2(spot[0] - w / 2, spot[1] - 0.003, 0)
         doc.ClearSelection2(True)
-        return True
+        return "created"

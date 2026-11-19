@@ -1,6 +1,6 @@
 """Lotto DATI ED EXPORT 2: schemi dei tool estesi di gestione dati, configurazioni, export e DimXpert MBD -> automation/ext_data2.py (Data2Operations)."""
 
-from ._common import S, N, B, A, UNIT
+from ._common import S, B, A, UNIT
 
 TOOLS = {
     # 1. Proprietà Personalizzate e Metadati
@@ -96,7 +96,6 @@ TOOLS = {
         "Generate an interactive 3D PDF file viewable with 360-degree rotation in Adobe Reader.",
         {
             "filepath": (S, "Destination 3D PDF file path (.pdf)"),
-            "quality_dpi": (N, "Page preview quality in dpi (default 300)"),
             "overwrite": (B, "Overwrite existing file if present (default false)"),
         },
         ["filepath"],

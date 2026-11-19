@@ -250,7 +250,7 @@ class Simulation2Operations:
             logger.error(f"create_fatigue_study: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    def create_topology_study(self, study_name: str = "Topology 1", target_mass_percent: float = 50.0) -> Dict:
+    def create_topology_study(self, study_name: str = "Topology 1") -> Dict:
         """Crea uno studio di ottimizzazione topologica (tipo 13). Richiede la licenza adatta: se SolidWorks lo rifiuta
         il tool fallisce (nessun ripiego su altri tipi di studio). L'obiettivo di massa non e' impostabile via API."""
         try:
@@ -311,7 +311,7 @@ class Simulation2Operations:
             rn, rs = float(c.NormalStiffnessValue) / 1e9, float(c.ShearStiffnessValue) / 1e9
             data = {"name": self._s2_last_name(lm, n0), "normal_stiffness_n_mm3": rn, "shear_stiffness_n_mm3": rs,
                     "faces": len(ents), "end_edit": rc}
-            if rc != 0 or abs(rn * 1e9 - kn) > 1e-6 * kn:
+            if rc != 0 or abs(rn * 1e9 - kn) > 1e-6 * kn or abs(rs * 1e9 - ks) > 1e-6 * max(ks, 1.0):   # (revisione 2026-11-12: anche la tangenziale)
                 return self._s2_err(f"Supporto elastico creato ma rigidezza rifiutata (codice {rc})", data=data)
             return self._result(True, f"Supporto elastico {data['name']} su {len(ents)} facce: k normale {rn} N/mm3, "
                                       f"tangenziale {rs} N/mm3", SwErrors.swSuccess, data)
@@ -553,7 +553,7 @@ class Simulation2Operations:
             rc = int(s.SpringConnectorEndEdit)
             rn, rs = float(s.NormalRadialStiffnessValue) / 1000.0, float(s.TangentialOrShearStiffnessValue) / 1000.0
             data = {"name": self._s2_last_name(lm, n0), "stiffness_n_mm": rn, "shear_stiffness_n_mm": rs, "end_edit": rc}
-            if rc != 0 or abs(rn * 1000.0 - kn) > 1e-6 * kn:
+            if rc != 0 or abs(rn * 1000.0 - kn) > 1e-6 * kn or abs(rs * 1000.0 - ks) > 1e-6 * max(ks, 1.0):   # (revisione 2026-11-12: anche la tangenziale)
                 return self._s2_err(f"Molla creata ma rigidezza rifiutata (codice {rc})", data=data)
             return self._result(True, f"Connettore molla {data['name']}: k normale {rn} N/mm, tangenziale {rs} N/mm",
                                 SwErrors.swSuccess, data)
@@ -664,7 +664,7 @@ class Simulation2Operations:
             em, ta, vf = float(r.Emmisivity), float(r.AmbientTemperature) - _K0, float(r.ViewFactor)
             data = {"name": self._s2_last_name(lm, n0), "emissivity": em, "ambient_temperature_c": round(ta, 6),
                     "view_factor": vf, "faces": len(ents), "end_edit": rc}
-            if rc != 0 or abs(em - float(emissivity)) > 1e-9 or abs(ta - float(ambient_temperature_c)) > 1e-6:
+            if rc != 0 or abs(em - float(emissivity)) > 1e-9 or abs(ta - float(ambient_temperature_c)) > 1e-6                     or abs(vf - float(view_factor)) > 1e-9:                  # (revisione 2026-11-12: anche il fattore di vista)
                 return self._s2_err(f"Irraggiamento creato ma valori rifiutati (codice {rc}: 6 = emissivita', 7 = fattore di vista)", data=data)
             return self._result(True, f"Irraggiamento {data['name']} su {len(ents)} facce: emissivita' {em}, T amb {ta:.2f} C, "
                                       f"fattore di vista {vf}", SwErrors.swSuccess, data)
@@ -770,6 +770,9 @@ class Simulation2Operations:
             note = "" if friction_coefficient is None or (fr is not None and abs(fr - float(friction_coefficient)) < 1e-9) \
                 else f" (attrito richiesto {friction_coefficient} non accettato da SolidWorks: letto {fr})"
             data["friction_set"] = not note
+            if note:
+                # (revisione 2026-11-12) prima un attrito non applicato rispondeva successo con una nota
+                return self._s2_err(f"Parete virtuale {data['name']} creata ma{note}", data=data)
             return self._result(True, f"Parete virtuale {data['name']} sul piano '{wall_plane}' "
                                       f"({'rigida' if data['rigid_wall'] else 'flessibile'}){note}", SwErrors.swSuccess, data)
         except Exception as e:
@@ -868,7 +871,8 @@ class Simulation2Operations:
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
     def get_mesh_quality_metrics(self, study_name: str = None) -> Dict:
-        """Metriche della mesh dello studio: nodi, elementi, rapporto d'aspetto (max, medio, % > 3 e > 10), jacobiano peggiore."""
+        """Metriche della mesh dello studio: nodi, elementi, rapporto d'aspetto MASSIMO, jacobiano peggiore, qualita' e tipo di
+        mesh. (revisione 2026-11-12: la descrizione prometteva media e percentuali che l'API non da'.)"""
         try:
             st, doc, sm, err = self._sim_study(study_name)
             if err:
@@ -959,9 +963,9 @@ class Simulation2Operations:
             logger.error(f"get_thermal_results: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    def get_reaction_forces_detail(self, face_point: list, study_name: str = None) -> Dict:
+    def get_reaction_forces_detail(self, face_point: list, study_name: str = None, step: int = 1) -> Dict:
         """Reazione vincolare (N) sui nodi delle facce indicate (punti in mm) di uno studio statico eseguito, e il totale del
-        modello per confronto."""
+        modello per confronto. `step` = passo di soluzione (1 negli studi lineari; revisione 2026-11-12, sez. 5)."""
         try:
             st, doc, sm, err = self._sim_study(study_name)
             if err:
@@ -975,7 +979,10 @@ class Simulation2Operations:
             if e:
                 return self._s2_err(e, SwErrors.swSelectionError)
             nodes = self._sim_nodes(st)
-            a = list(res.GetReactionForcesAndMoments(1, _nullv(), 0, _bi()) or [])
+            if int(step) < 1 or int(step) > int(res.GetMaximumAvailableSteps):
+                return self._s2_err(f"step {step} non disponibile (passi: 1..{int(res.GetMaximumAvailableSteps)})",
+                                    SwErrors.swInvalidInput)
+            a = list(res.GetReactionForcesAndMoments(int(step), _nullv(), 0, _bi()) or [])
             tot, sel, cnt = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], 0
             for i in range(0, len(a) - 8, 9):
                 f = (a[i + 1], a[i + 2], a[i + 3])
@@ -998,9 +1005,9 @@ class Simulation2Operations:
             logger.error(f"get_reaction_forces_detail: {e}\n{traceback.format_exc()}")
             return self._result(False, f"Errore: {e}", SwErrors.swUnknownError)
 
-    def probe_simulation_results(self, x: float, y: float, z: float, study_name: str = None) -> Dict:
+    def probe_simulation_results(self, x: float, y: float, z: float, study_name: str = None, step: int = 1) -> Dict:
         """Valori nel NODO della mesh piu' vicino al punto (mm) di uno studio statico eseguito: Von Mises (MPa) e spostamenti
-        UX, UY, UZ, URES (mm), con la distanza punto-nodo."""
+        UX, UY, UZ, URES (mm), con la distanza punto-nodo. `step` = passo di soluzione (revisione 2026-11-12, sez. 5)."""
         try:
             st, doc, sm, err = self._sim_study(study_name)
             if err:
@@ -1016,14 +1023,17 @@ class Simulation2Operations:
             bodies = [b for _, b in self._sim_sw_bodies(doc)]
             out = {}
             ec = _bi()
-            a = list(res.GetStressForEntities2(True, 9, 1, _nullv(), _va(bodies), 3, ec) or [])
+            if int(step) < 1 or int(step) > int(res.GetMaximumAvailableSteps):
+                return self._s2_err(f"step {step} non disponibile (passi: 1..{int(res.GetMaximumAvailableSteps)})",
+                                    SwErrors.swInvalidInput)
+            a = list(res.GetStressForEntities2(True, 9, int(step), _nullv(), _va(bodies), 3, ec) or [])
             vm = {int(a[i]): float(a[i + 1]) for i in range(0, len(a) - 1, 2)}
             if node not in vm:
                 return self._s2_err(f"Von Mises non disponibile nel nodo {node} (errore {ec.value})", SwErrors.swUnknownError)
             out["von_mises_mpa"] = vm[node]
             for comp, key in ((0, "ux_mm"), (1, "uy_mm"), (2, "uz_mm"), (3, "ures_mm")):
                 ec = _bi()
-                a = list(res.GetDisplacementForEntities(comp, 1, _nullv(), _va(bodies), 0, ec) or [])
+                a = list(res.GetDisplacementForEntities(comp, int(step), _nullv(), _va(bodies), 0, ec) or [])
                 vals = {int(a[i]): float(a[i + 1]) for i in range(0, len(a) - 1, 2)}
                 if node not in vals:
                     return self._s2_err(f"Spostamento {key} non disponibile nel nodo {node} (errore {ec.value})", SwErrors.swUnknownError)

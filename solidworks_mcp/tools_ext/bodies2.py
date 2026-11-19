@@ -77,8 +77,8 @@ TOOLS = {
         "seed itself or outside the body is reported as a mismatch). Example: {\"features\":[\"Boss-Extrude2\"],\"sketch\":\"Sketch3\"}.",
         {"features": (A, "Names of the features to repeat (the seed)"),
          "sketch": (S, "Name of the sketch containing the points"),
-         "geometry_pattern": (B, "Geometry pattern: copy the faces without re-solving each instance (default false)"),
-         "unit": UNIT}, ["features", "sketch"]),
+         "geometry_pattern": (B, "Geometry pattern: copy the faces without re-solving each instance (default false)")},
+        ["features", "sketch"]),
     "table_driven_pattern": ("table_driven_pattern",
         "Pattern features on a table of X,Y points (Insert > Pattern/Mirror > Table Driven Pattern): the centroid of the seed's faces "
         "(not of its volume) is moved to every point in the XY plane of a coordinate system; the coordinate along its Z axis does not change. "

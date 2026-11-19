@@ -1015,6 +1015,23 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                     rows.append(row)
                 data["mirrored"] = rows
                 data["files_created"] = [r["file"] for r in rows if r["file"]]
+                # (revisione 2026-11-12) prima successo anche con componenti non allineati o file mancanti
+                problems = []
+                if len(rows) != len(comps):
+                    problems.append(f"{len(rows)} componenti speculari invece di {len(comps)}")
+                missing = [p for p in planned if not os.path.isfile(p)]
+                if missing:
+                    problems.append(f"file non scritti: {missing}")
+                if align_exact:
+                    bad = [r["component"] for r in rows if not (r.get("placement") or {}).get("aligned")]
+                    if bad:
+                        problems.append(f"non allineati all'immagine speculare: {bad}")
+                if problems:
+                    return self._result(False, "Specchiatura incompleta (i componenti creati restano nell'assieme): "
+                                        + "; ".join(problems), SwErrors.swFeatureError, data)
+            elif len(new) != len(comps):
+                return self._result(False, f"Specchiatura incompleta: {len(new)} istanze nuove per {len(comps)} componenti "
+                                    "(restano nell'assieme).", SwErrors.swFeatureError, data)
             return self._result(True, f"Specchiati {len(comps)} componenti" + (" (versione opposta, nuovi file)" if opposite_hand else "")
                                 + f": nuove istanze {new}", SwErrors.swSuccess, data)
         except Exception as e:
@@ -1052,9 +1069,10 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
         """-> (codice, e' solo un avviso). Sulle feature d'accoppiamento GetErrorCode2 arriva come METODO (vuole il flag per
         riferimento): letto come proprieta' dava sempre 0 e nessun accoppiamento risultava in errore (trovato il 2026-10-24:
         distanza in conflitto con un coincidente = codice 47, i coincidenti coinvolti = 1 con avviso).
-        La lettura e' quella comune `_feat_error`; qui un codice illeggibile vale 0 (come prima)."""
+        La lettura e' quella comune `_feat_error`. (revisione 2026-11-12) un codice illeggibile restava 0, cioe' "sano": ora
+        resta None e chi chiama lo dichiara (error_unreadable)."""
         code, warn = self._feat_error(feat)
-        return (code or 0), warn
+        return code, warn
 
     def _as_mate_dim(self, doc, feat, idx: int = 1):
         name = str(self._com(feat, "Name"))
@@ -1116,7 +1134,9 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             pass
         code, warn = self._as_feat_error2(feat)
         info["error_code"] = code
-        info["in_error"] = code != 0 and not warn
+        info["in_error"] = code is not None and code != 0 and not warn
+        if code is None:
+            info["error_unreadable"] = True
         if code and warn:
             info["warning_code"] = code       # es. coincidente coinvolto in un conflitto: avviso, l'accoppiamento resta valido
         return info
@@ -1218,12 +1238,28 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                 mate = doc.CreateMate(md)
                 code = 1 if mate is not None else 0
                 if mate is not None:
-                    # il passo impostato in CreateMateData NON viene memorizzato (resta 1 m/giro): si scrive nella quota D1 dell'accoppiamento
+                    # il passo impostato in CreateMateData NON viene memorizzato (resta 1 m/giro): si scrive nella quota D1 dell'accoppiamento.
+                    # (revisione 2026-11-12) prima, senza la quota D1, restava 1 m/giro con successo: ora il passo si rilegge e, se
+                    # diverso, l'accoppiamento si elimina.
                     nf = self._as_mate_features(doc)[-1]
                     d1 = self._as_mate_dim(doc, nf, 1)
+                    got = None
                     if d1 is not None:
                         d1.SystemValue = self._mmu(pitch, unit)
                         doc.ForceRebuild3(False)
+                        try:
+                            got = float(self._com(self._as_mate_dim(doc, nf, 1), "SystemValue"))
+                        except Exception:
+                            got = None
+                    if got is None or abs(got - self._mmu(pitch, unit)) > 1e-9:
+                        nm = str(self._com(nf, "Name"))
+                        doc.ClearSelection2(True)
+                        nf.Select2(False, 0)
+                        doc.Extension.DeleteSelection2(0)
+                        doc.ClearSelection2(True)
+                        return self._result(False, f"Vite: passo non impostabile (quota D1@{nm} "
+                                            + ("assente" if got is None else f"= {got * 1000:g} mm") + f", chiesto {pitch}): "
+                                            "accoppiamento eliminato.", SwErrors.swFeatureError, {"selected": infos})
             else:
                 mate = doc.AddMate5(mt, al, bool(flip), dist_m, dmax, dmin, float(g1), float(g2), ang_r, amax, amin, False,
                                     bool(lock_rotation), wopt, err)
@@ -1243,9 +1279,26 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             info["requested"] = used
             info["selected"] = infos
             info["mates_total"] = len(mates)
-            if info.get("in_error"):
-                return self._result(False, f"Accoppiamento {info.get('name')} creato ma IN ERRORE (codice "
-                                    f"{info.get('error_code')}): probabile sovravincolo o geometria incompatibile.",
+            if newf is None:
+                return self._result(False, f"Accoppiamento {used}: SolidWorks ha risposto ma nessun accoppiamento nuovo "
+                                    "nell'albero.", SwErrors.swFeatureError, info)
+            if info.get("in_error") or info.get("error_unreadable"):
+                # (revisione 2026-11-12) prima l'accoppiamento in errore RESTAVA nel modello (e un errore illeggibile
+                # valeva "sano"): ora si elimina e il modello torna com'era
+                deleted = False
+                try:
+                    doc.ClearSelection2(True)
+                    newf.Select2(False, 0)
+                    deleted = bool(doc.Extension.DeleteSelection2(0))
+                    doc.ClearSelection2(True)
+                    self._com(doc, "EditRebuild3")
+                except Exception:
+                    pass
+                info["deleted"] = deleted
+                why = (f"IN ERRORE (codice {info.get('error_code')}): probabile sovravincolo o geometria incompatibile"
+                       if info.get("in_error") else "con stato d'errore non leggibile")
+                return self._result(False, f"Accoppiamento {info.get('name')} creato ma {why}; "
+                                    + ("eliminato." if deleted else "NON eliminato: toglilo con delete_mate."),
                                     SwErrors.swFeatureError, info)
             return self._result(True, f"Accoppiamento {info.get('name', used)} creato", SwErrors.swSuccess, info)
         except Exception as e:
@@ -1259,8 +1312,11 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                 return err
             infos = [self._as_mate_info(doc, f) for f in self._as_mate_features(doc)]
             bad = [i["name"] for i in infos if i.get("in_error")]
-            return self._result(True, f"{len(infos)} accoppiamenti" + (f", {len(bad)} in errore" if bad else ""),
-                                SwErrors.swSuccess, {"count": len(infos), "mates": infos, "in_error": bad})
+            unk = [i["name"] for i in infos if i.get("error_unreadable")]
+            return self._result(True, f"{len(infos)} accoppiamenti" + (f", {len(bad)} in errore" if bad else "")
+                                + (f", {len(unk)} con stato non leggibile" if unk else ""),
+                                SwErrors.swSuccess, {"count": len(infos), "mates": infos, "in_error": bad,
+                                                     "error_unreadable": unk})
         except Exception as e:
             return self._as_fail("list_mates", e)
 
@@ -1346,11 +1402,42 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
             info = self._as_mate_info(doc, target)
             if info.get("in_error"):
                 return self._result(False, f"Modificato ma in errore (codice {info['error_code']})", SwErrors.swFeatureError, info)
+            if info.get("error_unreadable"):
+                return self._result(False, "Modificato ma lo stato d'errore dell'accoppiamento non si legge: verifica con "
+                                    "get_assembly_status.", SwErrors.swFeatureError, info)
             return self._result(True, f"Accoppiamento {name} modificato: {changed}", SwErrors.swSuccess, info)
         except Exception as e:
             return self._as_fail("edit_mate", e)
 
-    def get_assembly_status(self, probe_dof: bool = True) -> Dict:
+    def _as_sub_mates(self, comps) -> Dict[str, Dict]:
+        """Accoppiamenti in errore DENTRO i sottoassiemi (revisione 2026-11-12, sez. 5): {componente: {mates, in_error,
+        error_unreadable}}. I sottoassiemi annidati si visitano fino a 5 livelli."""
+        out = {}
+
+        def visit(clist, depth, prefix):
+            if depth > 5:
+                return
+            for c in clist:
+                try:
+                    if self._com(c, "IsSuppressed"):
+                        continue
+                    m = self._com(c, "GetModelDoc2")
+                    if m is None or int(self._com(m, "GetType")) != 2:
+                        continue
+                except Exception:
+                    continue
+                name = prefix + str(c.Name2)
+                infos = [self._as_mate_info(m, f) for f in self._as_mate_features(m)]
+                out[name] = {"mates": len(infos), "in_error": [i["name"] for i in infos if i.get("in_error")],
+                             "error_unreadable": [i["name"] for i in infos if i.get("error_unreadable")]}
+                try:
+                    visit(list(self._com(c, "GetChildren") or ()), depth + 1, name + "/")
+                except Exception:
+                    pass
+        visit(list(comps), 1, "")
+        return out
+
+    def get_assembly_status(self, probe_dof: bool = True, subassemblies: bool = True) -> Dict:
         """Stato dei vincoli: per componente (fisso, completamente vincolato / sottovincolato / sovravincolato, moti liberi misurati con
         probe_dof), accoppiamenti in errore, e se l'assieme e' completamente vincolato."""
         try:
@@ -1381,14 +1468,19 @@ class AssemblyOperations(AssemblyExplodeMixin, AssemblyMotionMixin, AssemblyAnal
                     over.append(row["name"])
                 elif not st["fixed"] and code != 3:
                     free.append(row["name"])
-            bad = [self._as_mate_info(doc, f) for f in self._as_mate_features(doc)]
-            bad = [m["name"] for m in bad if m.get("in_error")]
-            full = not free and not over and not bad
+            minfo = [self._as_mate_info(doc, f) for f in self._as_mate_features(doc)]
+            bad = [m["name"] for m in minfo if m.get("in_error")]
+            unk = [m["name"] for m in minfo if m.get("error_unreadable")]
+            subs = self._as_sub_mates(comps) if subassemblies else {}
+            sub_bad = {k: v["in_error"] for k, v in subs.items() if v["in_error"] or v["error_unreadable"]}
+            full = not free and not over and not bad and not unk and not sub_bad
             msg = ("Assieme completamente vincolato" if full else
                    f"Assieme NON completamente vincolato: {len(free)} sottovincolati, {len(over)} sovravincolati, "
-                   f"{len(bad)} accoppiamenti in errore")
+                   f"{len(bad)} accoppiamenti in errore" + (f", sottoassiemi con accoppiamenti in errore: {sub_bad}" if sub_bad else ""))
             return self._result(True, msg, SwErrors.swSuccess,
                                 {"fully_constrained": full, "under_constrained": free, "over_constrained": over,
-                                 "mates_in_error": bad, "components": rows, "mates": len(self._as_mate_features(doc))})
+                                 "mates_in_error": bad, "mates_error_unreadable": unk, "components": rows,
+                                 "mates": len(self._as_mate_features(doc)), "subassemblies": subs,
+                                 "subassembly_mates_in_error": sub_bad})
         except Exception as e:
             return self._as_fail("get_assembly_status", e)
