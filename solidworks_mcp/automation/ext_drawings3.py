@@ -46,8 +46,7 @@ class Drawings3Operations:
                                         "stare SU spigoli visibili di una vista).", SwErrors.swSelectionError)
             else:
                 doc.ClearSelection2(True)
-                if not any(doc.Extension.SelectByID2("", typ, p1[0], p1[1], 0, False, 0, self._NULL, 0)
-                           for typ in ("EDGE", "SILEDGE")):
+                if not any(self._sheet_select(doc, typ, p1[0], p1[1]) for typ in ("EDGE", "SILEDGE")):
                     return self._result(False, f"Nessuno spigolo in {list(edge1)} mm del foglio.", SwErrors.swSelectionError)
                 p2 = p1
             if position is not None:

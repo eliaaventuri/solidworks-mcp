@@ -119,7 +119,7 @@ class DrawingDiamMixin:
                 yy = y + off if y > c else y - off
             else:
                 xx = x + off if x > c else x - off
-            if doc.Extension.SelectByID2("", "SILEDGE", xx, yy, 0, append, 0, self._NULL, 0):
+            if self._sheet_select(doc, "SILEDGE", xx, yy, append):
                 n = sm.GetSelectedObjectCount2(-1)
                 if n > nb and int(sm.GetSelectedObjectType3(n, -1)) == 46:
                     return True
@@ -226,7 +226,7 @@ class DrawingDiamMixin:
                     x, y = p[0] + off * (1 - p[2]), p[1] + off * p[2]
                     if not append:
                         doc.ClearSelection2(True)
-                    if doc.Extension.SelectByID2("", typ, x, y, 0, append, 0, self._NULL, 0):
+                    if self._sheet_select(doc, typ, x, y, append):
                         n = sm.GetSelectedObjectCount2(-1)
                         if n > before and int(sm.GetSelectedObjectType3(n, -1)) in (1, 46):
                             return True
@@ -367,7 +367,7 @@ class DrawingDiamMixin:
                     px = cx + g["rs"] * math.cos(math.radians(ang))
                     py = cy + g["rs"] * math.sin(math.radians(ang))
                     doc.ClearSelection2(True)
-                    if doc.Extension.SelectByID2("", "EDGE", px, py, 0, False, 0, self._NULL, 0):
+                    if self._sheet_select(doc, "EDGE", px, py):
                         if int(sm.GetSelectedObjectType3(sm.GetSelectedObjectCount2(-1), -1)) == 1:
                             ok = True
                             break

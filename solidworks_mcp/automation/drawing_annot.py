@@ -554,6 +554,7 @@ class DrawingAnnotMixin:
         if spot is None:
             ann.Select3(False, None)
             doc.EditDelete()
+            self._views_dirty = True
             return "failed"
         if ex is not None:
             pos = [float(t) for t in ann.GetPosition]

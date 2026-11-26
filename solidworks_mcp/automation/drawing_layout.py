@@ -344,6 +344,7 @@ class DrawingLayoutMixin:
         ok = doc.Extension.SelectByID2(info["full"], "DIMENSION", 0, 0, 0, False, 0, self._NULL, 0)
         if ok:
             doc.Extension.DeleteSelection2(0)
+            self._views_dirty = True
         doc.ClearSelection2(True)
         return bool(ok)
 

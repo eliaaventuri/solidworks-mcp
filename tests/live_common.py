@@ -127,7 +127,7 @@ class Client:
                 data = {"_json_error": str(e)}
                 ok = False
         if os.environ.get("SW_TEST_TRACE"):              # diagnosi: ogni risposta dei tool nel log
-            print(f"    <- {tool_name}: {text[:260]}")
+            print(f"    <- {tool_name}: {text[:int(os.environ.get('SW_TEST_TRACE_LEN', 260))]}")
         if tool_name == "connect_solidworks" and ok:
             LANG["ui"] = str(data.get("ui_language") or "italian").lower()
             print(f"Lingua di SolidWorks: {LANG['ui']}" + ("" if italian() else " (nomi italiani dei test tradotti in inglese)"))

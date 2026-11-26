@@ -322,7 +322,7 @@ class Drawings2Operations:
         ok = False
         for typ in ("EDGE", "SILEDGE"):
             for dx, dy in ((0, 0), (0.0003, 0), (-0.0003, 0), (0, 0.0003), (0, -0.0003), (0.0005, 0), (0, 0.0005)):
-                if doc.Extension.SelectByID2("", typ, x + dx, y + dy, 0, append, 0, null_variant(), 0):
+                if self._sheet_select(doc, typ, x + dx, y + dy, append):
                     ok = True
                     break
             if ok:

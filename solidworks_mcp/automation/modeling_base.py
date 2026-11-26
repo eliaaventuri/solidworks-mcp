@@ -11,6 +11,7 @@ Trappole SW 2026 (late binding):
  - I membri senza argomenti sono proprieta': usare self._com().
 """
 
+import os
 import math
 import logging
 from typing import Optional, Dict, List, Tuple, Any
@@ -63,6 +64,9 @@ class ModelingBase:
                      (96, False),      # swSketchPromptToCloseSketch
                      (100, False),     # swSketchOverdefiningDimsPromptToSetState
                      (101, True))      # swSketchOverdefiningDimsSetDrivenByDefault
+    # Velocita' (misurato 26/11/2026): swViewAnimationSpeed (double 38) a 0 = la vista ruota senza animazione. Con 0,5 (valore
+    # di fabbrica) ogni schizzo su un piano non parallelo alla vista aspettava ~0,5 s (create_sketch 550 -> 43 ms).
+    _SPEED_DOUBLE_PREFS = ((38, 0.0),)
 
     def _prepare_prefs(self):
         """Niente finestre di dialogo durante il tool. Le preferenze sono GLOBALI (finiscono nel registro): il valore originale
@@ -86,6 +90,14 @@ class ModelingBase:
                 app.SetUserPreferenceToggle(pref, val)
             except Exception:
                 pass
+        speed = os.environ.get("SW_MCP_FAST_VIEW", "1").strip().lower() not in ("0", "false", "no", "off")
+        for pref, val in (self._SPEED_DOUBLE_PREFS if speed else ()):
+            try:
+                if ("d", pref) not in saved:
+                    saved[("d", pref)] = float(app.GetUserPreferenceDoubleValue(pref))
+                app.SetUserPreferenceDoubleValue(pref, val)
+            except Exception:
+                pass
 
     def _restore_prefs(self, force: bool = False):
         """Rimette le preferenze cambiate da `_prepare_prefs` (chiamato alla fine di ogni tool e prima di chiudere l'istanza).
@@ -99,7 +111,10 @@ class ModelingBase:
             return
         for pref, val in saved.items():
             try:
-                app.SetUserPreferenceToggle(pref, val)
+                if isinstance(pref, tuple):         # ("d", numero): preferenza con valore decimale
+                    app.SetUserPreferenceDoubleValue(pref[1], val)
+                else:
+                    app.SetUserPreferenceToggle(pref, val)
             except Exception:
                 pass
 

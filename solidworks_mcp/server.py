@@ -652,11 +652,14 @@ _STATE_POOL = {"on": com_cache.stats().get("pool_on", False)}
 
 def _flush_com_pool():
     t0 = time.perf_counter()
+    fast_app = _fast_com_begin()            # rilasciare un oggetto costa ~5 ms senza CommandInProgress, ~0,2 ms con
     try:
         n = com_cache.flush()
     except Exception as e:
         logger.warning(f"rilascio degli oggetti COM non riuscito: {e!r}")
         return
+    finally:
+        _fast_com_end(fast_app)
     if n:
         logger.info(f"rilasciati {n} oggetti COM dopo la risposta ({(time.perf_counter() - t0) * 1000:.0f} ms)")
 
@@ -801,12 +804,45 @@ def _unfreeze_ui(frozen):
             pass
 
 
+def _fast_com_enabled() -> bool:
+    """ISldWorks.CommandInProgress acceso per la durata di ogni tool (SW_MCP_FAST_COM=0 lo spegne).
+    Misurato il 25/11/2026: senza, SolidWorks lavora ~5 ms dopo OGNI chiamata COM esterna (GetArea 5,1 ms, GetFaces 30 ms);
+    con il flag acceso 0,2 ms e 1,0 ms. Sessione di 18 tool: 10,4 -> 3,7 s con risultati identici."""
+    return os.environ.get("SW_MCP_FAST_COM", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _fast_com_begin():
+    """Accende CommandInProgress. -> l'oggetto applicazione su cui e' stato acceso (da passare a _fast_com_end), o None."""
+    app = sw_automation._sw_app
+    if app is None or not _fast_com_enabled():
+        return None
+    try:
+        app.CommandInProgress = True
+        sw_automation._fast_com_on = True
+        return app
+    except Exception as e:
+        logger.debug(f"CommandInProgress=True non riuscito: {e!r}")
+        return None
+
+
+def _fast_com_end(app):
+    """Spegne CommandInProgress (sempre, anche dopo un errore: acceso fra un tool e l'altro bloccherebbe l'interfaccia)."""
+    if app is None:
+        return
+    sw_automation._fast_com_on = False
+    try:
+        app.CommandInProgress = False
+    except Exception as e:
+        logger.debug(f"CommandInProgress=False non riuscito: {e!r}")
+
+
 def _dispatch_tool(name: str, arguments: dict) -> Dict:
     """Esegue un tool sul thread COM. Le preferenze anti-finestre valgono per ogni tool.
     Parametro comune `document` (titolo di un documento aperto): lo rende attivo prima del tool. Senza, se il documento
     attivo e' cambiato dalla chiamata precedente, il risultato lo segnala (un close_sketch chiudeva lo schizzo di un altro file)."""
     doc_arg = arguments.pop("document", None) if (isinstance(arguments, dict) and name != "close_document") else None
     frozen = []
+    fast_app = _fast_com_begin()
     try:
         if sw_automation._sw_app is not None:
             sw_automation._prepare_prefs()      # niente finestre di dialogo durante QUALUNQUE tool (anche disegni/assiemi)
@@ -837,6 +873,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Dict:
             sw_automation._restore_prefs()      # preferenze anti-finestre di dialogo: valori originali dopo ogni tool
         except Exception as e:
             logger.warning(f"ripristino preferenze: {e}")
+        _fast_com_end(fast_app)
 
 
 # ============================================================================

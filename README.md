@@ -155,6 +155,8 @@ Part, assembly and drawing templates are the SOLIDWORKS defaults (*Options › D
 | `SW_MCP_PREWARM=0` | Do not start the dedicated instance when the server starts (default on: it starts in the background right away) |
 | `SW_MCP_LANG=it` | Result messages in Italian (default `en`: the code writes them in Italian and the server translates them on the way out; data fields are never translated) |
 | `SW_MCP_FREEZE_UI=1` | Experimental: suspend graphics and FeatureManager tree updates of the active document during each tool |
+| `SW_MCP_FAST_COM=0` | Do not set SOLIDWORKS `CommandInProgress` while a tool runs (default on: without it SOLIDWORKS does ~5 ms of idle work after every call from the server; with it a call costs ~0.2 ms; it is always switched off at the end of the tool) |
+| `SW_MCP_FAST_VIEW=0` | Keep the view rotation animation during tools (default: animation speed 0 while a tool runs, restored afterwards) |
 
 ### Speed
 
@@ -171,6 +173,9 @@ Most of the time of a session is spent in model turns, not in SOLIDWORKS: every 
   server makes fewer of them: light COM wrappers, the feature tree read in one call, member ids asked once per list of
   objects, returned objects released after the answer instead of during the tool, the dedicated instance started early
   and its no-dialog preferences kept between tools (restored when it closes). Each tool's time is written in the server log.
+- Since 26/11/2026 the server also sets `CommandInProgress` while a tool runs (SOLIDWORKS otherwise spends ~5 ms after every
+  external call) and turns off the view animation: the same session takes 1.9 s instead of 10.4 s, with identical results.
+  Drawing views are brought up to date before picking edges on the sheet, because SOLIDWORKS does not do it with the flag on.
 
 ## Safety
 

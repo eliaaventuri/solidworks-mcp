@@ -10,6 +10,7 @@ import logging
 import datetime
 import traceback
 import subprocess
+import contextlib
 from typing import Optional, Dict, Any, Tuple
 
 # COM imports
@@ -147,6 +148,55 @@ class SolidWorksAutomation:
     # ========================================================================
     # Dedicated instance (SW_MCP_INSTANCE=dedicated)
     # ========================================================================
+
+    @contextlib.contextmanager
+    def _normal_com(self):
+        """CommandInProgress SPENTO per la durata del blocco, poi rimesso com'era. Il server lo accende per ogni tool (velocita':
+        server._fast_com_begin); alcune funzioni di SolidWorks con il flag acceso non fanno nulla (misurato 26/11/2026:
+        InsertFillSurface2 restituisce None e non crea la feature)."""
+        app = self._sw_app
+        was = False
+        try:
+            was = app is not None and bool(app.CommandInProgress)
+            if was:
+                app.CommandInProgress = False
+                self._fast_com_on = False
+        except Exception:
+            was = False
+        try:
+            yield
+        finally:
+            if was:
+                try:
+                    app.CommandInProgress = True
+                    self._fast_com_on = True
+                except Exception:
+                    pass
+
+    def _refresh_drawing_views(self, doc):
+        """Con CommandInProgress acceso SolidWorks NON rimette in pari da solo le viste delle tavole (lo fa nel suo tempo di
+        riposo). Misurato 26/11 (flangia): dopo la cancellazione di una quota doppia, SelectByID2 sui fori della vista
+        frontale falliva in ogni punto finche' non si ricostruiva la tavola; il Ø30 mancava. ForceRebuild3 ~50 ms."""
+        self._views_dirty = False
+        if doc is None:
+            return
+        try:
+            doc.ForceRebuild3(False)
+        except Exception as e:
+            logger.debug(f"aggiornamento delle viste: {e!r}")
+
+    def _sheet_select(self, doc, typ: str, x: float, y: float, append: bool = False, mark: int = 0) -> bool:
+        """SelectByID2 per coordinate sul foglio di una tavola (m). Con CommandInProgress acceso, se non trova nulla e la tavola
+        puo' essere rimasta indietro (`_views_dirty`: inizio del tool, quota o vista cancellata), la rimette in pari e
+        riprova. Una ricostruzione al massimo per ogni cambiamento; con append=True la selezione gia' fatta non si tocca."""
+        ext = doc.Extension
+        null = win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
+        if ext.SelectByID2("", typ, x, y, 0, append, mark, null, 0):
+            return True
+        if append or not self.__dict__.get("_fast_com_on") or not self.__dict__.get("_views_dirty"):
+            return False
+        self._refresh_drawing_views(doc)
+        return bool(ext.SelectByID2("", typ, x, y, 0, append, mark, null, 0))
 
     @staticmethod
     def is_dedicated_mode() -> bool:

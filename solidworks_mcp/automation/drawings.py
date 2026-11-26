@@ -98,6 +98,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                 f"Il documento attivo ({self._get_doc_title(doc)}) non e' un disegno. "
                 "Attiva o crea un disegno (create_drawing) e riprova.",
                 SwErrors.swInvalidInput)
+        self._views_dirty = True        # cambiamenti dei tool precedenti non ancora applicati alle viste (CommandInProgress)
         return doc, None
 
     def _fail(self, what: str, e: Exception) -> Dict:
@@ -423,7 +424,9 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     "model": model_path, "model_opened_by_tool": opened,
                     "sheet_format": fmt_used or "none",
                     "titleblock_properties_created": len(created_props),
-                    "still_missing": self._missing_props_from_dxf(doc),
+                    # seconda esportazione DXF solo se la prima aveva trovato proprieta' mancanti (le proprieta' si aggiungono,
+                    # mai si tolgono: con la prima lettura vuota anche la seconda lo e'). Velocita' 26/11: -1 export a tavola
+                    "still_missing": self._missing_props_from_dxf(doc) if missing else [],
                     "saved_as": os.path.abspath(save_as) if save_as and not save_err else "", "title_number": tnum,
                     "model_saved": model_saved}
             if model_note:
@@ -753,6 +756,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                         doc.ClearSelection2(True)
                         self._select_view(doc, v_old)
                         doc.Extension.DeleteSelection2(0)
+                        self._views_dirty = True
                         doc.ClearSelection2(True)
                         sh = self._com(doc, "GetCurrentSheet")
                         left = [str(self._com(x_, "GetName2")) for x_ in (self._com(sh, "GetViews") or ())]
@@ -1279,10 +1283,8 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
                     return self._result(False, "Servono edge1=[x,y] e edge2=[x,y] (punti sugli spigoli)",
                                         SwErrors.swInvalidInput)
                 doc.ClearSelection2(True)
-                ok1 = doc.Extension.SelectByID2("", "EDGE", self._m(edge1[0], unit), self._m(edge1[1], unit),
-                                                0, False, 1, self._NULL, 0)
-                ok2 = doc.Extension.SelectByID2("", "EDGE", self._m(edge2[0], unit), self._m(edge2[1], unit),
-                                                0, True, 1, self._NULL, 0)
+                ok1 = self._sheet_select(doc, "EDGE", self._m(edge1[0], unit), self._m(edge1[1], unit), False, 1)
+                ok2 = self._sheet_select(doc, "EDGE", self._m(edge2[0], unit), self._m(edge2[1], unit), True, 1)
                 if not (ok1 and ok2):
                     return self._result(False, "Spigoli non trovati nei punti indicati", SwErrors.swInvalidInput)
                 r = doc.InsertCenterLine2
@@ -1325,7 +1327,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             for dx, dy in ((0, 0), (0.0003, 0), (-0.0003, 0), (0, 0.0003), (0, -0.0003), (0.0002, 0.0002),
                            (-0.0002, -0.0002), (0.0005, 0), (-0.0005, 0), (0, 0.0005), (0, -0.0005)):
                 doc.ClearSelection2(True)
-                if doc.Extension.SelectByID2("", typ, xm + dx, ym + dy, 0, False, 0, self._NULL, 0):
+                if self._sheet_select(doc, typ, xm + dx, ym + dy):
                     n = sm.GetSelectedObjectCount2(-1)
                     if n and int(sm.GetSelectedObjectType3(n, -1)) in (1, 46):
                         return True
@@ -1871,6 +1873,7 @@ class DrawingOperations(DrawingLayoutMixin, DrawingDimsMixin, DrawingDiamMixin, 
             before = len(self._sheet_views(doc))
             self._select_view(doc, v)
             doc.Extension.DeleteSelection2(0)
+            self._views_dirty = True
             after = len(self._sheet_views(doc))
             if after >= before:
                 return self._result(False, f"Vista {name} non eliminata", SwErrors.swUnknownError)

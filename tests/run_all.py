@@ -135,6 +135,12 @@ def report(results, baseline, orphans_by_test, started):
     return "\n".join(lines) + "\n", ok
 
 
+# Test che girano DA SOLI anche con --jobs=N (dopo quelli in parallelo). Misurato il 26/11/2026: mentre un'ALTRA istanza di
+# SolidWorks si avvia o viene chiusa, la simulazione (molla: "errore 24", torsione: "errore 19") e fill_surface ("nessuna
+# feature", poi per tutta la sessione) falliscono anche con il server di prima; un'istanza ferma accanto non disturba.
+SOLO = ("ext_surfaces1", "simulation", "simulation_extra", "simulation2")
+
+
 def main(argv):
     stop = "--stop" in argv
     names = [a for a in argv if not a.startswith("--")]
@@ -159,7 +165,9 @@ def main(argv):
         # piu' test insieme, ognuno con la SUA istanza dedicata (cleanup chiude solo il PID del test): i processi rimasti
         # si contano una volta sola alla fine, quando nessun test gira piu'
         from concurrent.futures import ThreadPoolExecutor
-        print(f"== {len(names)} test, {jobs} alla volta", flush=True)
+        solo = [n for n in names if n in SOLO]
+        names = [n for n in names if n not in SOLO]
+        print(f"== {len(names)} test, {jobs} alla volta" + (f"; poi da soli: {', '.join(solo)}" if solo else ""), flush=True)
         os.environ["SW_TEST_PARALLEL_ROOT"] = str(os.getpid())   # i test non contano come orfani le istanze degli altri
 
         def one(n):
@@ -174,7 +182,7 @@ def main(argv):
         left = sorted(sw_pids() - baseline)
         if left:
             orphans_by_test["(fine)"] = left
-        names = []
+        names = solo                # poi i test sensibili alle altre istanze, uno alla volta
     for n in names:
         print(f"== {test_file(n).name} ...", flush=True)
         r = run_one(n, OUT)

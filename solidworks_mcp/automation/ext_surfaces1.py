@@ -491,6 +491,12 @@ class Surfaces1Operations:
     # ------------------------------------------------------------------ 8. superficie di riempimento
     def fill_surface(self, edge_points: list, continuity=None, face_points: list = None, merge_result: bool = False,
                      form_solid: bool = False, optimize: bool = False, resolution: int = 1, unit: str = None) -> Dict:
+        # tutto il tool SENZA CommandInProgress: con il flag acceso InsertFillSurface2 a volte non crea nulla (misurato 26/11:
+        # sempre da solo nel punto della chiamata; nella regressione con due test insieme anche spegnendolo solo li')
+        with self._normal_com():
+            return self._fill_surface(edge_points, continuity, face_points, merge_result, form_solid, optimize, resolution, unit)
+
+    def _fill_surface(self, edge_points, continuity, face_points, merge_result, form_solid, optimize, resolution, unit) -> Dict:
         try:
             doc, err = self._part()
             if err:
@@ -520,7 +526,9 @@ class Surfaces1Operations:
             opts = (1 if optimize else 0) | (2 if form_solid else 0) | (4 if merge_result else 0)
             feat = None
             attempts = 0
-            # a volte (istanza appena avviata) la prima chiamata non crea nulla: si ricostruisce e si riprova, rileggendo gli oggetti
+            # a volte (istanza appena avviata) la prima chiamata non crea nulla: si ricostruisce e si riprova, rileggendo gli oggetti.
+            # Misurato 26/11: dopo che un'ALTRA istanza di SolidWorks si e' avviata o chiusa, non crea piu' nulla per tutta la
+            # sessione (anche aspettando 40 s, anche con il server di prima): limite di SolidWorks, test fatto girare da solo
             for attempts in (1, 2, 3):
                 if attempts > 1:
                     time.sleep(2.0 * (attempts - 1))      # istanza sotto carico: lascia finire le ricostruzioni
