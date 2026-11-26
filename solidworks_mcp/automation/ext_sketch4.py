@@ -453,11 +453,8 @@ class Sketch4Operations:
             if err:
                 return err
 
-            sm = doc.SketchManager
             dx_m = self._mmu(dx, unit)
             dy_m = self._mmu(dy, unit)
-            bx_m = self._mmu(base_x, unit)
-            by_m = self._mmu(base_y, unit)
 
             chosen = []
             for ent_id in entities or []:
@@ -509,7 +506,9 @@ class Sketch4Operations:
                         wrong.append(f"{i}: {k} da {[round(v, 4) for v in b[k][:2]]} a {[round(v, 4) for v in a[k][:2]]}")
                         break
             moved = [i for i in after if i in before and before[i].get("s") != after[i].get("s")]
-            data = {"dx": dx, "dy": dy, "entities_count": selected_count, "entities_moved_or_stretched": moved}
+            # il punto base non cambia lo stiramento (conta solo lo spostamento): si restituisce con la sua destinazione
+            data = {"dx": dx, "dy": dy, "entities_count": selected_count, "entities_moved_or_stretched": moved,
+                    "base_point": [base_x, base_y], "base_point_destination": [base_x + dx, base_y + dy]}
             if wrong:
                 return self._result(False, "Stiramento non come chiesto: " + "; ".join(wrong), SwErrors.swSketchError, data)
             u = unit or "mm"

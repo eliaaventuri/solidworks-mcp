@@ -1,6 +1,6 @@
 """Lotto ASSIEMI 2: schemi dei tool -> automation/ext_assembly2.py (Assembly2Operations)."""
 
-from ._common import S, B, A
+from ._common import S, A
 
 TOOLS = {
     "form_new_subassembly": (

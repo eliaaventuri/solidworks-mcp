@@ -7,8 +7,6 @@ import logging
 import os
 import math
 import traceback
-import win32com.client
-import pythoncom
 from typing import Dict
 
 from ..constants import SwErrors

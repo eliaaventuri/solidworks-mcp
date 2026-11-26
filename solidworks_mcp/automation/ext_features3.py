@@ -11,7 +11,6 @@ import pythoncom
 from typing import Dict
 
 from ..constants import SwErrors, SYSTEM_FOLDER_TYPES
-from .modeling_base import null_variant
 
 logger = logging.getLogger(__name__)
 

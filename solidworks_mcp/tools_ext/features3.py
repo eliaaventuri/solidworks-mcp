@@ -1,6 +1,6 @@
 """Lotto FEATURE 3: schemi dei tool -> automation/ext_features3.py (Features3Operations)."""
 
-from ._common import S, B, A, UNIT, PT3
+from ._common import S, B, A, UNIT
 
 TOOLS = {
     "insert_library_feature": (

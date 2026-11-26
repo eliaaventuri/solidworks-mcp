@@ -5,7 +5,6 @@ I tool ritirati (nessuna API funzionante: not_implemented.py) si controllano sol
 """
 
 import asyncio
-import glob
 import math
 import os
 import struct
